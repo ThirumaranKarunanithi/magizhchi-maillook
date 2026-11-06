@@ -60,6 +60,10 @@ public class MessageRepo {
             m.put("lane", lane);
             m.put("laneSource", laneSource);
             m.put("hasAttachments", attachments != null && !attachments.isEmpty());
+            // Names of the first few files, so the list can show them without opening the mail.
+            m.put("attachmentNames", attachments == null ? List.of() : attachments.stream().limit(3)
+                    .map(a -> String.valueOf(a.getOrDefault("name", "attachment"))).toList());
+            m.put("attachmentCount", attachments == null ? 0 : attachments.size());
             m.put("threadKey", threadKey);
             m.put("threadCount", Math.max(1, threadCount));
             m.put("canUnsubscribe", listUnsubscribe != null && !unsubscribed);

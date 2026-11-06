@@ -7,7 +7,7 @@ export default function Logo({ size = 36, withName = true, tagline = true, large
       {withName && (
         <div className="leading-none text-left">
           <div className={`${large ? 'text-[15px]' : 'text-[10.5px]'} font-semibold tracking-wide text-slate-500`}>Magizhchi</div>
-          <div className={`${large ? 'mt-1 text-[34px]' : 'mt-0.5 text-[19px]'} font-extrabold tracking-tight text-brand-ink [text-shadow:0_2px_12px_rgba(0,0,0,.45)]`}>
+          <div className={`${large ? 'mt-1 text-[34px]' : 'mt-0.5 text-[19px]'} font-extrabold tracking-tight text-brand-ink mail-title`}>
             Mail<span className="bg-gradient-to-b from-[#ffd27a] to-[#f59e0b] bg-clip-text text-transparent">Look</span>
           </div>
           {tagline && !large && <div className="mt-1 text-[10.5px] font-medium text-slate-500">the mail app that makes you happy again</div>}

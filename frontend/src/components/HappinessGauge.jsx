@@ -19,7 +19,7 @@ export default function HappinessGauge({ happiness }) {
   const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100
   return (
     <div data-tilt="4" className="slab px-3 py-2.5" title="How calm your inbox is right now"
-      style={{ background: `linear-gradient(160deg, ${tone.tint}, transparent 60%), rgba(15,38,43,.78)` }}>
+      style={{ background: `linear-gradient(160deg, ${tone.tint}, transparent 60%), var(--slab-bg)` }}>
       <div className="flex items-center gap-3">
         <svg width="84" height="50" viewBox="0 0 84 50" aria-hidden="true" className="shrink-0 overflow-visible">
           <defs>
@@ -33,7 +33,7 @@ export default function HappinessGauge({ happiness }) {
             </filter>
           </defs>
           {/* recessed track */}
-          <path d="M8 42 A34 34 0 0 1 76 42" fill="none" stroke="#04161a" strokeWidth="10" strokeLinecap="round" />
+          <path d="M8 42 A34 34 0 0 1 76 42" fill="none" style={{ stroke: 'var(--gauge-track)' }} strokeWidth="10" strokeLinecap="round" />
           <path d="M8 43 A34 34 0 0 1 76 43" fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="9" strokeLinecap="round" />
           {/* glow under the lit arc */}
           <path d="M8 42 A34 34 0 0 1 76 42" fill="none" stroke={tone.glow} strokeWidth="9" strokeLinecap="round"
@@ -43,8 +43,8 @@ export default function HappinessGauge({ happiness }) {
           {/* specular line along the arc */}
           <path d="M8 40.5 A34 34 0 0 1 76 40.5" fill="none" stroke="rgba(255,255,255,.45)" strokeWidth="1.2" strokeLinecap="round"
             strokeDasharray={`${half * pct} ${half}`} />
-          <text x="42" y="42" textAnchor="middle" fontSize="18" fontWeight="800" fill="#f4ede0" className="num"
-            style={{ filter: `drop-shadow(0 0 6px ${tone.glow})` }}>
+          <text x="42" y="42" textAnchor="middle" fontSize="18" fontWeight="800" className="num"
+            style={{ fill: 'var(--gauge-ink)', filter: `drop-shadow(0 0 6px ${tone.glow})` }}>
             {score == null ? '–' : Math.round(score)}
           </text>
         </svg>

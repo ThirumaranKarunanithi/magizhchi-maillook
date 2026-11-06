@@ -5,7 +5,7 @@ import { useMail } from '../state.jsx'
 import { LANE_LABEL, VIEWS } from '../util.js'
 import MessageList from '../components/MessageList.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
-import { IconMenu, IconRefresh, IconSearch, IconX } from '../components/Icons.jsx'
+import { IconCompose, IconMenu, IconRefresh, IconSearch, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
 
@@ -43,7 +43,7 @@ export default function Mail() {
   const [params] = useSearchParams()
   const view = VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
   const cfg = VIEWS[view]
-  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen } = useMail()
+  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer } = useMail()
 
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
@@ -238,7 +238,7 @@ export default function Mail() {
             )}
           </div>
         </div>
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto max-md:pb-24">
           <MessageList
             items={items}
             loading={loading}
@@ -257,6 +257,14 @@ export default function Mail() {
           />
         </div>
       </section>
+
+      {/* phones: Compose stays one thumb away while the list is showing */}
+      {!selectedId && (
+        <button type="button" className="btn-primary btn-compose fab md:hidden" onClick={() => openComposer({ mode: 'new' })}>
+          <span className="disc"><IconCompose size={14} strokeWidth={2.2} /></span>
+          Compose
+        </button>
+      )}
 
       {/* reading pane */}
       <section className={`${selectedId ? 'flex' : 'hidden md:flex'} slab rise-3d d2 min-w-0 flex-1 flex-col overflow-hidden max-lg:rounded-none`}>

@@ -133,7 +133,7 @@ function AccountCard({ account, onChanged, onRemove }) {
               return (
                 <button key={c} role="radio" aria-checked={on} title={c} onClick={() => !on && saveColor(c)}
                   className="h-6 w-6 rounded-full transition-transform hover:scale-110"
-                  style={{ background: c, boxShadow: on ? `0 0 0 2px #0b2025, 0 0 0 4px ${c}` : 'inset 0 1px 0 rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.4)' }} />
+                  style={{ background: c, boxShadow: on ? `0 0 0 2px var(--ring-bg), 0 0 0 4px ${c}` : 'inset 0 1px 0 rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.4)' }} />
               )
             })}
           </div>
@@ -183,7 +183,7 @@ export default function Accounts() {
   }
 
   return (
-    <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="slab rise-3d d1 scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto max-lg:rounded-none">
       <PageHeader title="Manage accounts" subtitle="Every mailbox you read in Magizhchi MailLook">
         <button className="btn-secondary" onClick={refreshAccounts}><IconRefresh size={15} /> Refresh</button>
       </PageHeader>

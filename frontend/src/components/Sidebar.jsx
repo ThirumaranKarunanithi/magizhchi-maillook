@@ -4,6 +4,7 @@ import { useMail } from '../state.jsx'
 import HappinessGauge from './HappinessGauge.jsx'
 import Logo from './Logo.jsx'
 import Badge3D from './Badge3D.jsx'
+import ThemeToggle from './ThemeToggle.jsx'
 import {
   IconAlert, IconArchive, IconClock, IconCompose, IconHand, IconInbox, IconInfo, IconLogout, IconNews, IconSend, IconSettings,
 } from './Icons.jsx'
@@ -34,7 +35,7 @@ export function AccountDot({ color, size = 10 }) {
   return (
     <span
       className="inline-block shrink-0 rounded-full"
-      style={{ width: size, height: size, background: color || '#0e7c86', boxShadow: `0 0 0 2px #0b2025, 0 0 0 3.5px ${color || '#0e7c86'}88, 0 0 10px ${color || '#0e7c86'}99` }}
+      style={{ width: size, height: size, background: color || '#0e7c86', boxShadow: `0 0 0 2px var(--ring-bg), 0 0 0 3.5px ${color || '#0e7c86'}88, 0 0 10px ${color || '#0e7c86'}99` }}
       aria-hidden="true"
     />
   )
@@ -65,12 +66,15 @@ export default function Sidebar({ onNavigate }) {
 
   return (
     <nav className="scroll-thin flex h-full flex-col gap-4 overflow-y-auto px-3 py-4" aria-label="Mailboxes">
-      <button className="px-1 text-left" onClick={() => go('/?view=needs_me')} aria-label="Magizhchi MailLook home">
-        <Logo />
-      </button>
+      <div className="flex shrink-0 items-start gap-2">
+        <button className="min-w-0 flex-1 px-1 text-left" onClick={() => go('/?view=needs_me')} aria-label="Magizhchi MailLook home">
+          <Logo tagline={false} />
+        </button>
+        <ThemeToggle className="mt-1" />
+      </div>
 
-      <button className="btn-primary w-full" onClick={() => { openComposer({ mode: 'new' }); onNavigate?.() }}>
-        <IconCompose size={16} /> Compose
+      <button className="btn-primary btn-compose" onClick={() => { openComposer({ mode: 'new' }); onNavigate?.() }}>
+        <span className="disc"><IconCompose size={14} strokeWidth={2.2} /></span> Compose
       </button>
 
       <HappinessGauge happiness={counts?.happiness} />

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 export default function ConfirmDialog({ title, children, confirmLabel = 'Confirm', danger = false, busy = false, onConfirm, onCancel }) {
   useEffect(() => {
@@ -6,7 +7,7 @@ export default function ConfirmDialog({ title, children, confirmLabel = 'Confirm
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
-  return (
+  return createPortal(
     <div className="modal-back fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="card w-full max-w-md p-5" role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <h2 className="text-base font-bold text-brand-ink">{title}</h2>
@@ -18,6 +19,7 @@ export default function ConfirmDialog({ title, children, confirmLabel = 'Confirm
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

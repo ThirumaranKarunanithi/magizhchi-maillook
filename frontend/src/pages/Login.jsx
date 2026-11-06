@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { idLoginUrl } from '../api.js'
 import Logo from '../components/Logo.jsx'
+import ThemeToggle from '../components/ThemeToggle.jsx'
 
 const RETURN_KEY = 'mlook_after_login'
 
@@ -36,6 +37,7 @@ export default function Login() {
 
   return (
     <main className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-10">
+      <div className="absolute right-4 top-4 z-10"><ThemeToggle /></div>
       <div className="rise-3d relative w-full max-w-md">
         <Brand />
         <div data-tilt="3" className="card space-y-4 p-6">

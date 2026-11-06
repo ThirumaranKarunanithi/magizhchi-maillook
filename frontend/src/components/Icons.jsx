@@ -33,6 +33,7 @@ export const IconX = (p) => <Svg {...p}><path d="M18 6 6 18M6 6l12 12" /></Svg>
 export const IconMenu = (p) => <Svg {...p}><path d="M3 6h18M3 12h18M3 18h18" /></Svg>
 export const IconBack = (p) => <Svg {...p}><path d="m15 18-6-6 6-6" /></Svg>
 export const IconChevron = ({ open, ...p }) => <Svg {...p} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}><path d="m9 18 6-6-6-6" /></Svg>
+export const IconEye = (p) => <Svg {...p}><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></Svg>
 export const IconDownload = (p) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></Svg>
 export const IconUnsub = (p) => <Svg {...p}><path d="M4 4h16v12H4z" /><path d="m4 4 8 7 8-7" /><path d="M15 20h6" /></Svg>
 export const IconLogout = (p) => <Svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></Svg>

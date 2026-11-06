@@ -50,7 +50,7 @@ export default function Subscriptions() {
   const colorOf = (id) => accounts.find((a) => a.id === id)?.color || '#0e7c86'
 
   return (
-    <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="slab rise-3d d1 scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto max-lg:rounded-none">
       <PageHeader title="Subscriptions" subtitle={`Newsletters and mailing lists${account ? ` in ${account.email}` : ''}, busiest first`}>
         <button className="btn-secondary" onClick={load} disabled={loading}>
           <IconRefresh size={15} className={loading ? 'animate-spin' : ''} /> Refresh

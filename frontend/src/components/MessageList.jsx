@@ -23,11 +23,21 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane }) {
         <span className={`min-w-0 flex-1 truncate text-sm ${unread ? 'font-bold text-brand-ink' : 'font-medium text-slate-700'}`}>{who}</span>
         {m.threadCount > 1 && <span className="rounded bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600 num">{m.threadCount}</span>}
         {m.flagged && <IconFlag filled size={13} className="text-red-600" />}
-        {m.hasAttachments && <IconPaperclip size={13} className="text-slate-500" />}
+        {m.hasAttachments && <IconPaperclip size={14} className="text-brand-primary" aria-label="Has attachments" />}
         <span className={`shrink-0 text-xs num ${unread ? 'font-semibold text-brand-primary' : 'text-slate-500'}`}>{shortTime(m.receivedAt)}</span>
       </div>
       <div className={`truncate text-[13px] ${unread ? 'font-semibold text-brand-ink' : 'text-slate-700'}`}>{m.subject || '(no subject)'}</div>
       <div className="truncate pr-24 text-xs text-slate-500">{m.snippet}</div>
+      {m.attachmentNames?.length > 0 && (
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 pr-24">
+          {m.attachmentNames.slice(0, 2).map((n, i) => (
+            <span key={i} className="inline-flex min-w-0 max-w-[60%] items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200/70" title={n}>
+              <IconPaperclip size={11} className="shrink-0" /><span className="truncate">{n}</span>
+            </span>
+          ))}
+          {m.attachmentCount > 2 && <span className="shrink-0 text-[11px] font-semibold text-amber-700">+{m.attachmentCount - 2}</span>}
+        </div>
+      )}
 
       <div className="row-actions absolute bottom-1.5 right-2 flex items-center gap-0.5 rounded-lg bg-white/95 shadow-sm ring-1 ring-slate-200">
         <button className="icon-btn" title="Done (archive)" onClick={(e) => { e.stopPropagation(); onDone(m.id) }}>

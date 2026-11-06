@@ -5,7 +5,7 @@ import { IconMenu } from './Icons.jsx'
 export default function PageHeader({ title, subtitle, children }) {
   const { setMenuOpen } = useMail()
   return (
-    <header className="flex flex-wrap items-center gap-3 border-b border-slate-200/70 bg-white/70 px-4 py-3 sm:px-6">
+    <header className="flex flex-wrap items-center gap-3 sticky top-0 z-10 border-b border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur-xl sm:px-6">
       <button className="icon-btn lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu">
         <IconMenu />
       </button>

@@ -1,51 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { downloadFile, get, post } from '../api.js'
+import { get, post } from '../api.js'
 import { useMail } from '../state.jsx'
 import { formatSize, fullDate, LANE_LABEL, safeHttpUrl, senderName, shortTime } from '../util.js'
 import AiCard from './AiCard.jsx'
+import AttachmentShelf from './AttachmentShelf.jsx'
 import LaneMenu from './LaneMenu.jsx'
 import PaMenu from './PaMenu.jsx'
 import MailFrame from './MailFrame.jsx'
 import { AccountDot } from './Sidebar.jsx'
 import {
-  IconArchive, IconBack, IconDownload, IconFlag, IconForward, IconPaperclip, IconReply, IconReplyAll, IconTrash, IconUnsub,
+  IconArchive, IconBack, IconFlag, IconForward, IconReply, IconReplyAll, IconTrash, IconUnsub,
 } from './Icons.jsx'
 
 const SOURCE_LABEL = { ai: 'sorted by AI', user: 'you moved it', rule: 'your sender rule', heuristic: 'sorted automatically' }
 
 function Body({ detail }) {
   if (detail.bodyHtml) return <MailFrame html={detail.bodyHtml} title={`Message: ${detail.subject || ''}`} />
-  if (detail.bodyText) return <pre className="paper whitespace-pre-wrap break-words px-5 py-4 font-sans text-sm leading-relaxed">{detail.bodyText}</pre>
+  if (detail.bodyText) return <pre className="paper whitespace-pre-wrap break-words px-[clamp(18px,4vw,40px)] pb-8 pt-7 font-sans text-[15px] leading-[1.65]">{detail.bodyText}</pre>
   return <p className="text-sm italic text-slate-500">{detail.snippet || 'This message has no text.'}</p>
-}
-
-function Attachments({ messageId, attachments, notify }) {
-  const [busy, setBusy] = useState(null)
-  if (!attachments?.length) return null
-  async function save(a) {
-    setBusy(a.index)
-    try {
-      await downloadFile(`/api/messages/${messageId}/attachments/${a.index}`, a.name)
-    } catch (e) {
-      notify(e.message, 'error')
-    } finally {
-      setBusy(null)
-    }
-  }
-  return (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {attachments.map((a) => (
-        <button key={a.index} onClick={() => save(a)} disabled={busy === a.index}
-          className="flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-left text-sm hover:border-amber-300"
-          title={`Download ${a.name}`}>
-          {busy === a.index ? <span className="spinner text-slate-500" /> : <IconPaperclip size={15} className="text-slate-500" />}
-          <span className="min-w-0 truncate font-medium">{a.name}</span>
-          <span className="shrink-0 text-xs text-slate-500">{formatSize(a.size)}</span>
-          <IconDownload size={14} className="shrink-0 text-slate-400" />
-        </button>
-      ))}
-    </div>
-  )
 }
 
 /** One older message in the thread: collapsed to a line, loads its body when opened. */
@@ -83,7 +55,7 @@ function ThreadItem({ summary, notify }) {
                 To {(detail.to || []).join(', ')}{detail.cc?.length ? ` · Cc ${detail.cc.join(', ')}` : ''} · {fullDate(detail.receivedAt)}
               </p>
               <Body detail={detail} />
-              <Attachments messageId={detail.id} attachments={detail.attachments} notify={notify} />
+              <AttachmentShelf compact messageId={detail.id} attachments={detail.attachments} notify={notify} />
             </>
           )}
         </div>
@@ -221,7 +193,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
 
         {/* header */}
         <header>
-          <h1 className="text-2xl font-extrabold leading-snug tracking-tight text-brand-ink [text-shadow:0_2px_18px_rgba(0,0,0,.5)]">{detail.subject || '(no subject)'}</h1>
+          <h1 className="mail-title text-2xl font-extrabold leading-snug tracking-tight text-brand-ink">{detail.subject || '(no subject)'}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-700">
               <AccountDot color={detail.accountColor} size={8} /> {detail.accountEmail}
@@ -245,6 +217,8 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
           </div>
         </header>
 
+        <AttachmentShelf messageId={detail.id} attachments={detail.attachments} notify={notify} />
+
         <AiCard key={detail.id} messageId={detail.id}
           onDraft={(body) => openComposer({ mode: 'reply', message: detail, draftBody: body })} />
 
@@ -263,7 +237,6 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
                   </div>
                 )}
                 <Body detail={detail} />
-                <Attachments messageId={detail.id} attachments={detail.attachments} notify={notify} />
               </article>
             ) : (
               <ThreadItem key={t.id} summary={t} notify={notify} />

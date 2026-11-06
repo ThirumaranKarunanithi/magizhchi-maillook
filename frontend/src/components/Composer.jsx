@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { postForm } from '../api.js'
 import { useMail } from '../state.jsx'
 import { bodyAsText, EMAIL_RE, formatSize, fullDate, splitAddresses } from '../util.js'
 import { IconPaperclip, IconSend, IconX } from './Icons.jsx'
+import ConfirmDialog from './ConfirmDialog.jsx'
 
 function uniq(list, exclude = new Set()) {
   const seen = new Set()
@@ -130,6 +132,7 @@ export default function Composer() {
   const [toText, setToText] = useState('')
   const [ccText, setCcText] = useState('')
   const [bccText, setBccText] = useState('')
+  const [ask, setAsk] = useState(null) // 'discard' | 'nosubject' while a question is on screen
   const [showCc, setShowCc] = useState(init.cc.length > 0)
   const [subject, setSubject] = useState(init.subject)
   const [text, setText] = useState(init.text)
@@ -153,21 +156,22 @@ export default function Composer() {
     }
   }, [composer.mode])
 
-  const dirty = to.length || cc.length || bcc.length || toText || subject !== init.subject || text !== init.text || files.length
+  // only what the user typed or changed counts: an untouched reply (prefilled To, subject and quote) closes without a question
+  const dirty = to.join() !== init.to.join() || cc.join() !== init.cc.join() || bcc.length || toText || ccText || bccText || subject !== init.subject || text !== init.text || files.length
 
   function close() {
     if (sending) return
-    if (dirty && !window.confirm('Discard this draft?')) return
+    if (dirty) return setAsk('discard')
     closeComposer()
   }
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && close()
+    const onKey = (e) => e.key === 'Escape' && !ask && close()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  async function send() {
+  async function send(sendWithoutSubject = false) {
     setError('')
     const all = (chips, typed) => uniq([...chips, ...splitAddresses(typed)])
     const toList = all(to, toText)
@@ -177,7 +181,7 @@ export default function Composer() {
     if (!fromId) return setError('Add a mailbox under Manage accounts before sending.')
     if (!toList.length && !ccList.length && !bccList.length) return setError('Who is this going to? Add at least one recipient.')
     if (bad.length) return setError(`These don't look like email addresses: ${bad.join(', ')}`)
-    if (!subject.trim() && !window.confirm('Send without a subject?')) return
+    if (!subject.trim() && !sendWithoutSubject) return setAsk('nosubject')
 
     const payload = {
       accountId: Number(fromId),
@@ -202,10 +206,21 @@ export default function Composer() {
     }
   }
 
+  const askNode = ask && (
+    <ConfirmDialog
+      title={ask === 'discard' ? 'Discard this draft?' : 'Send without a subject?'}
+      confirmLabel={ask === 'discard' ? 'Discard' : 'Send anyway'}
+      danger={ask === 'discard'}
+      onCancel={() => setAsk(null)}
+      onConfirm={() => { const a = ask; setAsk(null); if (a === 'discard') closeComposer(); else send(true) }}>
+      {ask === 'discard' ? 'What you wrote will be lost.' : 'People are more likely to open mail that says what it is about.'}
+    </ConfirmDialog>
+  )
+
   const title = { new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' }[composer.mode] || 'New message'
   const totalSize = files.reduce((n, f) => n + f.size, 0)
 
-  return (
+  return createPortal(
     <div className="modal-back fixed inset-0 z-50 flex items-stretch justify-end sm:items-center sm:justify-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="card flex h-full w-full flex-col overflow-hidden !rounded-none sm:h-[min(760px,92vh)] sm:max-w-2xl sm:!rounded-2xl"
         role="dialog" aria-modal="true" aria-label={title}
@@ -260,7 +275,7 @@ export default function Composer() {
         {error && <p className="border-t border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700" role="alert">{error}</p>}
 
         <div className="flex items-center gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2.5">
-          <button className="btn-primary" onClick={send} disabled={sending}>
+          <button className="btn-primary" onClick={() => send()} disabled={sending}>
             {sending ? <span className="spinner" /> : <IconSend size={15} />} {sending ? 'Sending…' : 'Send'}
           </button>
           <button className="btn-ghost" onClick={() => fileInput.current?.click()} disabled={sending} title="Attach files">
@@ -271,6 +286,8 @@ export default function Composer() {
           <span className="ml-auto hidden text-[11px] text-slate-400 sm:inline">Ctrl + Enter to send</span>
         </div>
       </div>
-    </div>
+      {askNode}
+    </div>,
+    document.body,
   )
 }
