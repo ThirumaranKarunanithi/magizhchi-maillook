@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { downloadFile, openFile } from '../api.js'
+import { useEffect, useState } from 'react'
+import { downloadFile, openFile, post } from '../api.js'
+import { refreshBox, useBox } from '../box.js'
 import { formatSize } from '../util.js'
-import { IconDownload, IconEye, IconPaperclip } from './Icons.jsx'
+import { IconCloudCheck, IconCloudUp, IconDownload, IconEye, IconPaperclip } from './Icons.jsx'
 
 // What kind of file it is, from its name and type: drives the tile colour, the label and whether the
 // browser can show it directly ("Open") or it has to be saved first.
@@ -47,24 +48,45 @@ function FileTile({ kind }) {
 
 /**
  * The files in this mail, shown at the top where nobody can miss them: each one with its type, size,
- * Open (when the browser can show it) and Download, plus Download all.
+ * Open (when the browser can show it), Download and Save to Magizhchi Box, plus Download all and
+ * Save all to Box. A file already in Box shows a green "In Box" cloud that opens Box.
  */
 export default function AttachmentShelf({ messageId, attachments, notify, compact = false }) {
   const [busy, setBusy] = useState(null)
+  const box = useBox()
+  const [inBox, setInBox] = useState(() => new Set((attachments || []).filter((a) => a.inBox).map((a) => a.index)))
+  const [boxFull, setBoxFull] = useState(null) // Box's own words when it refused for space
+  useEffect(() => {
+    setInBox(new Set((attachments || []).filter((a) => a.inBox).map((a) => a.index)))
+    setBoxFull(null)
+  }, [messageId, attachments])
   if (!attachments?.length) return null
   const path = (a) => `/api/messages/${messageId}/attachments/${a.index}`
   const total = attachments.reduce((n, a) => n + (a.size || 0), 0)
+  const boxOn = !!box?.configured
+  const allInBox = attachments.every((a) => inBox.has(a.index))
+  const openBox = () => box?.webUrl && window.open(box.webUrl, '_blank', 'noopener')
 
   async function run(key, fn) {
     setBusy(key)
     try {
       await fn()
     } catch (e) {
+      if (e.status === 413 && /full|plan/i.test(e.message)) setBoxFull(e.message)
       notify(e.message, 'error')
     } finally {
       setBusy(null)
     }
   }
+
+  function saved(res) {
+    setInBox((prev) => new Set([...prev, ...(res.inBox || [])]))
+    notify(res.message, res.status === 'partial' ? 'error' : 'success')
+    if (!box?.connected || res.saved) refreshBox()
+  }
+
+  const saveToBox = (a) => run(`b${a.index}`, async () => saved(await post(`${path(a)}/box`)))
+  const saveAllToBox = () => run('box', async () => saved(await post(`/api/messages/${messageId}/box`)))
 
   async function saveAll() {
     await run('all', async () => {
@@ -75,17 +97,36 @@ export default function AttachmentShelf({ messageId, attachments, notify, compac
   return (
     <section aria-label="Attachments" className={compact ? 'mt-3' : 'attach-shelf rounded-2xl p-3'}>
       {!compact && (
-        <div className="mb-2.5 flex items-center gap-2 px-1">
+        <div className="mb-2.5 flex flex-wrap items-center gap-2 px-1">
           <IconPaperclip size={16} className="text-brand-primary" />
-          <h2 className="text-sm font-bold text-brand-ink">
+          <h2 className="whitespace-nowrap text-sm font-bold text-brand-ink">
             {attachments.length === 1 ? '1 attachment' : `${attachments.length} attachments`}
             <span className="ml-1.5 font-medium text-slate-500">{formatSize(total)}</span>
           </h2>
-          {attachments.length > 1 && (
-            <button className="btn-secondary ml-auto !py-1 text-xs" onClick={saveAll} disabled={busy != null}>
-              {busy === 'all' ? <span className="spinner !h-3 !w-3" /> : <IconDownload size={14} />} Download all
-            </button>
-          )}
+          <div className="ml-auto flex flex-wrap justify-end gap-1.5">
+            {boxOn && (allInBox ? (
+              <button className="chip !bg-emerald-50 !py-1 !font-semibold !text-emerald-800 !ring-emerald-300" onClick={openBox} title="Open Magizhchi Box">
+                <IconCloudCheck size={14} /> {attachments.length > 1 ? 'All in Box' : 'In Box'}
+              </button>
+            ) : (
+              <button className="btn-secondary !py-1 text-xs" onClick={saveAllToBox} disabled={busy != null}
+                title={`Save ${attachments.length > 1 ? 'every file' : 'it'} to your Magizhchi Box`}>
+                {busy === 'box' ? <span className="spinner !h-3 !w-3" /> : <IconCloudUp size={15} />}
+                {attachments.length > 1 ? 'Save all to Box' : 'Save to Box'}
+              </button>
+            ))}
+            {attachments.length > 1 && (
+              <button className="btn-secondary !py-1 text-xs" onClick={saveAll} disabled={busy != null}>
+                {busy === 'all' ? <span className="spinner !h-3 !w-3" /> : <IconDownload size={14} />} Download all
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {boxFull && (
+        <div role="alert" className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span className="min-w-0 flex-1">{boxFull}</span>
+          {box?.webUrl && <a className="font-bold underline" href={box.webUrl} target="_blank" rel="noopener noreferrer">Recharge in Magizhchi Box</a>}
         </div>
       )}
       <ul className={`grid gap-2 ${attachments.length > 1 ? "sm:grid-cols-2" : ""}`}>
@@ -105,6 +146,17 @@ export default function AttachmentShelf({ messageId, attachments, notify, compac
                     {busy === `o${a.index}` ? <span className="spinner" /> : <IconEye size={17} />}
                   </button>
                 )}
+                {boxOn && (inBox.has(a.index) ? (
+                  <button className="icon-btn !text-emerald-600" title="In your Magizhchi Box: open Box" aria-label={`${a.name} is in Magizhchi Box. Open Box`}
+                    onClick={openBox}>
+                    <IconCloudCheck size={18} />
+                  </button>
+                ) : (
+                  <button className="icon-btn" title={`Save ${a.name} to Magizhchi Box`} aria-label={`Save ${a.name} to Magizhchi Box`} disabled={busy != null}
+                    onClick={() => saveToBox(a)}>
+                    {busy === `b${a.index}` ? <span className="spinner" /> : <IconCloudUp size={18} />}
+                  </button>
+                ))}
                 <button className="icon-btn !text-brand-primary" title={`Download ${a.name}`} aria-label={`Download ${a.name}`} disabled={busy != null}
                   onClick={() => run(`d${a.index}`, () => downloadFile(path(a), a.name))}>
                   {busy === `d${a.index}` ? <span className="spinner" /> : <IconDownload size={17} />}

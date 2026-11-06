@@ -6,6 +6,7 @@ import PageHeader from '../components/PageHeader.jsx'
 import AddAccountForm from '../components/AddAccountForm.jsx'
 import BulkAdd from '../components/BulkAdd.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import BoxCard from '../components/BoxCard.jsx'
 import { AccountDot } from '../components/Sidebar.jsx'
 import { IconCheck, IconRefresh, IconTrash } from '../components/Icons.jsx'
 
@@ -203,6 +204,8 @@ export default function Accounts() {
             </ul>
           )}
         </section>
+
+        <BoxCard notify={notify} />
 
         <section className="card p-5">
           <div className="mb-4 flex flex-wrap items-center gap-2">

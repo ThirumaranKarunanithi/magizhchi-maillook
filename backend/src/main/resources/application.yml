@@ -52,6 +52,12 @@ magizhchi:
       # tasks and calendar events. Blank turns the PA connection off.
       api: ${MAGIZHCHI_PA_URL:https://paback.magizhchi.software}
       web: ${MAGIZHCHI_PA_WEB:https://pa.magizhchi.software}
+    box:
+      # Magizhchi Box. Saving an attachment connects the person to their own Box drive by itself,
+      # through Box's provisioning endpoint. A blank secret hides "Save to Box".
+      api: ${MAGIZHCHI_BOX_URL:https://box.magizhchi.software}
+      web: ${MAGIZHCHI_BOX_WEB:https://box.magizhchi.software}
+      provision-secret: ${MAGIZHCHI_BOX_PROVISION_SECRET:}
 
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:5177,http://localhost:4173}

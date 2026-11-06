@@ -59,7 +59,10 @@ export function formatSize(bytes) {
   if (bytes == null) return ''
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  // Box space: whole numbers stay whole (5 GB, 2 TB), the rest get one decimal (3.8 GB)
+  const [n, unit] = bytes < 1024 ** 4 ? [bytes / 1024 ** 3, 'GB'] : [bytes / 1024 ** 4, 'TB']
+  return `${Number.isInteger(Math.round(n * 10) / 10) ? Math.round(n) : n.toFixed(1)} ${unit}`
 }
 
 export const EMAIL_RE = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/

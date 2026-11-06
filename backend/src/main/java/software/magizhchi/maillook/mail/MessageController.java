@@ -1,5 +1,6 @@
 package software.magizhchi.maillook.mail;
 
+import software.magizhchi.maillook.suite.BoxClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.ContentDisposition;
@@ -43,8 +44,10 @@ public class MessageController {
     private final MailActions actions;
     private final AiService ai;
     private final ObjectMapper mapper;
+    private final BoxClient box;
 
-    public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper) {
+    public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box) {
+        this.box = box;
         this.messages = messages;
         this.actions = actions;
         this.ai = ai;
@@ -129,18 +132,33 @@ public class MessageController {
     @GetMapping("/messages/{id}")
     public Map<String, Object> get(@RequestAttribute long userId, @PathVariable long id) {
         MessageRepo.Row r = actions.owned(userId, id);
+        List<MessageRepo.Row> thread = messages.thread(r.accountId(), r.threadKey());
+        List<Long> ids = new java.util.ArrayList<>(thread.stream().map(MessageRepo.Row::id).toList());
+        if (!ids.contains(r.id())) ids.add(r.id());
+        java.util.Set<String> inBox = new java.util.HashSet<>(box.savedKeys(ids));
         Map<String, Object> out = r.summary();
         out.put("bodyHtml", r.bodyHtml());
         out.put("bodyText", r.bodyText());
-        out.put("attachments", r.attachments());
-        out.put("thread", messages.thread(r.accountId(), r.threadKey()).stream().map(t -> {
+        out.put("attachments", withBox(r, inBox));
+        out.put("thread", thread.stream().map(t -> {
             Map<String, Object> m = t.summary();
             m.put("bodyHtml", t.bodyHtml());
             m.put("bodyText", t.bodyText());
-            m.put("attachments", t.attachments());
+            m.put("attachments", withBox(t, inBox));
             return m;
         }).toList());
         return out;
+    }
+
+    /** The message's attachments, each marked inBox when it was saved to Magizhchi Box. */
+    private static List<Map<String, Object>> withBox(MessageRepo.Row r, java.util.Set<String> inBox) {
+        if (r.attachments() == null) return List.of();
+        return r.attachments().stream().map(a -> {
+            Map<String, Object> m = new LinkedHashMap<>(a);
+            Object idx = a.get("index");
+            m.put("inBox", idx instanceof Number n && inBox.contains(r.id() + ":" + n.intValue()));
+            return m;
+        }).toList();
     }
 
     @GetMapping("/messages/{id}/attachments/{index}")
