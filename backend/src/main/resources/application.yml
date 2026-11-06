@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: magizhchi-maillook
+  datasource:
+    # Default: a local H2 file DB (no setup). Production: point DB_URL at Postgres, e.g.
+    # jdbc:postgresql://localhost:5432/magizhchi_maillook
+    url: ${DB_URL:jdbc:h2:file:./data/magizhchi-maillook;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 35MB
+
+server:
+  port: ${PORT:8097}
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain,text/html
+
+maillook:
+  # Signs session tokens. Change in production.
+  session-secret: ${MAILLOOK_SESSION_SECRET:magizhchi-maillook-dev-session-secret-change-me}
+  session-hours: ${MAILLOOK_SESSION_HOURS:720}
+  # Encrypts stored mailbox passwords (AES-256-GCM). Change in production and keep it safe:
+  # rotating it means every mailbox password has to be entered again.
+  encryption-key: ${MAILLOOK_ENCRYPTION_KEY:magizhchi-mail-dev-encryption-key-change-me}
+  sync:
+    interval-ms: ${MAILLOOK_SYNC_INTERVAL_MS:180000}
+    initial-inbox: ${MAILLOOK_SYNC_INITIAL_INBOX:300}
+    initial-sent: ${MAILLOOK_SYNC_INITIAL_SENT:100}
+    threads: ${MAILLOOK_SYNC_THREADS:4}
+  ai:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-2.5-flash}
+    base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
+    timeout-seconds: ${GEMINI_TIMEOUT_SEC:60}
+
+# ── Magizhchi suite ────────────────────────────────────────────
+magizhchi:
+  jwt:
+    # MUST equal MAGIZHCHI_JWT_SECRET in Magizhchi ID and every other suite app.
+    secret: ${MAGIZHCHI_JWT_SECRET:magizhchi-suite-shared-secret-change-in-production-2026}
+  # Optional: report sign-ins to Magizhchi ID so Mail shows under "connected apps".
+  base-url: ${MAGIZHCHI_ID_BASE_URL:}
+  provision-secret: ${MAGIZHCHI_PROVISION_SECRET:}
+  apps:
+    pa:
+      # Magizhchi PA's API. Mail signs in there as the same person (suite SSO) for AI,
+      # tasks and calendar events. Blank turns the PA connection off.
+      api: ${MAGIZHCHI_PA_URL:https://paback.magizhchi.software}
+      web: ${MAGIZHCHI_PA_WEB:https://pa.magizhchi.software}
+
+cors:
+  allowed-origins: ${CORS_ORIGINS:http://localhost:5177,http://localhost:4173}
+
+logging:
+  level:
+    software.magizhchi.maillook: INFO

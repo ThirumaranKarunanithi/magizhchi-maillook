@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "maillook-backend", "runtimeExecutable": "java", "runtimeArgs": ["-jar", "backend/target/maillook-0.1.0.jar"], "port": 8097 },
+    { "name": "maillook-frontend", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "frontend", "run", "dev"], "port": 5177 }
+  ]
+}
