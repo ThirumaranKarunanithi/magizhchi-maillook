@@ -183,6 +183,15 @@ public class MessageRepo {
         jdbc.update("UPDATE messages SET lane = ?, lane_source = ? WHERE id = ?", lane, source, id);
     }
 
+    /**
+     * Newest inbox mail still sorted only by heuristics, so the AI pass can catch up on mail
+     * it missed (e.g. PA was unreachable when the mail first synced).
+     */
+    public List<Long> awaitingAiLane(long accountId, int limit) {
+        return jdbc.queryForList("SELECT id FROM messages WHERE account_id = ? AND folder = 'INBOX' " +
+                "AND lane_source = 'heuristic' ORDER BY received_at DESC LIMIT " + Math.max(1, limit), Long.class, accountId);
+    }
+
     /** Re-lanes the sender's other inbox mail the AI or heuristics placed (never the user's own choices). */
     public void applySenderRule(long userId, String senderEmail, String lane) {
         jdbc.update("UPDATE messages SET lane = ?, lane_source = 'rule' WHERE LOWER(from_email) = LOWER(?) AND folder = 'INBOX' " +

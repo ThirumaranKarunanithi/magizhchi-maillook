@@ -105,7 +105,9 @@ public class SyncService {
                 syncFolder(store, accounts.find(a.id()).orElse(a), sent, "SENT", own, rules);
             }
             accounts.syncDone(a.id());
-            if (!newInbox.isEmpty()) ai.classifyLater(a.userId(), newInbox);
+            // New mail plus anything an earlier AI pass missed (newest first; AI marks what it checked).
+            List<Long> unchecked = messages.awaitingAiLane(a.id(), 100);
+            if (!unchecked.isEmpty()) ai.classifyLater(a.userId(), unchecked);
         } catch (ApiException e) {
             accounts.setStatus(a.id(), "error", e.getMessage());
         } catch (Exception e) {

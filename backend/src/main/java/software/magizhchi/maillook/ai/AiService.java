@@ -97,7 +97,9 @@ public class AiService {
                 You sort email into three lanes for a busy person.
                 needs_me: a real person (or a client, student, colleague) expects a reply, decision or action from the owner.
                 fyi: worth knowing but no reply needed: receipts, bank/UPI alerts, OTPs, order/shipping updates, calendar notices, CCs, team broadcasts.
-                can_wait: newsletters, promotions, offers, marketing, social notifications, digests.
+                can_wait: newsletters, promotions, offers, marketing, social notifications, digests,
+                and cold outreach: a stranger pitching a service, product, partnership, SEO, design, leads or
+                "I came across your company" mail, even when it is personally addressed and written like a letter.
                 Reply as JSON: {"items":[{"id":<number>,"lane":"needs_me|fyi|can_wait"}]}. Include every id.
                 """, sb.toString(), 0.0, 2000);
         for (JsonNode it : out.path("items")) {
