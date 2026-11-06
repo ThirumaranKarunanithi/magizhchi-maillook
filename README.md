@@ -93,6 +93,16 @@ CORS_ORIGINS=https://maillook.magizhchi.software
 ```
 
 Without `DB_URL` the API falls back to a local file database, which Railway wipes on every redeploy.
+
+**Sharing a Postgres that already holds another app's tables?** Give MailLook its own schema. It then
+creates and uses only `maillook` and never touches the other tables (tested next to another app's
+`public.users`):
+```
+DB_URL=jdbc:postgresql://${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}?currentSchema=maillook
+SPRING_FLYWAY_SCHEMAS=maillook
+SPRING_FLYWAY_DEFAULT_SCHEMA=maillook
+```
+Never "fix" Flyway's *non-empty schema* error with `baselineOnMigrate`: MailLook would then change the other app's tables.
 Then add the custom domain `maillookback.magizhchi.software` and its DNS record.
 
 **Web app on Hostinger.** `cd frontend && npm run build` (uses `.env.production`), then upload the
