@@ -47,7 +47,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * session, and AI must go through /api/v1/assistant/complete.
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:pa;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
+        "spring.datasource.url=${MAILLOOK_TEST_DB_URL:jdbc:h2:mem:pa;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1}",
+        "spring.datasource.username=${MAILLOOK_TEST_DB_USER:sa}",
+        "spring.datasource.password=${MAILLOOK_TEST_DB_PASSWORD:}",
         "maillook.sync.interval-ms=3600000",
         "maillook.ai.api-key="})
 @AutoConfigureMockMvc

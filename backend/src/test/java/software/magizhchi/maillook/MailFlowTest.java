@@ -33,7 +33,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * Sent copy, archive, sender rules, unsubscribe, bulk add, incremental sync.
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:h2:mem:flow;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
+        "spring.datasource.url=${MAILLOOK_TEST_DB_URL:jdbc:h2:mem:flow;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1}",
+        "spring.datasource.username=${MAILLOOK_TEST_DB_USER:sa}",
+        "spring.datasource.password=${MAILLOOK_TEST_DB_PASSWORD:}",
         "maillook.sync.interval-ms=3600000",
         "magizhchi.apps.pa.api="})
 @AutoConfigureMockMvc

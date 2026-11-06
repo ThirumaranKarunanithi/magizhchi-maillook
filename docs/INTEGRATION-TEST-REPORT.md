@@ -84,8 +84,8 @@ on Postgres 18 (separate test schemas `id_e2e`, `pa_e2e`) and a local test mailb
 3. **ID**: deploy the "Magizhchi MailLook" app registration and set `VITE_APP_URL_MAIL=<MailLook's web URL>` in
    `frontend/.env.production` (blank now). Without it, ID won't send people back to MailLook.
 4. **MailLook**: set `MAILLOOK_ENCRYPTION_KEY`, `MAILLOOK_SESSION_SECRET`, `MAGIZHCHI_PA_URL`/`MAGIZHCHI_PA_WEB` if not the
-   defaults, and `VITE_ID_LOGIN_URL` to ID's real sign-in address. The default is `https://accounts.magizhchi.software`.
-   PA's config comment says `account.magizhchi.software`, so confirm which is right.
+   defaults, and `VITE_ID_LOGIN_URL` (`https://accounts.magizhchi.software`, already in `frontend/.env.production`).
+   (`account.magizhchi.software` is ID's API, used for `MAGIZHCHI_ID_BASE_URL`.) Full steps: README → Deploy.
 5. Optional: `MAGIZHCHI_ID_BASE_URL` + `MAGIZHCHI_PROVISION_SECRET` on MailLook for the ID apps-and-devices list.
 
 ## Changed files (uncommitted)

@@ -1,0 +1,36 @@
+# Apache / LiteSpeed config for this single-page app on Hostinger.
+# Vite copies everything in public/ into dist/, so this file ships with every build -
+# upload the WHOLE dist folder, including this hidden file.
+
+# 1) Single-page-app routing: serve index.html for any path that isn't a real file or
+#    folder, so /login and other deep links work on direct visit and on refresh.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# 2) Compress text.
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json image/svg+xml
+</IfModule>
+
+# 3) Caching.
+#    - index.html (and the manifest) are never cached, so a new upload shows up on the next
+#      load instead of after the browser's guess at "fresh enough".
+#    - Vite fingerprints .js/.css/font filenames on every build, so those can be cached hard.
+#    - Images keep their names (maillook-mark.svg ...), so they only get a day.
+<IfModule mod_headers.c>
+  <FilesMatch "(^index\.html$|\.webmanifest$)">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  <FilesMatch "\.(js|css|woff2?)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "\.(png|jpe?g|svg|ico|webp|gif)$">
+    Header set Cache-Control "public, max-age=86400"
+  </FilesMatch>
+</IfModule>

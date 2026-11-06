@@ -69,6 +69,44 @@ have password sign-in turned off, so they will come with Outlook sign-in (OAuth)
 | `MAILLOOK_SYNC_INITIAL_INBOX` | 300 | Newest messages fetched the first time |
 | `CORS_ORIGINS` | localhost dev ports | |
 
+## Deploy (same setup as Magizhchi ID, PA and Forms)
+
+| Part | Where | Address |
+|---|---|---|
+| API (`backend/`) | Railway, from `backend/Dockerfile` | `https://maillookback.magizhchi.software` |
+| Database | Railway Postgres | |
+| Web app (`frontend/`) | Hostinger, static files | `https://maillook.magizhchi.software` |
+
+**API on Railway.** New service from this repo with root directory `backend` (it finds the Dockerfile).
+Add a Postgres database, then set these variables:
+
+```
+DB_URL=jdbc:postgresql://${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}
+DB_USER=${{Postgres.PGUSER}}
+DB_PASSWORD=${{Postgres.PGPASSWORD}}
+MAILLOOK_ENCRYPTION_KEY=<long random value; keep a safe copy, losing it means re-entering every mailbox password>
+MAILLOOK_SESSION_SECRET=<long random value>
+MAGIZHCHI_JWT_SECRET=<the same value as Magizhchi ID and PA>
+MAGIZHCHI_ID_BASE_URL=https://account.magizhchi.software    # ID's API (the sign-in page is accounts.)
+MAGIZHCHI_PROVISION_SECRET=<the same value as Magizhchi ID>
+CORS_ORIGINS=https://maillook.magizhchi.software
+```
+
+Without `DB_URL` the API falls back to a local file database, which Railway wipes on every redeploy.
+Then add the custom domain `maillookback.magizhchi.software` and its DNS record.
+
+**Web app on Hostinger.** `cd frontend && npm run build` (uses `.env.production`), then upload the
+**whole** `dist` folder to `maillook.magizhchi.software`, including the hidden `.htaccess`.
+
+**Magizhchi ID.** Set `VITE_APP_URL_MAILLOOK=https://maillook.magizhchi.software` in ID's
+`frontend/.env.production` and redeploy ID. Until then ID won't send people back to MailLook.
+
+**Magizhchi PA.** Needs its `/api/v1/assistant/complete` endpoint deployed, `ANTHROPIC_API_KEY` set, and the same
+`MAGIZHCHI_JWT_SECRET`.
+
+To run the tests against Postgres instead of the in-memory database, set `MAILLOOK_TEST_DB_URL`,
+`MAILLOOK_TEST_DB_USER` and `MAILLOOK_TEST_DB_PASSWORD` (one empty schema per test class).
+
 ## How sorting works
 1. **Your rules**: "Move to lane → always for this sender" wins.
 2. **Heuristics**: newsletters and lists go to *Can wait*; no-reply alerts, receipts and mail you're only CC'd on go to *For my info*; a person writing to you directly goes to *Needs me*.

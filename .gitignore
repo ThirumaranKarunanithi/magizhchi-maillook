@@ -2,3 +2,7 @@ node_modules/
 dist/
 .env
 .env.local
+
+# Local H2 database, wherever the API was started from
+data/
+**/data/*.mv.db
