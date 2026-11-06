@@ -8,11 +8,12 @@ const RETURN_KEY = 'mlook_after_login'
 
 function Brand() {
   return (
-    <div className="mb-6 flex flex-col items-center text-center">
-      <h1>
-        <Logo size={72} large />
+    <div className="relative mb-8 flex flex-col items-center text-center">
+      <div className="stage-light" aria-hidden="true" />
+      <h1 className="relative">
+        <Logo size={84} large />
       </h1>
-      <p className="mt-3 text-sm text-slate-600">The mail app that makes you happy again.</p>
+      <p className="mt-10 text-base font-medium text-slate-700">The mail app that makes you happy again.</p>
       <p className="mt-0.5 text-xs text-slate-500" lang="ta">மகிழ்ச்சி: happiness</p>
     </div>
   )
@@ -34,17 +35,17 @@ export default function Login() {
   }
 
   return (
-    <main className="flex min-h-full items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
+    <main className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-10">
+      <div className="rise-3d relative w-full max-w-md">
         <Brand />
-        <div className="card space-y-4 p-6">
+        <div data-tilt="3" className="card space-y-4 p-6">
           <div>
             <h2 className="text-base font-bold">Sign in</h2>
             <p className="mt-0.5 text-xs text-slate-500">
               Use your Magizhchi ID, the same account as Magizhchi PA, Forms and CRM.
             </p>
           </div>
-          <button className="btn-primary w-full" onClick={go}>
+          <button className="btn-primary w-full !py-2.5 !text-[15px]" onClick={go}>
             <img src="/brand/id-mark-sm.png" alt="" width="24" height="18" className="object-contain" />
             Continue with Magizhchi ID
           </button>
@@ -91,8 +92,8 @@ export function SsoCallback() {
   }, [ssoLogin, navigate])
 
   return (
-    <main className="flex min-h-full items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
+    <main className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-10">
+      <div className="rise-3d relative w-full max-w-md">
         <Brand />
         <div className="card space-y-4 p-6 text-center">
           {error ? (

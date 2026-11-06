@@ -19,15 +19,15 @@ function RequireAuth({ children }) {
 function Shell() {
   const { composer, menuOpen, setMenuOpen } = useMail()
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
+    <div className="flex h-full min-h-0 gap-2.5 overflow-hidden p-0 lg:p-2.5">
       {/* sidebar: fixed column on large screens, a drawer below that */}
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200/70 bg-slate-100/60 lg:block">
+      <aside className="slab rise-3d hidden w-64 shrink-0 overflow-hidden lg:block">
         <Sidebar />
       </aside>
       {menuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-label="Navigation">
           <div className="modal-back absolute inset-0" onClick={() => setMenuOpen(false)} />
-          <aside className="slide-in absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-slate-200 bg-slate-50 shadow-xl">
+          <aside className="slide-in absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-slate-200 bg-slate-50 shadow-[0_0_60px_rgba(0,0,0,.8)]">
             <Sidebar onNavigate={() => setMenuOpen(false)} />
           </aside>
         </div>

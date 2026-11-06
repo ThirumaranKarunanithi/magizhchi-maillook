@@ -133,7 +133,7 @@ function AccountCard({ account, onChanged, onRemove }) {
               return (
                 <button key={c} role="radio" aria-checked={on} title={c} onClick={() => !on && saveColor(c)}
                   className="h-6 w-6 rounded-full transition-transform hover:scale-110"
-                  style={{ background: c, boxShadow: on ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : 'inset 0 0 0 1px rgba(0,0,0,.08)' }} />
+                  style={{ background: c, boxShadow: on ? `0 0 0 2px #0b2025, 0 0 0 4px ${c}` : 'inset 0 1px 0 rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.4)' }} />
               )
             })}
           </div>

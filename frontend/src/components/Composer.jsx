@@ -210,7 +210,7 @@ export default function Composer() {
       <div className="card flex h-full w-full flex-col overflow-hidden !rounded-none sm:h-[min(760px,92vh)] sm:max-w-2xl sm:!rounded-2xl"
         role="dialog" aria-modal="true" aria-label={title}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send() } }}>
-        <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5">
           <h2 className="flex-1 text-sm font-bold">{title}</h2>
           <button className="icon-btn" onClick={close} aria-label="Close"><IconX size={17} /></button>
         </div>

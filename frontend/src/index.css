@@ -2,19 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Magizhchi MailLook: the same morning light as Magizhchi Forms.
-   Pearl for the ground, marigold gold for what you press, peacock for the ink. No black anywhere. */
+/* Magizhchi MailLook "Night grade".
+   One look, graded like a film: shadows pushed into deep peacock, highlights warm ivory, marigold as the
+   only accent. Light comes from one key (warm, top right) and one fill (teal, bottom left); every panel
+   is a slab lit by that light: a bright top edge, a soft reflection across its face, a deep shadow under it.
+   Mail itself is read on a sheet of paper, so senders' own HTML always looks as they meant it. */
 :root {
-  --ground: #fbf8f2;
-  --surface: #ffffff;
-  --line: #ece3d3;
-  --ink: #0b3a42;
-  --muted: #4f6d71;
-  --gold-edge: #c27612;
-  --amber-text: #b45309;
-  --shadow-warm: 120, 72, 12;
+  --ground: #05161a;
+  --ink: #f4ede0;
+  --muted: #9cb4b5;
+  --gold: #f5b320;
+  --gold-edge: #b8680a;
+  --amber-text: #ffb547;
+  --teal: #52c6c9;
+  --paper: #fffdf8;
+  --paper-ink: #0b3a42;
+  --slab: 15, 38, 43; /* panel colour as rgb */
   --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
   --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -23,114 +29,227 @@
   body {
     @apply font-sans text-brand-ink;
     background-color: var(--ground);
+    /* the set's lighting: warm key light, teal fill, a floor that falls into shadow */
     background-image:
-      radial-gradient(1100px 520px at 50% -200px, rgba(255, 200, 100, 0.22), transparent 70%),
-      radial-gradient(900px 600px at -10% 110%, rgba(14, 124, 134, 0.06), transparent 70%);
+      radial-gradient(1200px 700px at 88% -12%, rgba(255, 170, 60, 0.20), transparent 62%),
+      radial-gradient(900px 700px at -8% 112%, rgba(30, 160, 170, 0.22), transparent 64%),
+      radial-gradient(1400px 900px at 50% 50%, #0a2429 0%, #05161a 70%);
     background-attachment: fixed;
   }
-  ::selection { background: rgba(245, 179, 32, 0.35); color: var(--ink); }
-  :focus-visible { outline: 2px solid var(--amber-text); outline-offset: 2px; }
+  /* film grain + lens vignette over the whole frame; never catches the pointer */
+  body::before, body::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 60;
+  }
+  body::before {
+    opacity: 0.07; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  body::after {
+    background: radial-gradient(ellipse 120% 100% at 50% 45%, transparent 60%, rgba(0, 6, 8, 0.55) 100%);
+  }
+  ::selection { background: rgba(245, 179, 32, 0.4); color: #fffdf8; }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   .num { font-variant-numeric: tabular-nums; }
 }
 
 @layer components {
+  /* ── slabs: the 3D panels everything sits on ───────────────────── */
+  .slab, .card {
+    position: relative;
+    border-radius: 18px;
+    background:
+      /* the reflection: a soft diagonal sheen across the face, and a lit top */
+      linear-gradient(115deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 22%, transparent 40%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 38%),
+      rgba(var(--slab), 0.78);
+    border: 1px solid rgba(160, 220, 220, 0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 245, 225, 0.10),   /* lit top edge */
+      inset 0 -1px 0 rgba(0, 0, 0, 0.35),         /* bottom bevel */
+      0 2px 4px rgba(0, 0, 0, 0.25),
+      0 30px 60px -28px rgba(0, 0, 0, 0.8),
+      0 0 0 1px rgba(0, 0, 0, 0.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+  }
+
+  /* panels rise into place once, from a slight tilt, as on a set */
+  .rise-3d { animation: rise-3d 0.9s var(--ease-out) both; transform-origin: 50% 100%; }
+  .rise-3d.d1 { animation-delay: 0.08s; }
+  .rise-3d.d2 { animation-delay: 0.16s; }
+  @keyframes rise-3d {
+    from { opacity: 0; transform: perspective(1400px) rotateX(9deg) translateY(28px) scale(0.985); }
+  }
+
+  /* pointer tilt with a moving glare (see tilt.js); flat for reduced motion */
+  [data-tilt] {
+    transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+    transition: transform 0.5s var(--ease-out);
+    transform-style: preserve-3d; will-change: transform;
+  }
+  [data-tilt].tilting { transition: transform 0.08s linear; }
+  [data-tilt]::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
+    background: radial-gradient(360px circle at var(--gx, 50%) var(--gy, 0%), rgba(255, 236, 200, 0.14), transparent 60%);
+    transition: opacity 0.4s;
+  }
+  [data-tilt].tilting::after { opacity: 1; }
+
+  /* ── buttons ───────────────────────────────────────────────────── */
   .btn-primary {
-    @apply relative inline-flex items-center justify-center gap-2 rounded-[10px] px-4 py-2 text-sm font-semibold;
-    color: #4a2a04;
-    background: linear-gradient(180deg, #ffe08f 0%, #f9bd3a 50%, #ef9a18 100%);
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[11px] px-4 py-2 text-sm font-bold;
+    color: #3d2203;
+    background: linear-gradient(180deg, #ffe39a 0%, #fbbf3b 48%, #ec9214 100%);
     border: 1px solid var(--gold-edge);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 -2px 0 rgba(160, 90, 0, 0.16), 0 1px 0 #c27612, 0 8px 18px -8px rgba(224, 138, 12, 0.65);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 -3px 0 rgba(150, 80, 0, 0.22),
+      0 1px 0 #7a4306, 0 10px 24px -10px rgba(245, 160, 30, 0.75), 0 0 32px -12px rgba(255, 170, 50, 0.6);
     text-shadow: 0 1px 0 rgba(255, 244, 210, 0.6);
     transition: transform 0.25s var(--ease-out), box-shadow 0.25s var(--ease-out), filter 0.25s;
   }
-  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.03) saturate(1.05); }
-  .btn-primary:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 2px 4px rgba(160, 90, 0, 0.3); }
+  /* specular sweep across the button on hover */
+  .btn-primary::after {
+    content: ''; position: absolute; inset: -40% auto -40% -60%; width: 40%; pointer-events: none;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+    transform: skewX(-18deg) translateX(0); opacity: 0;
+  }
+  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05) saturate(1.08); }
+  .btn-primary:hover:not(:disabled)::after { animation: sweep 0.9s var(--ease-out); }
+  .btn-primary:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 2px 5px rgba(120, 60, 0, 0.4); }
   .btn-primary:disabled { @apply cursor-not-allowed opacity-50; }
+  @keyframes sweep { from { opacity: 1; transform: skewX(-18deg) translateX(0); } to { opacity: 0; transform: skewX(-18deg) translateX(420%); } }
 
   .btn-secondary {
-    @apply relative inline-flex items-center justify-center gap-2 rounded-[10px] px-3 py-1.5 text-sm font-medium text-brand-ink;
-    background: linear-gradient(180deg, #ffffff 0%, #fbf6ec 100%);
-    border: 1px solid #e3d7c0;
-    box-shadow: inset 0 1px 0 #fff, 0 1px 0 #e3d5bb;
-    transition: transform 0.2s var(--ease-out), border-color 0.2s, color 0.2s;
+    @apply relative inline-flex items-center justify-center gap-2 rounded-[10px] px-3 py-1.5 text-sm font-semibold text-brand-ink;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+    border: 1px solid rgba(160, 220, 220, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 245, 225, 0.12), 0 6px 14px -8px rgba(0, 0, 0, 0.7);
+    transition: transform 0.2s var(--ease-out), border-color 0.2s, background 0.2s;
   }
-  .btn-secondary:hover:not(:disabled) { border-color: #e2b45c; }
+  .btn-secondary:hover:not(:disabled) { border-color: rgba(245, 179, 32, 0.55); background: linear-gradient(180deg, rgba(255, 200, 100, 0.12), rgba(255, 255, 255, 0.03)); }
   .btn-secondary:active:not(:disabled) { transform: translateY(1px); }
   .btn-secondary:disabled { @apply cursor-not-allowed opacity-50; }
 
   .btn-danger {
-    @apply relative inline-flex items-center justify-center gap-2 rounded-[10px] px-4 py-2 text-sm font-semibold text-white;
-    background: linear-gradient(180deg, #d9534f 0%, #b3261e 100%);
-    border: 1px solid #8f1d16;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 0 #8f1d16;
+    @apply relative inline-flex items-center justify-center gap-2 rounded-[10px] px-4 py-2 text-sm font-semibold;
+    color: #fff6f4;
+    background: linear-gradient(180deg, #e2605a 0%, #a8231c 100%);
+    border: 1px solid #6e140f;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 10px 22px -10px rgba(220, 60, 50, 0.7);
   }
   .btn-danger:disabled { @apply cursor-not-allowed opacity-50; }
 
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 transition-colors;
   }
-  .btn-ghost:hover:not(:disabled) { @apply bg-slate-100 text-brand-ink; }
+  .btn-ghost:hover:not(:disabled) { @apply text-brand-ink; background: rgba(255, 255, 255, 0.07); }
   .btn-ghost:disabled { @apply cursor-not-allowed opacity-40; }
 
   .icon-btn {
     @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors;
   }
-  .icon-btn:hover:not(:disabled) { @apply bg-slate-100 text-brand-ink; }
+  .icon-btn:hover:not(:disabled) { @apply text-brand-ink; background: rgba(255, 255, 255, 0.08); }
   .icon-btn:disabled { @apply cursor-not-allowed opacity-40; }
 
+  /* ── fields: recessed into the slab ────────────────────────────── */
   .input {
-    @apply w-full rounded-[10px] px-3 py-2 text-sm text-brand-ink placeholder:text-[#6b8487];
-    background: #ffffff;
-    border: 1px solid #e0d4bd;
-    box-shadow: inset 0 1px 2px rgba(var(--shadow-warm), 0.06);
+    @apply w-full rounded-[10px] px-3 py-2 text-sm text-brand-ink placeholder:text-slate-400;
+    background: rgba(2, 14, 17, 0.55);
+    border: 1px solid rgba(160, 220, 220, 0.12);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 245, 225, 0.05);
     transition: border-color 0.2s, box-shadow 0.2s;
   }
-  .input:focus { outline: none; border-color: #e0a12a; box-shadow: 0 0 0 3px rgba(245, 179, 32, 0.26); }
+  .input:focus { outline: none; border-color: rgba(245, 179, 32, 0.7); box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(245, 179, 32, 0.22); }
   .label { @apply mb-1 block text-xs font-semibold text-slate-600; }
 
-  .card {
-    @apply rounded-2xl;
-    background: var(--surface);
-    border: 1px solid #efe6d6;
-    box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(var(--shadow-warm), 0.05), 0 16px 36px -24px rgba(var(--shadow-warm), 0.38);
-  }
 
-  .pane { background: rgba(255, 255, 255, 0.82); }
+  .pane { background: rgba(var(--slab), 0.7); }
 
+  /* ── navigation ────────────────────────────────────────────────── */
   .nav-item {
-    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm text-slate-700 transition-colors;
+    @apply relative flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-1.5 text-left text-sm text-slate-700;
+    transition: background 0.2s, color 0.2s, transform 0.25s var(--ease-out);
   }
-  .nav-item:hover { @apply bg-white/80 text-brand-ink; }
-  .nav-item.active { @apply bg-white font-semibold text-brand-ink; box-shadow: inset 3px 0 0 #f5b320, 0 1px 2px rgba(var(--shadow-warm), 0.08); }
+  .nav-item:hover { @apply text-brand-ink; background: rgba(255, 255, 255, 0.055); transform: translateX(2px); }
+  .nav-item.active {
+    @apply font-semibold text-brand-ink;
+    background: linear-gradient(90deg, rgba(245, 179, 32, 0.20), rgba(245, 179, 32, 0.04) 70%);
+    box-shadow: inset 3px 0 0 var(--gold), inset 0 1px 0 rgba(255, 230, 180, 0.10), 0 8px 18px -12px rgba(245, 160, 30, 0.6);
+  }
 
   .menu {
-    @apply absolute z-30 min-w-[200px] rounded-xl border border-slate-200 bg-white p-1 text-sm;
-    box-shadow: 0 18px 40px -16px rgba(var(--shadow-warm), 0.45);
+    @apply absolute z-30 min-w-[200px] rounded-xl p-1 text-sm;
+    background: #10282d;
+    border: 1px solid rgba(160, 220, 220, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 245, 225, 0.1), 0 24px 50px -16px rgba(0, 0, 0, 0.85);
   }
-  .menu-item { @apply flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-brand-ink hover:bg-slate-100; }
+  .menu-item { @apply flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-brand-ink; }
+  .menu-item:hover { background: rgba(255, 255, 255, 0.08); }
 
   .chip {
     @apply inline-flex items-center gap-1 rounded-full bg-peacock-50 px-2 py-0.5 text-xs font-medium text-peacock-700;
+    box-shadow: inset 0 0 0 1px rgba(82, 198, 201, 0.25);
   }
 
   .modal-back {
-    background: rgba(11, 58, 66, 0.32);
-    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+    background: rgba(2, 12, 14, 0.6);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
     animation: fade 0.2s var(--ease-soft) both;
   }
-  .modal-back > .card { animation: modal-in 0.35s var(--ease-out) both; }
+  .modal-back > .card { animation: modal-in 0.45s var(--ease-out) both; }
   .slide-in { animation: slide-in 0.35s var(--ease-out) both; }
   @keyframes fade { from { opacity: 0; } }
-  @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
+  @keyframes modal-in { from { opacity: 0; transform: perspective(1200px) rotateX(10deg) translateY(24px) scale(0.97); } }
   @keyframes slide-in { from { opacity: 0.3; transform: translateX(-24px); } }
 
   .spinner {
     @apply inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent align-[-2px];
   }
 
+  /* ── message list ──────────────────────────────────────────────── */
+  .msg-row { transition: background 0.2s, transform 0.25s var(--ease-out); }
+  .msg-row:hover { transform: translateX(2px); }
+  .msg-row[aria-current='true'] {
+    background: linear-gradient(90deg, rgba(245, 179, 32, 0.16), rgba(245, 179, 32, 0.03) 80%) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 230, 180, 0.08), 0 10px 24px -16px rgba(245, 160, 30, 0.55);
+  }
   .row-actions { opacity: 0; transition: opacity 0.15s; }
   .msg-row:hover .row-actions, .msg-row:focus-within .row-actions { opacity: 1; }
   @media (hover: none) { .row-actions { opacity: 1; } }
 
-  .scroll-thin { scrollbar-width: thin; scrollbar-color: #d9ccb5 transparent; }
+  /* the AI helper: a teal-lit panel with a slow light moving across it */
+  .ai-panel {
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgba(82, 198, 201, 0.20), transparent 55%),
+      radial-gradient(90% 120% at 100% 100%, rgba(245, 179, 32, 0.12), transparent 60%),
+      rgba(9, 40, 46, 0.85);
+    box-shadow: inset 0 1px 0 rgba(200, 255, 250, 0.14), 0 0 0 1px rgba(82, 198, 201, 0.12), 0 18px 40px -22px rgba(30, 180, 190, 0.55);
+  }
+
+  /* the sheet of paper mail is read on */
+  .paper {
+    background: var(--paper); color: var(--paper-ink); border-radius: 12px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 2px 6px rgba(0, 0, 0, 0.35), 0 34px 60px -30px rgba(0, 0, 0, 0.9);
+  }
+
+  .float-slow { animation: float-slow 6s ease-in-out infinite; }
+  @keyframes float-slow { 50% { transform: translateY(-8px); } }
+
+  /* a cone of warm light falling on the logo, as on a stage */
+  .stage-light {
+    position: absolute; left: 50%; top: -220px; width: 520px; height: 420px; transform: translateX(-50%); pointer-events: none;
+    background: radial-gradient(50% 60% at 50% 100%, rgba(255, 190, 90, 0.28), transparent 70%);
+    filter: blur(8px);
+  }
+
+  /* a floor reflection under 3D art */
+  .reflect { -webkit-box-reflect: below 6px linear-gradient(transparent 55%, rgba(255, 255, 255, 0.22)); }
+
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: #2b4b53 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-3d, .modal-back > .card, .slide-in, .float-slow { animation: none; }
+  [data-tilt] { transform: none !important; }
+  .btn-primary:hover::after { animation: none; }
+  .msg-row:hover, .nav-item:hover { transform: none; }
 }

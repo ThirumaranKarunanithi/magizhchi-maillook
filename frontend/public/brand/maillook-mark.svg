@@ -1,20 +1,85 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Magizhchi MailLook">
+  <!-- Magizhchi MailLook mark, lit version: a peacock glass tile, an ivory envelope whose flap is a
+       marigold smile, and a marigold sun. One key light from the top left, graded teal-and-orange. -->
   <defs>
-    <linearGradient id="ml-tile" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0E7C86"/>
-      <stop offset="1" stop-color="#0B3A42"/>
+    <linearGradient id="tile" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#22b3b8"/>
+      <stop offset="0.45" stop-color="#0d6a75"/>
+      <stop offset="1" stop-color="#04252c"/>
     </linearGradient>
-    <linearGradient id="ml-sun" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFC94A"/>
-      <stop offset="1" stop-color="#F59E0B"/>
+    <radialGradient id="tileGlow" cx="0.28" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#9ff3ee" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#3fc3c4" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="warmBounce" cx="0.95" cy="0.95" r="0.6">
+      <stop offset="0" stop-color="#ff9f2e" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff9f2e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9fffd" stop-opacity="0.85"/>
+      <stop offset="0.35" stop-color="#bff5f1" stop-opacity="0.15"/>
+      <stop offset="0.7" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffb04a" stop-opacity="0.45"/>
     </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffefa"/>
+      <stop offset="0.6" stop-color="#fbf3e3"/>
+      <stop offset="1" stop-color="#ead7b6"/>
+    </linearGradient>
+    <linearGradient id="smile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="0.55" stop-color="#f7aa1f"/>
+      <stop offset="1" stop-color="#d9700a"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.36" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#fff6cf"/>
+      <stop offset="0.3" stop-color="#ffd25a"/>
+      <stop offset="0.75" stop-color="#f39a12"/>
+      <stop offset="1" stop-color="#b85a05"/>
+    </radialGradient>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="3.5" stdDeviation="3" flood-color="#021417" flood-opacity="0.55"/>
+    </filter>
+    <filter id="sunGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feColorMatrix in="b" values="1 0 0 0 0.2  0 0.8 0 0 0.1  0 0 0.2 0 0  0 0 0 0.9 0" result="g"/>
+      <feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="tileClip"><rect x="4" y="4" width="120" height="120" rx="30"/></clipPath>
   </defs>
-  <!-- tile -->
-  <rect width="128" height="128" rx="30" fill="url(#ml-tile)"/>
-  <!-- envelope -->
-  <rect x="20" y="40" width="88" height="60" rx="13" fill="#FFFDF8"/>
-  <!-- flap drawn as a smile -->
-  <path d="M30 50 Q64 84 98 50" fill="none" stroke="#F5B320" stroke-width="8" stroke-linecap="round"/>
-  <!-- marigold sun peeking over the corner: "a happy look at your mail" -->
-  <circle cx="99" cy="37" r="15" fill="url(#ml-sun)" stroke="#0B3A42" stroke-width="5"/>
+
+  <!-- tile body -->
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#tile)"/>
+  <g clip-path="url(#tileClip)">
+    <rect x="4" y="4" width="120" height="120" fill="url(#tileGlow)"/>
+    <rect x="4" y="4" width="120" height="120" fill="url(#warmBounce)"/>
+    <!-- glass reflection on the upper face -->
+    <path d="M4 4 H124 V52 C92 40 44 44 4 66 Z" fill="url(#gloss)"/>
+  </g>
+  <!-- bevelled rim: lit on top, warm bounce at the bottom -->
+  <rect x="4.75" y="4.75" width="118.5" height="118.5" rx="29.3" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+
+  <!-- envelope, lifted off the glass -->
+  <g filter="url(#lift)">
+    <rect x="21" y="43" width="86" height="58" rx="13" fill="url(#paper)"/>
+    <!-- the folds of the envelope, barely there -->
+    <path d="M30 94 L54 73 M98 94 L74 73" stroke="#d9c39c" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>
+    <rect x="21.6" y="43.6" width="84.8" height="56.8" rx="12.4" fill="none" stroke="#fff" stroke-opacity="0.9" stroke-width="1.2"/>
+    <!-- the flap, drawn as a smile -->
+    <path d="M31 53 Q64 86 97 53" fill="none" stroke="#a95406" stroke-opacity="0.35" stroke-width="9" stroke-linecap="round" transform="translate(0 1.6)"/>
+    <path d="M31 53 Q64 86 97 53" fill="none" stroke="url(#smile)" stroke-width="8.5" stroke-linecap="round"/>
+    <path d="M33 52 Q64 81 95 52" fill="none" stroke="#fff3c8" stroke-opacity="0.75" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- the sun: a lit sphere with its own glow -->
+  <g filter="url(#sunGlow)">
+    <circle cx="99" cy="38" r="15.6" fill="#05303a"/><circle cx="99" cy="38" r="15.1" fill="none" stroke="#7fe0dc" stroke-opacity="0.35" stroke-width="0.8"/>
+    <circle cx="99" cy="38" r="12.8" fill="url(#sun)"/>
+    <ellipse cx="94.6" cy="33" rx="4.6" ry="3" fill="#fff" fill-opacity="0.85" transform="rotate(-30 94.6 33)"/>
+  </g>
 </svg>

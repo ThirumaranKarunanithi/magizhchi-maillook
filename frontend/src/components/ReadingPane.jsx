@@ -15,7 +15,7 @@ const SOURCE_LABEL = { ai: 'sorted by AI', user: 'you moved it', rule: 'your sen
 
 function Body({ detail }) {
   if (detail.bodyHtml) return <MailFrame html={detail.bodyHtml} title={`Message: ${detail.subject || ''}`} />
-  if (detail.bodyText) return <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-brand-ink">{detail.bodyText}</pre>
+  if (detail.bodyText) return <pre className="paper whitespace-pre-wrap break-words px-5 py-4 font-sans text-sm leading-relaxed">{detail.bodyText}</pre>
   return <p className="text-sm italic text-slate-500">{detail.snippet || 'This message has no text.'}</p>
 }
 
@@ -177,7 +177,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
   return (
     <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/* toolbar */}
-      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-0.5 border-b border-slate-200/70 bg-white/90 px-2 py-1.5 backdrop-blur">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-0.5 border-b border-slate-200/70 bg-white/85 px-2 py-1.5 backdrop-blur-xl">
         {onBack && (
           <button className="icon-btn md:hidden" onClick={onBack} aria-label="Back to the list"><IconBack /></button>
         )}
@@ -221,7 +221,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
 
         {/* header */}
         <header>
-          <h1 className="text-xl font-bold leading-snug text-brand-ink">{detail.subject || '(no subject)'}</h1>
+          <h1 className="text-2xl font-extrabold leading-snug tracking-tight text-brand-ink [text-shadow:0_2px_18px_rgba(0,0,0,.5)]">{detail.subject || '(no subject)'}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-700">
               <AccountDot color={detail.accountColor} size={8} /> {detail.accountEmail}

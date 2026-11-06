@@ -3,14 +3,15 @@ import { useAuth } from '../auth.jsx'
 import { useMail } from '../state.jsx'
 import HappinessGauge from './HappinessGauge.jsx'
 import Logo from './Logo.jsx'
+import Badge3D from './Badge3D.jsx'
 import {
   IconAlert, IconArchive, IconClock, IconCompose, IconHand, IconInbox, IconInfo, IconLogout, IconNews, IconSend, IconSettings,
 } from './Icons.jsx'
 
 const LANE_ITEMS = [
-  { view: 'needs_me', label: 'Needs me', Icon: IconHand },
-  { view: 'fyi', label: 'For my info', Icon: IconInfo },
-  { view: 'can_wait', label: 'Can wait', Icon: IconClock },
+  { view: 'needs_me', label: 'Needs me', Icon: IconHand, hue: 'marigold' },
+  { view: 'fyi', label: 'For my info', Icon: IconInfo, hue: 'teal' },
+  { view: 'can_wait', label: 'Can wait', Icon: IconClock, hue: 'dusk' },
 ]
 
 const FOLDER_ITEMS = [
@@ -33,7 +34,7 @@ export function AccountDot({ color, size = 10 }) {
   return (
     <span
       className="inline-block shrink-0 rounded-full"
-      style={{ width: size, height: size, background: color || '#0e7c86', boxShadow: `0 0 0 2px #fff, 0 0 0 3.5px ${color || '#0e7c86'}55` }}
+      style={{ width: size, height: size, background: color || '#0e7c86', boxShadow: `0 0 0 2px #0b2025, 0 0 0 3.5px ${color || '#0e7c86'}88, 0 0 10px ${color || '#0e7c86'}99` }}
       aria-hidden="true"
     />
   )
@@ -76,9 +77,9 @@ export default function Sidebar({ onNavigate }) {
 
       <div>
         <div className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Lanes</div>
-        {LANE_ITEMS.map(({ view, label, Icon }) => (
+        {LANE_ITEMS.map(({ view, label, Icon, hue }) => (
           <button key={view} className={`nav-item ${onMail && currentView === view ? 'active' : ''}`} onClick={() => go(`/?view=${view}`)}>
-            <Icon size={17} className={view === 'needs_me' ? 'text-brand-primary' : 'text-peacock-500'} />
+            <Badge3D hue={hue} Icon={Icon} size={24} />
             <span className="truncate">{label}</span>
             <Count unread={lanes[view]?.unread} total={lanes[view]?.total} />
           </button>
@@ -125,9 +126,9 @@ export default function Sidebar({ onNavigate }) {
       </div>
 
       {pa && (
-        <div className="mt-auto rounded-lg border border-slate-200 bg-white/70 px-2.5 py-2 text-xs" title={pa.message || ''}>
+        <div className="mt-auto rounded-xl border border-slate-200/70 bg-slate-50/70 px-2.5 py-2 text-xs" title={pa.message || ''}>
           <div className="flex items-center gap-1.5 font-semibold text-slate-600">
-            <span className={`h-2 w-2 rounded-full ${pa.connected ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <span className={`h-2 w-2 rounded-full ${pa.connected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(67,201,154,.9)]' : 'bg-slate-300'}`} />
             Magizhchi PA
             <span className="ml-auto font-normal text-slate-500">{pa.connected ? (pa.aiEnabled ? 'Connected · AI on' : 'Connected') : 'Not connected'}</span>
           </div>

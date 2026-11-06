@@ -14,13 +14,13 @@ export function buildSrcDoc(html) {
 export default function MailFrame({ html, title = 'Message body' }) {
   return (
     // An opaque-origin iframe can't be measured from outside, so it gets a tall box the reader can resize.
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white" style={{ resize: 'vertical', height: '62vh', minHeight: 260 }}>
+    <div className="paper overflow-hidden" style={{ resize: 'vertical', height: '62vh', minHeight: 260 }}>
       <iframe
         title={title}
         sandbox="allow-popups allow-popups-to-escape-sandbox"
         referrerPolicy="no-referrer"
         srcDoc={buildSrcDoc(html)}
-        className="h-full w-full border-0 bg-white"
+        className="h-full w-full border-0" style={{ background: "#fffdf8" }}
       />
     </div>
   )

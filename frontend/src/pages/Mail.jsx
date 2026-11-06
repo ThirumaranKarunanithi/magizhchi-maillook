@@ -209,9 +209,9 @@ export default function Mail() {
   const account = accountId != null ? accounts.find((a) => a.id === accountId) : null
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1 gap-2.5">
       {/* message list */}
-      <section className={`${selectedId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-r border-slate-200/70 bg-white/50 md:w-[340px] xl:w-[400px]`}>
+      <section className={`${selectedId ? 'hidden md:flex' : 'flex'} slab rise-3d d1 w-full shrink-0 flex-col overflow-hidden max-lg:rounded-none md:w-[340px] xl:w-[400px]`}>
         <div className="border-b border-slate-200/70 px-3 pb-2 pt-3">
           <div className="flex items-center gap-1">
             <button className="icon-btn lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu"><IconMenu /></button>
@@ -259,7 +259,7 @@ export default function Mail() {
       </section>
 
       {/* reading pane */}
-      <section className={`${selectedId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col bg-white/40`}>
+      <section className={`${selectedId ? 'flex' : 'hidden md:flex'} slab rise-3d d2 min-w-0 flex-1 flex-col overflow-hidden max-lg:rounded-none`}>
         {selectedId ? (
           <ReadingPane
             key={selectedId}
@@ -273,8 +273,8 @@ export default function Mail() {
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-            <img src="/brand/maillook-mark.svg" alt="" width="96" height="96" className="opacity-80" />
-            <p className="mt-4 text-base font-semibold text-slate-600">Pick a message to read</p>
+            <img src="/brand/maillook-mark.svg" alt="" width="112" height="112" className="reflect float-slow" style={{ filter: "drop-shadow(0 18px 30px rgba(0,0,0,.55))" }} />
+            <p className="mt-14 text-lg font-bold text-brand-ink">Pick a message to read</p>
             <p className="mt-1 text-sm text-slate-500">Hover a message to mark it Done, move it, or trash it.</p>
           </div>
         )}

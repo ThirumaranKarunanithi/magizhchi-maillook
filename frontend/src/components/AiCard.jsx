@@ -46,13 +46,13 @@ export default function AiCard({ messageId, onDraft }) {
   }
 
   return (
-    <section className={`rounded-xl border p-3 ${disabled ? 'border-slate-200 bg-slate-50/80' : 'border-peacock-200 bg-gradient-to-br from-peacock-50 to-amber-50/60'}`}
+    <section data-tilt="2" className={`relative rounded-2xl border p-3.5 ${disabled ? 'border-slate-200 bg-slate-50/80' : 'ai-panel border-peacock-300/60'}`}
       aria-label="AI helper">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`flex items-center gap-1.5 text-sm font-semibold ${disabled ? 'text-slate-500' : 'text-peacock-700'}`}>
-          <IconSparkle size={16} /> AI helper
+          <IconSparkle size={16} className={disabled ? "" : "drop-shadow-[0_0_6px_rgba(82,198,201,.9)]"} /> AI helper
         </span>
-        {aiInfo?.provider === 'pa' && <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10.5px] font-semibold text-slate-500">by Magizhchi PA</span>}
+        {aiInfo?.provider === 'pa' && <span className="rounded-full bg-peacock-50 px-2 py-0.5 text-[10.5px] font-semibold text-peacock-700 ring-1 ring-peacock-300/50">by Magizhchi PA</span>}
         <div className="ml-auto flex gap-2">
           <button className="btn-secondary !py-1 text-xs" disabled={disabled || !!busy} onClick={() => run('summary')}>
             {busy === 'summary' && <span className="spinner !h-3 !w-3" />} Summarize
