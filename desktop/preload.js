@@ -35,4 +35,21 @@ contextBridge.exposeInMainWorld('maillookDesktop', {
   onCompose: (fn) => listen('compose', fn),
   /** fn(path): a page to show, from a clicked alert or the tray. */
   onOpen: (fn) => listen('open', fn),
+  /**
+   * Updates of the desktop app. Each call resolves to
+   * { state: idle|checking|available|downloading|ready, current, version, percent, auto, error, checkedAt, packaged }.
+   */
+  updates: {
+    get: () => ipcRenderer.invoke('maillook:update:get'),
+    check: () => ipcRenderer.invoke('maillook:update:check'),
+    download: () => ipcRenderer.invoke('maillook:update:download'),
+    install: () => ipcRenderer.invoke('maillook:update:install'),
+    setAuto: (on) => ipcRenderer.invoke('maillook:update:auto', !!on),
+    onChange: (fn) => {
+      if (typeof fn !== 'function') return () => {}
+      const h = (_e, v) => fn(v)
+      ipcRenderer.on('maillook:update', h)
+      return () => ipcRenderer.removeListener('maillook:update', h)
+    },
+  },
 })

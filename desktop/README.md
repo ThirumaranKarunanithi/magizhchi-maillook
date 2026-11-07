@@ -8,9 +8,16 @@ browser tab can't do:
 - **Alerts and a taskbar count.** The web app tells the desktop app its counts; the taskbar icon carries the
   unread "Needs me" number, and new mail rings according to the person's alert setting (Needs me / All new
   mail / Off), the same setting phones use. Clicking an alert opens Needs me.
-- **The computer's mail app.** The installer registers `mailto:`. After choosing MailLook under Windows
-  Settings → Default apps → MAILTO (Help → Make MailLook my mail app opens that page), mail links in any app
-  open a new mail here, with To, Cc, Subject and text filled in.
+- **The computer's mail app.** The installer lists MailLook as a mail app in Windows (it doesn't take over
+  the one in use). After picking it next to MAILTO in Settings → Default apps (Help → Make MailLook my mail
+  app opens MailLook's page there), mail links in any app open a new mail here, with To, Cc, Subject and
+  text filled in.
+- **Updates, your way.** "Update automatically" is on by default: a new version downloads in the background
+  and installs the next time MailLook restarts. Turned off, MailLook still checks, says a new version is out,
+  and downloads and installs it only when asked. The switch, "Check for updates now", "Download" and
+  "Restart and update" (with download progress) are in the tray's Updates menu, in Help (press Alt), and in
+  the **MailLook for Windows** card on the Manage accounts page. Clicking an "update ready" alert asks before
+  restarting.
 - **Links open in the right place.** MailLook and the sign-in pages (Magizhchi ID, Google, Microsoft) stay in
   the window; links in mail, Meet rooms, Box files and everything else open in the default browser.
 - Right-click with spelling suggestions (English), copy/paste, Ctrl+N new mail, Ctrl+1/2/3 for the lanes,
@@ -21,7 +28,8 @@ changes to these files need a new installer.
 
 | File | What |
 |---|---|
-| `main.js` | Window, tray, menu, alerts, taskbar count, updates |
+| `main.js` | Window, tray, menu, alerts, taskbar count, updates and their settings |
+| `build/installer.nsh` | Closes a running MailLook before install; lists MailLook as a Windows mail app |
 | `preload.js` | `window.maillookDesktop`: the only things the web app can ask for |
 | `links.js` | Which links stay in the window and which go to the browser |
 | `mailto.js` | `mailto:` link → To, Cc, Bcc, Subject, text |
@@ -53,6 +61,11 @@ maillook.magizhchi.software on Hostinger. The installer is then at
 `https://maillook.magizhchi.software/downloads/MagizhchiMailLook-Setup.exe`, and installed apps find new
 versions through `latest.yml` (they check at start and every six hours, and install on restart).
 For a new version, raise `version` in `package.json` first.
+
+To try an update before publishing it: build the newer version into its own folder
+(`npx electron-builder --win nsis -c.directories.output=dist-feed -c.extraMetadata.version=1.0.1`), serve
+that folder over http, and start an installed or `win-unpacked` copy of the older version with
+`MAILLOOK_UPDATE_URL=http://localhost:8099/`. Careful: "Restart and update" really installs it.
 
 The installer is a one-click, per-user install (no admin). Like Meet, it's **unsigned**
 (`signAndEditExecutable: false` skips the code-signing tool, which Windows won't unpack without Developer

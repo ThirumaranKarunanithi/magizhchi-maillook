@@ -262,8 +262,9 @@ function rebuildTray() {
   if (app.isPackaged) {
     items.push({ label: 'Start with Windows', type: 'checkbox', checked: settings.openAtLogin !== false, click: (m) => startWithWindows(m.checked) })
   }
+  if (updateReady()) items.push({ label: `Restart to update to ${update.version}`, click: installUpdate })
   items.push(
-    { label: updateReady ? 'Restart to update' : 'Check for updates…', click: () => (updateReady ? installUpdate() : checkForUpdates(true)) },
+    { label: update.state === 'downloading' ? `Updates (downloading ${update.percent}%)` : update.state === 'available' ? 'Updates (new version)' : 'Updates', submenu: updateMenuItems() },
     { type: 'separator' },
     { label: 'Quit MailLook', click: quit },
   )
@@ -300,10 +301,9 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [
-        { label: 'Check for updates…', click: () => checkForUpdates(true) },
-        { label: 'Make MailLook my mail app', click: makeDefaultMailApp },
+        ...updateMenuItems(),
         { type: 'separator' },
-        { label: `Magizhchi MailLook ${app.getVersion()}`, enabled: false },
+        { label: 'Make MailLook my mail app', click: makeDefaultMailApp },
       ],
     },
   ]
@@ -311,16 +311,21 @@ function buildMenu() {
 }
 
 function makeDefaultMailApp() {
-  const ok = app.setAsDefaultProtocolClient('mailto')
   if (process.platform === 'win32') {
-    // Windows lets only the person choose the default mail app, in Settings.
+    // Windows lets only the person choose the default mail app, in Settings. The installer lists MailLook
+    // there (build/installer.nsh); nothing here touches the mail app that is set now.
     dialog.showMessageBox(win, {
       type: 'info', title: 'Mail links',
       message: 'Choose MailLook in Windows Settings',
-      detail: 'Windows opens its Default apps page. Under "MAILTO", pick Magizhchi MailLook. After that, mail links in any app open a new mail here.',
+      detail: 'Windows opens MailLook’s page in Default apps. Next to MAILTO, pick Magizhchi MailLook. After that, mail links in any app open a new mail here.',
       buttons: ['Open Settings', 'Not now'], defaultId: 0, cancelId: 1,
-    }).then((r) => { if (r.response === 0) shell.openExternal('ms-settings:defaultapps') })
-  } else if (!ok) {
+    }).then((r) => {
+      if (r.response === 0) shell.openExternal('ms-settings:defaultapps?registeredAppUser=' + encodeURIComponent('Magizhchi MailLook'))
+    })
+    return
+  }
+  const ok = app.setAsDefaultProtocolClient('mailto')
+  if (!ok) {
     dialog.showMessageBox(win, { type: 'warning', message: 'MailLook could not become the mail app here.' })
   }
 }
@@ -343,52 +348,183 @@ function quit() {
 }
 
 // ── updates (latest.yml beside the installer on Hostinger) ───────────────────
+//
+// "Update automatically" (on unless turned off): a new version downloads in the background and installs
+// the next time MailLook restarts. Off: MailLook still checks, tells you a new version is out, and
+// downloads and installs it only when you say so. The same choices are in the tray, the Help menu and the
+// "Desktop app" card in MailLook's settings.
 
-let updateReady = false
-let updateAsked = false
+let update = { state: 'idle', version: null, percent: 0, error: null, checkedAt: null }
+let updateAsked = false // a check from the menu answers with a dialog; background and card checks don't
+let toldAvailable = null
 
-function installUpdate() {
-  quitting = true
-  try { autoUpdater.quitAndInstall() } catch { app.quit() }
+const autoUpdateOn = () => settings.autoUpdate !== false
+const updateReady = () => update.state === 'ready'
+
+function updateView() {
+  return { ...update, current: app.getVersion(), auto: autoUpdateOn(), packaged: app.isPackaged && !!autoUpdater }
 }
 
-function checkForUpdates(asked) {
-  if (updateReady) return installUpdate()
-  if (!autoUpdater || !app.isPackaged) {
-    if (asked) dialog.showMessageBox(win, { type: 'info', title: 'Updates', message: `Magizhchi MailLook ${app.getVersion()}`, detail: 'This copy runs from source. The installed app updates itself.' })
+function setUpdate(patch) {
+  update = { ...update, ...patch }
+  rebuildTray()
+  buildMenu()
+  send('maillook:update', updateView())
+}
+
+function errText(e) {
+  const m = String((e && e.message) || e || '')
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|net::ERR_/i.test(m)) return 'MailLook couldn’t reach the update server. Check your internet connection.'
+  if (/404|valid semver|latest\.yml/i.test(m)) return 'No update has been published yet.'
+  return m.split('\n')[0].slice(0, 200)
+}
+
+function setAutoUpdate(on) {
+  settings.autoUpdate = !!on
+  saveSettings()
+  if (autoUpdater) {
+    autoUpdater.autoDownload = !!on
+    autoUpdater.autoInstallOnAppQuit = !!on
+  }
+  if (on && update.state === 'available') downloadUpdate()
+  else setUpdate({})
+}
+
+function installUpdate() {
+  if (!updateReady()) return
+  quitting = true
+  // Silent install, then MailLook opens again by itself.
+  try { autoUpdater.quitAndInstall(true, true) } catch { app.quit() }
+}
+
+/** From an alert: never restart on a single click, in case a mail is half-written. */
+function askToRestart() {
+  if (!updateReady()) return showWin()
+  showWin()
+  dialog.showMessageBox(win, {
+    type: 'question', title: 'Update MailLook',
+    message: `Restart MailLook to install version ${update.version}?`,
+    detail: 'It takes a few seconds and opens again by itself. What you are writing is saved as you type.',
+    buttons: ['Restart now', 'Later'], defaultId: 0, cancelId: 1,
+  }).then((r) => { if (r.response === 0) installUpdate() })
+}
+
+function downloadUpdate() {
+  if (!autoUpdater || update.state !== 'available') return
+  setUpdate({ state: 'downloading', percent: 0, error: null })
+  autoUpdater.downloadUpdate().catch((e) => setUpdate({ state: 'available', error: errText(e) }))
+}
+
+function checkForUpdates(how = 'background') {
+  if (updateReady()) {
+    if (how === 'menu') installUpdate()
     return
   }
-  updateAsked = !!asked
-  autoUpdater.checkForUpdates().catch((e) => {
-    if (!updateAsked) return
-    updateAsked = false
-    dialog.showMessageBox(win, { type: 'warning', title: 'Updates', message: 'Could not check for updates', detail: String((e && e.message) || e) })
-  })
+  if (!autoUpdater || !app.isPackaged) {
+    if (how === 'menu') dialog.showMessageBox(win, { type: 'info', title: 'Updates', message: `Magizhchi MailLook ${app.getVersion()}`, detail: 'This copy runs from source. The installed app updates itself.' })
+    return
+  }
+  if (update.state === 'checking' || update.state === 'downloading') return
+  updateAsked = how === 'menu'
+  const before = update.state
+  setUpdate({ state: 'checking', error: null })
+  // A feed that accepts the connection and never answers would leave "Checking…" up for good.
+  const stuck = setTimeout(() => { if (update.state === 'checking') setUpdate({ state: before === 'available' ? 'available' : 'idle', error: 'The update server didn’t answer. Try again later.' }) }, 60000)
+  autoUpdater.checkForUpdates()
+    .catch((e) => {
+      setUpdate({ state: before === 'available' ? 'available' : 'idle', error: errText(e), checkedAt: Date.now() })
+      if (updateAsked) {
+        updateAsked = false
+        dialog.showMessageBox(win, { type: 'warning', title: 'Updates', message: 'Couldn’t check for updates', detail: `${errText(e)}\n\nYou have version ${app.getVersion()}.` })
+      }
+    })
+    .finally(() => clearTimeout(stuck))
+}
+
+function updateMenuItems() {
+  const v = update.version
+  const status = {
+    idle: `Version ${app.getVersion()}${update.checkedAt && !update.error ? ' · up to date' : ''}`,
+    checking: 'Checking for updates…',
+    available: `Version ${v} is available`,
+    downloading: `Downloading version ${v}… ${update.percent}%`,
+    ready: `Version ${v} is ready to install`,
+  }[update.state] || `Version ${app.getVersion()}`
+  const action = update.state === 'ready' ? { label: 'Restart and update now', click: installUpdate }
+    : update.state === 'available' ? { label: `Download version ${v}`, click: downloadUpdate }
+      : { label: 'Check for updates now', enabled: update.state === 'idle', click: () => checkForUpdates('menu') }
+  return [
+    { label: status, enabled: false },
+    action,
+    { type: 'separator' },
+    { label: 'Update automatically', type: 'checkbox', checked: autoUpdateOn(), click: (m) => setAutoUpdate(m.checked) },
+  ]
 }
 
 function initUpdates() {
   if (!autoUpdater || !app.isPackaged) return
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  // For trying a release before it goes up: MAILLOOK_UPDATE_URL=http://localhost:8099/ points at a local folder.
+  if (process.env.MAILLOOK_UPDATE_URL) autoUpdater.setFeedURL({ provider: 'generic', url: process.env.MAILLOOK_UPDATE_URL })
+  autoUpdater.autoDownload = autoUpdateOn()
+  autoUpdater.autoInstallOnAppQuit = autoUpdateOn()
   autoUpdater.on('update-available', (info) => {
+    const version = info?.version || 'new'
+    if (autoUpdateOn()) {
+      setUpdate({ state: 'downloading', version, percent: 0, checkedAt: Date.now() })
+    } else {
+      setUpdate({ state: 'available', version, checkedAt: Date.now() })
+      if (toldAvailable !== version && !updateAsked) {
+        toldAvailable = version
+        updateToast(`MailLook ${version} is available`, 'Click to download it. Turn on "Update automatically" to get updates without asking.', () => { showWin(); downloadUpdate() })
+      }
+    }
     if (!updateAsked) return
     updateAsked = false
-    dialog.showMessageBox(win, { type: 'info', title: 'Updates', message: `Version ${info?.version || 'newer'} is downloading`, detail: 'You will be told when it is ready.' })
+    if (autoUpdateOn()) {
+      dialog.showMessageBox(win, { type: 'info', title: 'Updates', message: `Version ${version} is downloading`, detail: 'It installs the next time MailLook restarts. You’ll be told when it’s ready.' })
+    } else {
+      dialog.showMessageBox(win, {
+        type: 'info', title: 'Updates', message: `Version ${version} is available`, detail: `You have version ${app.getVersion()}.`,
+        buttons: ['Download now', 'Later'], defaultId: 0, cancelId: 1,
+      }).then((r) => { if (r.response === 0) downloadUpdate() })
+    }
   })
   autoUpdater.on('update-not-available', () => {
+    setUpdate({ state: 'idle', version: null, checkedAt: Date.now(), error: null })
     if (!updateAsked) return
     updateAsked = false
-    dialog.showMessageBox(win, { type: 'info', title: 'Updates', message: 'You are up to date', detail: `Magizhchi MailLook ${app.getVersion()} is the newest version.` })
+    dialog.showMessageBox(win, { type: 'info', title: 'Updates', message: 'You’re up to date', detail: `Magizhchi MailLook ${app.getVersion()} is the newest version.` })
   })
-  autoUpdater.on('update-downloaded', () => {
-    updateReady = true
-    rebuildTray()
-    toast('MailLook update ready', 'It installs when MailLook restarts. Click to restart now.')
+  autoUpdater.on('download-progress', (p) => {
+    const percent = Math.floor(p?.percent || 0)
+    if (percent !== update.percent) setUpdate({ state: 'downloading', percent })
   })
-  autoUpdater.on('error', (e) => console.warn('[update]', e && e.message))
-  checkForUpdates(false)
-  setInterval(() => checkForUpdates(false), 6 * 60 * 60 * 1000)
+  autoUpdater.on('update-downloaded', (info) => {
+    setUpdate({ state: 'ready', version: info?.version || update.version, percent: 100, error: null })
+    updateToast(`MailLook ${update.version} is ready`, autoUpdateOn() ? 'It installs the next time MailLook restarts.' : 'Restart MailLook to install it.', askToRestart)
+  })
+  autoUpdater.on('error', (e) => {
+    console.warn('[update]', e && e.message)
+    if (update.state === 'downloading') setUpdate({ state: 'available', error: errText(e) })
+  })
+  checkForUpdates('background')
+  setInterval(() => checkForUpdates('background'), 6 * 60 * 60 * 1000)
 }
+
+function updateToast(title, body, onClick) {
+  try {
+    if (!Notification.isSupported()) return
+    const n = new Notification({ title, body, icon: ICON })
+    n.on('click', onClick)
+    n.show()
+  } catch { /* alerts unavailable */ }
+}
+
+ipcMain.handle('maillook:update:get', () => updateView())
+ipcMain.handle('maillook:update:check', () => { checkForUpdates('card'); return updateView() })
+ipcMain.handle('maillook:update:download', () => { downloadUpdate(); return updateView() })
+ipcMain.handle('maillook:update:install', () => { installUpdate(); return updateView() })
+ipcMain.handle('maillook:update:auto', (_e, on) => { setAutoUpdate(!!on); return updateView() })
 
 // ── what the web app asks for ────────────────────────────────────────────────
 
