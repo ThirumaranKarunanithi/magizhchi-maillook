@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get, post } from '../api.js'
-import { minutesToStart, scheduleLine, useMeet } from '../meet.js'
+import { minutesToStart, nextClass, scheduleLine, useMeet } from '../meet.js'
 import { useMail } from '../state.jsx'
 import { safeHttpUrl } from '../util.js'
 import { IconVideo } from './Icons.jsx'
@@ -61,6 +61,7 @@ export function JoinCard({ message, refreshKey }) {
         const m = r.known ? minutesToStart(r, now) : null
         const soon = soonText(m, r.live)
         const line = r.known ? scheduleLine(r) : null
+        const next = r.known && !soon && !r.live ? nextClass(r, now) : null
         return (
           <section key={r.id} aria-label={`Magizhchi Meet room ${r.name}`}
             className={`flex flex-wrap items-center gap-3 rounded-2xl border px-3.5 py-3 ${soon ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white/80'}`}>
@@ -72,8 +73,11 @@ export function JoinCard({ message, refreshKey }) {
               <p className="truncate text-xs text-slate-500">
                 {soon ? <span className="font-semibold text-emerald-800">{soon}</span> : line || 'Magizhchi Meet'}
                 {soon && line ? <span> · {line}</span> : null}
-                {r.locked && !soon ? ' · locked' : ''}
               </p>
+              {next && <p className="truncate text-xs text-slate-600">{r.type === 'CLASS' ? 'Next class' : 'Next'} <span className="font-semibold text-brand-ink">{next}</span></p>}
+              {r.locked && (
+                <p className="text-xs text-slate-500" title="Locked in Magizhchi Meet">Locked: only people you let in can join.</p>
+              )}
             </div>
             {r.known && m != null && m <= 60 && m >= -15 && (
               <button className="btn-ghost !px-2.5 !py-1.5 text-sm" aria-expanded={briefFor === r.id}

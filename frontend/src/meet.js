@@ -74,6 +74,37 @@ export function minutesToStart(room, now = new Date()) {
   return open - z.minutes
 }
 
+/**
+ * When a repeating room next opens, as "today, 4:45 PM", "tomorrow, 4:45 PM" or "Mon 9 Nov, 4:45 PM"
+ * (the room's own clock). Null for one-off rooms, while a class is on, or when the days aren't known.
+ */
+export function nextClass(room, now = new Date()) {
+  if (!room.repeat || !room.openTime) return null
+  const z = zoneNow(room.zone, now)
+  const open = toMin(room.openTime)
+  if (!z || open == null) return null
+  const days = (room.days || '').split(',').map((d) => d.trim().slice(0, 3)).filter(Boolean)
+  const runs = (day) => room.repeat === 'DAILY'
+    || (room.repeat === 'WEEKDAYS' && !['SAT', 'SUN'].includes(day))
+    || (room.repeat === 'WEEKLY' && days.includes(day))
+  const start = DAY_CODES.indexOf(z.day)
+  if (start < 0) return null
+  const h = Math.floor(open / 60), mm = open % 60
+  const time = `${((h + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+  for (let d = 0; d <= 7; d++) {
+    if (!runs(DAY_CODES[(start + d) % 7])) continue
+    if (d === 0) {
+      if (z.minutes >= open) continue // on now or over for today
+      return `today, ${time}`
+    }
+    if (d === 1) return `tomorrow, ${time}`
+    const date = new Intl.DateTimeFormat('en-GB', { timeZone: room.zone || 'UTC', weekday: 'short', day: 'numeric', month: 'short' })
+      .format(new Date(now.getTime() + d * 86400000))
+    return `${date}, ${time}`
+  }
+  return null
+}
+
 /** "Saturdays 3:00–5:00 PM" style line for a weekly batch, or the one-off date. */
 export function scheduleLine(room) {
   const t = (hhmm) => {
