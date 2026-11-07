@@ -30,7 +30,17 @@ public class MessageRepo {
                              String subject, String snippet, String bodyText, String bodyHtml,
                              List<Map<String, Object>> attachments, OffsetDateTime receivedAt,
                              boolean seen, boolean flagged, String lane, String laneSource,
-                             String listUnsubscribe, boolean listUnsubscribePost) {}
+                             String listUnsubscribe, boolean listUnsubscribePost, String calendar) {
+        public NewMessage(long accountId, String folder, Long uid, String messageId, String threadKey,
+                          String fromName, String fromEmail, List<String> to, List<String> cc,
+                          String subject, String snippet, String bodyText, String bodyHtml,
+                          List<Map<String, Object>> attachments, OffsetDateTime receivedAt,
+                          boolean seen, boolean flagged, String lane, String laneSource,
+                          String listUnsubscribe, boolean listUnsubscribePost) {
+            this(accountId, folder, uid, messageId, threadKey, fromName, fromEmail, to, cc, subject, snippet, bodyText, bodyHtml,
+                    attachments, receivedAt, seen, flagged, lane, laneSource, listUnsubscribe, listUnsubscribePost, null);
+        }
+    }
 
     /** A stored row (bodies included only when asked for). */
     public record Row(long id, long accountId, String accountEmail, String accountColor, long userId,
@@ -128,7 +138,7 @@ public class MessageRepo {
             PreparedStatement ps = con.prepareStatement(
                     "INSERT INTO messages (account_id, folder, uid, message_id, thread_key, from_name, from_email, to_list, cc_list, " +
                     "subject, snippet, body_text, body_html, attachments, received_at, seen, flagged, lane, lane_source, " +
-                    "list_unsubscribe, list_unsubscribe_post) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "list_unsubscribe, list_unsubscribe_post, calendar_ics) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     Statement.RETURN_GENERATED_KEYS);
             int i = 1;
             ps.setLong(i++, n.accountId());
@@ -151,7 +161,8 @@ public class MessageRepo {
             ps.setString(i++, n.lane());
             ps.setString(i++, n.laneSource());
             ps.setString(i++, cut(n.listUnsubscribe(), 2000));
-            ps.setBoolean(i, n.listUnsubscribePost());
+            ps.setBoolean(i++, n.listUnsubscribePost());
+            ps.setString(i, n.calendar());
             return ps;
         }, kh);
         return ((Number) kh.getKeys().get("id")).longValue();
@@ -259,6 +270,90 @@ public class MessageRepo {
         sql.append(" ORDER BY m.received_at DESC, m.id DESC LIMIT ?");
         args.add(limit);
         return jdbc.query(sql.toString(), mapper(false), args.toArray());
+    }
+
+    /**
+     * Mail matching any of {@code words} (subject, sender, body or the person's note), narrowed by sender,
+     * recipient, dates, files and folder; newest first, bodies included so the caller can rank and answer.
+     * {@code folder} SENT means mail they sent; anything else means every folder except Trash and Spam.
+     */
+    public List<Row> askSearch(long userId, Long accountId, List<String> words, String from, String to,
+                               Instant after, Instant before, boolean attach, String folder, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + ", m.body_text, m.body_html FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE a.user_id = ?");
+        List<Object> args = new ArrayList<>(List.of(userId));
+        if ("SENT".equals(folder)) sql.append(" AND m.folder = 'SENT'");
+        else sql.append(" AND m.folder NOT IN ('TRASH', 'SPAM')");
+        if (accountId != null) {
+            sql.append(" AND m.account_id = ?");
+            args.add(accountId);
+        }
+        if (from != null && !from.isBlank()) {
+            String l = MailSearch.like(from);
+            sql.append(" AND (LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ?)");
+            args.addAll(List.of(l, l));
+        }
+        if (to != null && !to.isBlank()) {
+            sql.append(" AND (LOWER(m.to_list) LIKE ? OR LOWER(m.cc_list) LIKE ?)");
+            String l = MailSearch.like(to);
+            args.addAll(List.of(l, l));
+        }
+        if (after != null) {
+            sql.append(" AND m.received_at >= ?");
+            args.add(OffsetDateTime.ofInstant(after, java.time.ZoneOffset.UTC));
+        }
+        if (before != null) {
+            sql.append(" AND m.received_at < ?");
+            args.add(OffsetDateTime.ofInstant(before, java.time.ZoneOffset.UTC));
+        }
+        if (attach) sql.append(" AND m.attachments LIKE '[{%'");
+        List<String> ws = words == null ? List.of() : words.stream().filter(w -> w != null && w.trim().length() >= 2).limit(8).toList();
+        if (!ws.isEmpty()) {
+            sql.append(" AND (");
+            for (int i = 0; i < ws.size(); i++) {
+                String l = MailSearch.like(ws.get(i));
+                if (i > 0) sql.append(" OR ");
+                sql.append("LOWER(m.subject) LIKE ? OR LOWER(m.from_name) LIKE ? OR LOWER(m.from_email) LIKE ? OR LOWER(m.body_text) LIKE ?" +
+                        " OR EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key AND LOWER(tn.body) LIKE ?)");
+                args.addAll(List.of(l, l, l, l, l));
+            }
+            sql.append(")");
+        }
+        sql.append(" ORDER BY m.received_at DESC, m.id DESC LIMIT ?");
+        args.add(limit);
+        return jdbc.query(sql.toString(), mapper(true), args.toArray());
+    }
+
+    /**
+     * Mail the person sent between {@code from} and {@code to} that is still the last word in its thread:
+     * nobody else wrote after it and they didn't write again. Bodies included. Mail they said they
+     * aren't waiting on is left out.
+     */
+    public List<Row> lastWordSent(long userId, Long accountId, OffsetDateTime from, OffsetDateTime to, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + ", m.body_text, m.body_html FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE a.user_id = ? AND m.folder = 'SENT' AND m.received_at >= ? AND m.received_at <= ? AND m.to_list LIKE '[\"%'" +
+                " AND NOT EXISTS (SELECT 1 FROM messages t WHERE t.account_id = m.account_id AND t.thread_key = m.thread_key" +
+                "   AND t.id <> m.id AND t.received_at >= m.received_at AND (t.folder = 'SENT' OR (t.from_email IS NOT NULL" +
+                "   AND LOWER(t.from_email) NOT IN (SELECT LOWER(x.email) FROM accounts x WHERE x.user_id = a.user_id))))" +
+                " AND NOT EXISTS (SELECT 1 FROM ai_cache c WHERE c.message_id = m.id AND c.kind = 'waiting_off')");
+        List<Object> args = new ArrayList<>(List.of(userId, from, to));
+        if (accountId != null) {
+            sql.append(" AND m.account_id = ?");
+            args.add(accountId);
+        }
+        sql.append(" ORDER BY m.received_at DESC, m.id DESC LIMIT ?");
+        args.add(limit);
+        return jdbc.query(sql.toString(), mapper(true), args.toArray());
+    }
+
+    /** The raw calendar invite sent inside this mail, if any. */
+    public Optional<String> calendar(long id) {
+        return jdbc.queryForList("SELECT calendar_ics FROM messages WHERE id = ? AND calendar_ics IS NOT NULL", String.class, id)
+                .stream().findFirst();
+    }
+
+    public void deleteAiCache(long messageId, String kind) {
+        jdbc.update("DELETE FROM ai_cache WHERE message_id = ? AND kind = ?", messageId, kind);
     }
 
     /** Mail snoozed for later, soonest back first. */

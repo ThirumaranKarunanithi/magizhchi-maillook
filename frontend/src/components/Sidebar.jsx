@@ -8,7 +8,7 @@ import Badge3D from './Badge3D.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
 import {
   IconAlert, IconArchive, IconBook, IconCalendar, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo,
-  IconLogout, IconNews, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconTrash,
+  IconLogout, IconNews, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
 } from './Icons.jsx'
 
 const LANE_ITEMS = [
@@ -21,6 +21,7 @@ const FOLDER_ITEMS = [
   { view: 'all', label: 'All mail', Icon: IconInbox },
   { view: 'drafts', label: 'Drafts', Icon: IconDraft },
   { view: 'snoozed', label: 'Snoozed', Icon: IconSnooze },
+  { view: 'waiting', label: 'Waiting on others', Icon: IconClock },
   { view: 'sent', label: 'Sent', Icon: IconSend },
   { view: 'archive', label: 'Archive', Icon: IconArchive },
   { view: 'spam', label: 'Spam', Icon: IconSpam },
@@ -180,7 +181,12 @@ export default function Sidebar({ onNavigate }) {
         <span className="disc"><IconCompose size={14} strokeWidth={2.2} /></span> Compose
       </button>
 
-      <HappinessGauge happiness={counts?.happiness} />
+      <HappinessGauge happiness={counts?.happiness} onOpen={() => go('/today')} />
+
+      <button className={`nav-item -mt-2 ${location.pathname === '/today' ? 'active' : ''}`} onClick={() => go('/today')}>
+        <IconSparkle size={17} className="text-peacock-600" />
+        <span>Today</span>
+      </button>
 
       <div>
         <div className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Lanes</div>
@@ -199,6 +205,7 @@ export default function Sidebar({ onNavigate }) {
             <Icon size={17} className="text-slate-500" />
             <span>{label}</span>
             {view === 'drafts' && draftCount > 0 && <span className="ml-auto text-xs text-slate-500 num">{draftCount}</span>}
+            {view === 'waiting' && counts?.happiness?.waitingOnOthers > 0 && <span className="ml-auto text-xs text-slate-500 num">{counts.happiness.waitingOnOthers}</span>}
           </button>
         ))}
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>

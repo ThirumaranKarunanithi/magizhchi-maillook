@@ -21,7 +21,7 @@ public class PushController {
     public record Keys(String p256dh, String auth) {}
     public record SubscribeRequest(String endpoint, Keys keys) {}
     public record UnsubscribeRequest(String endpoint) {}
-    public record SettingsRequest(String mode) {}
+    public record SettingsRequest(String mode, Integer briefingHour, Boolean briefing, String tz) {}
 
     private final PushService push;
 
@@ -36,14 +36,29 @@ public class PushController {
         m.put("publicKey", push.configured() ? push.publicKey() : null);
         m.put("mode", push.mode(userId));
         m.put("devices", push.devices(userId));
+        m.put("briefingHour", push.briefingHour(userId));
         return m;
     }
 
     @PutMapping
     public Map<String, Object> setMode(@RequestAttribute long userId, @RequestBody SettingsRequest req) {
-        String mode = req.mode() == null ? "" : req.mode().trim().toLowerCase(java.util.Locale.ROOT);
-        if (!PushService.MODES.contains(mode)) throw ApiException.bad("Alerts can be off, needs_me or all.");
-        push.setMode(userId, mode);
+        if (req.mode() != null) {
+            String mode = req.mode().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!PushService.MODES.contains(mode)) throw ApiException.bad("Alerts can be off, needs_me or all.");
+            push.setMode(userId, mode);
+        }
+        if (req.tz() != null && !req.tz().isBlank()) {
+            try {
+                push.setZone(userId, java.time.ZoneId.of(req.tz().trim()).getId());
+            } catch (java.time.DateTimeException e) {
+                throw ApiException.bad("Unknown time zone.");
+            }
+        }
+        if (Boolean.FALSE.equals(req.briefing())) push.setBriefingHour(userId, null);
+        else if (req.briefingHour() != null) {
+            if (req.briefingHour() < 4 || req.briefingHour() > 12) throw ApiException.bad("The briefing can come between 4 and 12 in the morning.");
+            push.setBriefingHour(userId, req.briefingHour());
+        }
         return settings(userId);
     }
 

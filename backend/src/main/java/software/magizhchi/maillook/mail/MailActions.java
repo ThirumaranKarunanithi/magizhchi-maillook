@@ -292,6 +292,45 @@ public class MailActions {
     }
 
     /**
+     * Answers a meeting invite: a short mail to the organizer carrying the iCalendar REPLY, so their calendar
+     * marks this person as going, maybe or not going. A copy goes in Sent like any other mail.
+     */
+    public void sendCalendarReply(long userId, MessageRepo.Row invite, String to, String subject, String text, String ics) {
+        Account a = account(invite);
+        if (a.userId() != userId) throw ApiException.notFound("Account");
+        try {
+            var session = imap.smtpSession(a);
+            MimeMessage msg = new MimeMessage(session);
+            msg.setFrom(new InternetAddress(a.email(), a.displayName() == null ? a.email() : a.displayName(), "UTF-8"));
+            msg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
+            msg.setSubject(subject, "UTF-8");
+            msg.setSentDate(new Date());
+            var alt = new jakarta.mail.internet.MimeMultipart("alternative");
+            var plain = new jakarta.mail.internet.MimeBodyPart();
+            plain.setText(text, "UTF-8");
+            alt.addBodyPart(plain);
+            var cal = new jakarta.mail.internet.MimeBodyPart();
+            cal.setDataHandler(new jakarta.activation.DataHandler(new jakarta.mail.util.ByteArrayDataSource(
+                    ics.getBytes(StandardCharsets.UTF_8), "text/calendar; charset=UTF-8; method=REPLY")));
+            alt.addBodyPart(cal);
+            msg.setContent(alt);
+            if (invite.messageId() != null) {
+                msg.setHeader("In-Reply-To", invite.messageId());
+                msg.setHeader("References", invite.messageId());
+            }
+            msg.saveChanges();
+            Transport.send(msg, a.email(), imap.secret(a));
+            saveToSent(a, msg);
+        } catch (ApiException e) {
+            throw e;
+        } catch (jakarta.mail.AuthenticationFailedException e) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "The mail server refused the password for " + a.email() + " when sending.");
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "Couldn't send your answer: " + e.getMessage());
+        }
+    }
+
+    /**
      * The shape calendar apps look for: the text and the invite as alternatives (Gmail and Outlook show
      * Yes / No / Maybe), the same invite as an invite.ics file, then any files the person attached.
      */

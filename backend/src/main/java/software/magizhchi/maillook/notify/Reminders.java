@@ -6,9 +6,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import software.magizhchi.maillook.mail.FollowUps;
+import software.magizhchi.maillook.mail.LaneClassifier;
 import software.magizhchi.maillook.mail.MessageRepo;
+import software.magizhchi.maillook.mail.Waiting;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -17,7 +23,8 @@ import java.util.Map;
 /**
  * Once a minute: snoozed mail whose time came goes back on top of its lane (unread), and mail you sent
  * with "remind me if nobody replies" comes back in Needs me when nobody else wrote in that thread.
- * Both ring the person's browsers and phones.
+ * Both ring the person's browsers and phones. In the morning, at the hour they chose, the day's
+ * briefing rings too.
  */
 @Service
 public class Reminders {
@@ -28,8 +35,10 @@ public class Reminders {
     private final MessageRepo messages;
     private final FollowUps followUps;
     private final PushService push;
+    private final Waiting waiting;
 
-    public Reminders(JdbcTemplate jdbc, MessageRepo messages, FollowUps followUps, PushService push) {
+    public Reminders(JdbcTemplate jdbc, MessageRepo messages, FollowUps followUps, PushService push, Waiting waiting) {
+        this.waiting = waiting;
         this.jdbc = jdbc;
         this.messages = messages;
         this.followUps = followUps;
@@ -79,7 +88,40 @@ public class Reminders {
                 followUps.delete(d.id());
             }
         }
+        briefings(now);
         return back;
+    }
+
+    /**
+     * The morning briefing alert, once a day, in the first three hours after the hour the person chose
+     * (so a late deploy doesn't ring at midnight).
+     * @return how many people got it.
+     */
+    public int briefings(Instant now) {
+        if (!push.configured()) return 0;
+        List<Map<String, Object>> due = jdbc.queryForList(
+                "SELECT u.id, u.tz, u.briefing_hour, u.briefing_sent_on FROM users u WHERE u.briefing_hour IS NOT NULL AND u.tz IS NOT NULL " +
+                        "AND u.notify <> 'off' AND EXISTS (SELECT 1 FROM push_subscriptions p WHERE p.user_id = u.id)");
+        int sent = 0;
+        for (Map<String, Object> u : due) {
+            try {
+                long userId = ((Number) u.get("id")).longValue();
+                ZonedDateTime local = now.atZone(ZoneId.of(u.get("tz").toString()));
+                int hour = ((Number) u.get("briefing_hour")).intValue();
+                LocalDate last = u.get("briefing_sent_on") == null ? null : LocalDate.parse(u.get("briefing_sent_on").toString().substring(0, 10));
+                if (local.getHour() < hour || local.getHour() >= hour + 3 || local.toLocalDate().equals(last)) continue;
+                jdbc.update("UPDATE users SET briefing_sent_on = ? WHERE id = ?", local.toLocalDate(), userId);
+                long needs = messages.unseenInLane(userId, null, LaneClassifier.NEEDS_ME, now.minus(Duration.ofDays(30)), now.plus(Duration.ofDays(1)));
+                int waits = waiting.list(userId, null, now, false).size();
+                String body = needs == 0 ? "Nobody is waiting on you" : needs == 1 ? "1 person is waiting on you" : needs + " people are waiting on you";
+                if (waits > 0) body += " · you're waiting on " + waits + (waits == 1 ? " reply" : " replies");
+                push.reminder(userId, "Your morning briefing", body + ". Tap for today's plan.", "/today", "maillook-briefing");
+                sent++;
+            } catch (Exception e) {
+                log.info("Briefing alert skipped: {}", e.toString());
+            }
+        }
+        return sent;
     }
 
     /** Did anyone other than this person write in the thread after the mail was sent? */

@@ -5,6 +5,7 @@ import { useMail } from '../state.jsx'
 import { bodyAsText, EMAIL_RE, formatSize, fullDate, signatureBlock, splitAddresses } from '../util.js'
 import { IconAlert, IconBell, IconCalendar, IconPaperclip, IconPlus, IconSend, IconTrash, IconX } from './Icons.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import ComposerAi from './ComposerAi.jsx'
 import { SuggestList, useAddressCheck, useOftenWith, useSuggestions } from './AddressSuggest.jsx'
 import { FOLLOW_UP, followUpAt } from '../when.js'
 
@@ -34,6 +35,22 @@ function swapSignature(text, oldBlock, newBlock, anchor) {
   if (!newBlock || oldBlock) return text
   const at = anchor ? text.indexOf(anchor) : -1
   return at >= 0 ? text.slice(0, at) + newBlock + text.slice(at) : text + newBlock
+}
+
+/** "Ravi Kumar <ravi@x.net>" → { email: "ravi@x.net", name: "Ravi Kumar" }; a bare address stays as it is. */
+function parseAddress(a) {
+  const s = String(a || '').trim()
+  const m = s.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/)
+  return m ? { email: m[2].trim(), name: m[1].trim() || null } : { email: s, name: null }
+}
+
+/** Addresses as the chips want them (bare), with the names they came with kept for showing. */
+function bareAll(list, names) {
+  return (list || []).map((a) => {
+    const p = parseAddress(a)
+    if (p.name) names[p.email.toLowerCase()] = p.name
+    return p.email
+  })
 }
 
 function prefixed(subject, prefix, re) {
@@ -74,6 +91,10 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: su
 
   const accountId = accounts.some((a) => a.id === m.accountId) ? m.accountId : fallbackFrom
   const fromMe = own.has((m.fromEmail || '').toLowerCase())
+  const names = {}
+  if (m.fromName && m.fromEmail) names[m.fromEmail.toLowerCase()] = m.fromName
+  const mTo = bareAll(m.to, names)
+  const mCc = bareAll(m.cc, names)
   if (mode === 'forward') {
     const header = [
       '---------- Forwarded message ----------',
@@ -91,22 +112,22 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: su
       invite: null, draftId: null, anchor: `\n\n${header}`,
     }
   }
-  let to = fromMe ? m.to || [] : [m.fromEmail]
+  let to = fromMe ? mTo : [m.fromEmail]
   let cc = []
   if (mode === 'replyAll') {
-    to = fromMe ? m.to || [] : [m.fromEmail, ...(m.to || [])]
-    cc = m.cc || []
+    to = fromMe ? mTo : [m.fromEmail, ...mTo]
+    cc = mCc
   }
   to = uniq(to, fromMe ? new Set() : own)
   if (!to.length && m.fromEmail) to = [m.fromEmail]
   cc = uniq(cc, new Set([...own, ...to.map((x) => x.toLowerCase())]))
   // A reply to chosen people (the meeting recap goes to who came; the catch-up to who missed it).
   if (toOverride?.length) {
-    to = uniq(toOverride, own)
+    to = uniq(bareAll(toOverride, names), own)
     cc = []
   }
   return {
-    accountId, to, cc, bcc: [],
+    accountId, to, cc, bcc: [], names,
     subject: subjectOverride || prefixed(m.subject, 'Re:', /^\s*re\s*:/i),
     // Signature above the quote, where it belongs in a reply.
     text: `${draftBody ? `${draftBody}\n` : ''}${sig(accountId)}\n\n${quote(m)}`,
@@ -188,7 +209,7 @@ function RecipientField({ label, chips, setChips, text, setText, autoFocus, acco
 }
 
 export default function Composer() {
-  const { composer, closeComposer, accounts, accountId: selectedAccountId, notify, bumpMail, refreshCounts, refreshDrafts } = useMail()
+  const { composer, closeComposer, accounts, accountId: selectedAccountId, notify, bumpMail, refreshCounts, refreshDrafts, aiEnabled } = useMail()
   const init = useMemo(() => initialDraft(composer, accounts, selectedAccountId), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [fromId, setFromId] = useState(init.accountId)
@@ -207,7 +228,7 @@ export default function Composer() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [remind, setRemind] = useState('')
-  const [names, setNames] = useState({}) // email → name, from suggestions
+  const [names, setNames] = useState(init.names || {}) // email → name, from the mail replied to and from suggestions
   const [typoOk, setTypoOk] = useState(false) // they chose to send to an address that looked mistyped
   const fileInput = useRef(null)
   const bodyRef = useRef(null)
@@ -450,6 +471,11 @@ export default function Composer() {
           <span className="w-10 shrink-0 text-xs font-semibold text-slate-500">Subject</span>
           <input className="min-w-0 flex-1 bg-transparent py-1 text-sm font-medium outline-none" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
         </div>
+
+        <ComposerAi aiEnabled={aiEnabled} text={text} setText={setText} anchor={init.anchor}
+          sig={signatureBlock(accounts.find((a) => a.id === Number(fromId))?.signature)}
+          accountId={fromId} to={allOf(to, toText)} subject={subject} setSubject={setSubject}
+          replyToId={init.replyToMessageId} bodyRef={bodyRef} notify={notify} />
 
         <textarea ref={bodyRef} className="scroll-thin min-h-0 flex-1 resize-none bg-white px-4 py-3 text-sm leading-relaxed outline-none"
           value={text} onChange={(e) => setText(e.target.value)} aria-label="Message" placeholder="Write something kind…" />

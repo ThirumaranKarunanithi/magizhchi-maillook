@@ -294,7 +294,7 @@ public class SyncService {
         return new MessageRepo.NewMessage(a.id(), code, uid, messageId, threadKey, fromName, fromEmail, to, cc,
                 subject, MessageParser.snippet(body.text()), body.text(), body.html(), body.attachments(), at,
                 m.isSet(Flags.Flag.SEEN) || "SENT".equals(code), m.isSet(Flags.Flag.FLAGGED), lane, laneSource,
-                unsub, unsubPost != null && unsubPost.toLowerCase(Locale.ROOT).contains("one-click"));
+                unsub, unsubPost != null && unsubPost.toLowerCase(Locale.ROOT).contains("one-click"), body.calendar());
     }
 
     /** The thread's root Message-ID: first of References, else In-Reply-To, else this message's own. */

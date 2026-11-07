@@ -1,5 +1,5 @@
 import { senderName, shortTime } from '../util.js'
-import { IconArchive, IconBell, IconFlag, IconNote, IconPaperclip, IconSnooze, IconTrash, IconVideo } from './Icons.jsx'
+import { IconArchive, IconBell, IconClock, IconFlag, IconNote, IconPaperclip, IconSnooze, IconTrash, IconVideo } from './Icons.jsx'
 import MoveMenu from './MoveMenu.jsx'
 import SnoozeMenu from './SnoozeMenu.jsx'
 import { whenLabel } from '../when.js'
@@ -16,7 +16,7 @@ function startsBadge(at) {
 function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onMove, onSnooze }) {
   const unread = !m.seen
   const toLine = `To: ${(m.to || []).join(', ') || '(no recipients)'}`
-  const who = sentView || m.backReason === 'no_reply' ? toLine : senderName(m)
+  const who = sentView || m.backReason === 'no_reply' || m.waitingDays ? toLine : senderName(m)
   return (
     <div
       role="button"
@@ -55,6 +55,11 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
             <IconBell size={11} />No reply yet
           </span>
         )}
+        {m.waitingDays > 0 && (
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-peacock-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-peacock-800 ring-1 ring-peacock-200">
+            <IconClock size={11} />{m.waitingDays} days, no reply
+          </span>
+        )}
         {m.snoozedUntil && (
           <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
             <IconSnooze size={11} />{whenLabel(m.snoozedUntil)}
@@ -62,7 +67,7 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
         )}
         {m.subject || '(no subject)'}
       </div>
-      <div className="truncate pr-24 text-xs text-slate-500">{m.snippet}</div>
+      <div className="truncate pr-24 text-xs text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : m.snippet}</div>
       {m.attachmentNames?.length > 0 && (
         <div className="mt-1.5 flex min-w-0 items-center gap-1.5 pr-24">
           {m.attachmentNames.slice(0, 2).map((n, i) => (

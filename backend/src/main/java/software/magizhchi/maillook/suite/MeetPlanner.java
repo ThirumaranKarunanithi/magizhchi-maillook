@@ -140,6 +140,28 @@ public class MeetPlanner {
         }
     }
 
+    /**
+     * Free times from the PA calendar for any mail: the composer's "Suggest times" puts them in the
+     * text. Works without Meet; without PA the times are only checked against working hours.
+     */
+    @GetMapping("/meet/free")
+    public Map<String, Object> free(@RequestAttribute long userId,
+                                    @org.springframework.web.bind.annotation.RequestParam(defaultValue = "30") int minutes,
+                                    @org.springframework.web.bind.annotation.RequestParam(defaultValue = "4") int count) {
+        int m = (int) Math.round(Math.max(15, Math.min(240, minutes)) / 15.0) * 15;
+        int n = Math.max(1, Math.min(6, count));
+        List<Instant[]> busy = new ArrayList<>();
+        boolean checked = busy(userId, busy);
+        List<Map<String, Object>> slots = new ArrayList<>();
+        for (Instant s : freeSlots(Instant.now(), busy, m, n)) slots.add(slot(s, m));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("minutes", m);
+        out.put("calendarChecked", checked);
+        out.put("zone", "IST");
+        out.put("slots", slots);
+        return out;
+    }
+
     /** Remember the times offered in this thread and draft the reply that proposes them. */
     @PostMapping("/messages/{id}/meet/offer")
     public Map<String, Object> offer(@RequestAttribute long userId, @PathVariable long id, @RequestBody OfferRequest req) {

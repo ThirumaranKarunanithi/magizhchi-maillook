@@ -4,6 +4,16 @@ import { useMail } from '../state.jsx'
 import { currentSubscription, disablePush, enablePush, needsHomeScreen, pushSupported } from '../push.js'
 import { IconBell } from './Icons.jsx'
 
+const TZ = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch {
+    return ''
+  }
+})()
+
+const HOURS = [5, 6, 7, 8, 9, 10]
+
 const MODES = [
   { key: 'needs_me', label: 'Needs me', hint: 'People waiting on you, and your reminders' },
   { key: 'all', label: 'All new mail', hint: 'Everything except newsletters you set to Can wait' },
@@ -19,6 +29,8 @@ export default function AlertsCard({ compact = false }) {
 
   useEffect(() => {
     get('/api/push').then(setS).catch(() => setS({ configured: false }))
+    // The morning briefing comes at the person's own hour, so the server needs their time zone.
+    if (TZ) put('/api/push', { tz: TZ }).catch(() => {})
     currentSubscription().then((sub) => setHere(!!sub)).catch(() => setHere(false))
   }, [])
 
@@ -55,6 +67,14 @@ export default function AlertsCard({ compact = false }) {
   async function setMode(mode) {
     try {
       setS(await put('/api/push', { mode }))
+    } catch (e) {
+      notify(e.message, 'error')
+    }
+  }
+
+  async function setBriefing(value) {
+    try {
+      setS(await put('/api/push', value === 'off' ? { briefing: false, tz: TZ || null } : { briefingHour: Number(value), tz: TZ || null }))
     } catch (e) {
       notify(e.message, 'error')
     }
@@ -101,6 +121,17 @@ export default function AlertsCard({ compact = false }) {
           ))}
           {here && <button className="ml-auto text-xs font-semibold text-peacock-700 hover:underline" onClick={test}>Send a test</button>}
         </div>
+      )}
+      {s.configured && s.mode !== 'off' && (
+        <label className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span>Morning briefing</span>
+          <select className="rounded-lg border border-slate-200 bg-transparent px-1.5 py-1 text-xs outline-none" value={s.briefingHour ?? 'off'}
+            onChange={(e) => setBriefing(e.target.value)} aria-label="Morning briefing alert">
+            {HOURS.map((h) => <option key={h} value={h}>{h}:00 AM</option>)}
+            <option value="off">Off</option>
+          </select>
+          <span className="text-slate-500">who's waiting on you, and today's meetings</span>
+        </label>
       )}
     </section>
   )

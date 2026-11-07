@@ -56,10 +56,13 @@ public class MessageController {
     private final FollowUps followUps;
     private final NoteRepo notes;
     private final software.magizhchi.maillook.contacts.PeopleService people;
+    private final Waiting waiting;
 
     public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box,
                              software.magizhchi.maillook.suite.MeetSoon meetSoon, FolderCursors cursors, DraftRepo drafts,
-                             FollowUps followUps, NoteRepo notes, software.magizhchi.maillook.contacts.PeopleService people) {
+                             FollowUps followUps, NoteRepo notes, software.magizhchi.maillook.contacts.PeopleService people,
+                             Waiting waiting) {
+        this.waiting = waiting;
         this.people = people;
         this.followUps = followUps;
         this.notes = notes;
@@ -88,6 +91,12 @@ public class MessageController {
                                     @RequestParam(required = false) String after,
                                     @RequestParam(required = false) String before,
                                     @RequestParam(required = false) String tz) {
+        if ("WAITING".equalsIgnoreCase(folder)) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("items", waiting.list(userId, accountId, Instant.now(), true).stream().map(Waiting.Item::summary).toList());
+            out.put("nextCursor", null);
+            return out;
+        }
         if ("SNOOZED".equalsIgnoreCase(folder)) {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("items", messages.snoozed(userId, accountId, 200).stream().map(MessageRepo.Row::summary).toList());
@@ -196,12 +205,15 @@ public class MessageController {
         else message = needsMe + " people are waiting on you";
         if (waiting > 0) message += waiting == 1 ? ", 1 for over 2 days" : ", " + waiting + " for over 2 days";
 
+        long waitingOnOthers = this.waiting.list(userId, accountId, now, false).size();
+
         Map<String, Object> happiness = new LinkedHashMap<>();
         happiness.put("score", score);
         happiness.put("label", label);
         happiness.put("needsMeUnread", needsMe);
         happiness.put("waitingOver48h", waiting);
         happiness.put("message", message);
+        happiness.put("waitingOnOthers", waitingOnOthers);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("lanes", laneOut);
@@ -221,6 +233,14 @@ public class MessageController {
         Map<String, Object> out = r.summary();
         out.put("followUpAt", followUps.due(r.id()).map(Instant::toString).orElse(null));
         out.put("note", notes.find(r.accountId(), r.threadKey()).map(NoteRepo.Note::json).orElse(null));
+        out.put("invite", messages.calendar(r.id()).isPresent() || hasIcs(r));
+        if ("SENT".equals(r.folder())) {
+            waiting.list(userId, r.accountId(), Instant.now(), false).stream().filter(w -> w.row().id() == r.id()).findFirst()
+                    .ifPresent(w -> {
+                        out.put("waitingDays", w.days());
+                        out.put("waitingFor", w.why());
+                    });
+        }
         out.put("bodyHtml", r.bodyHtml());
         out.put("bodyText", r.bodyText());
         out.put("attachments", withBox(r, inBox));
@@ -232,6 +252,16 @@ public class MessageController {
             return m;
         }).toList());
         return out;
+    }
+
+    /** A calendar invite sent as a file (invite.ics). */
+    static boolean hasIcs(MessageRepo.Row r) {
+        if (r.attachments() == null) return false;
+        return r.attachments().stream().anyMatch(a -> {
+            String type = String.valueOf(a.getOrDefault("contentType", "")).toLowerCase(java.util.Locale.ROOT);
+            String name = String.valueOf(a.getOrDefault("name", "")).toLowerCase(java.util.Locale.ROOT);
+            return type.equals("text/calendar") || type.equals("application/ics") || name.endsWith(".ics");
+        });
     }
 
     /** The message's attachments, each marked inBox when it was saved to Magizhchi Box. */

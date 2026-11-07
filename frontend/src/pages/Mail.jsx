@@ -5,9 +5,10 @@ import { useMail } from '../state.jsx'
 import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
 import MessageList from '../components/MessageList.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
+import AskCard from '../components/AskCard.jsx'
 import { folderLabel } from '../components/MoveMenu.jsx'
 import { whenLabel } from '../when.js'
-import { IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconTrash, IconX } from '../components/Icons.jsx'
+import { IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconSparkle, IconTrash, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
 
@@ -23,6 +24,7 @@ const EMPTY = {
   folder: { emoji: '📁', title: 'Nothing in this folder', text: 'Mail you move here, or that your other mail apps file here, shows up after the next sync.' },
   drafts: { emoji: '📝', title: 'No drafts', text: 'Close the composer before sending and what you wrote waits here.' },
   snoozed: { emoji: '⏰', title: 'Nothing snoozed', text: 'Snooze a mail and it waits here, then comes back on top when you said, with a ping on your phone.' },
+  waiting: { emoji: '🤝', title: 'Nobody owes you a reply', text: 'Mail you sent that asked for something shows up here when there is no answer after two days.' },
 }
 
 const SINCE = [
@@ -39,6 +41,9 @@ const TZ = (() => {
     return ''
   }
 })()
+
+/** Reads like a question rather than a few words to find. */
+const QUESTION = /\?\s*$|^(who|what|when|where|which|why|how|did|do|does|is|was|were|has|have|find|show|list|any)\b/i
 
 function sinceIso(key) {
   const s = SINCE.find((x) => x.key === key)
@@ -115,7 +120,9 @@ export default function Mail() {
   const folderCode = params.get('view') === 'folder' && params.get('f')?.startsWith('F:') ? params.get('f') : null
   const view = folderCode ? 'folder' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
   const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode } : VIEWS[view]
-  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts } = useMail()
+  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled } = useMail()
+  const [asked, setAsked] = useState(null) // { q, loading } | { q, error } | { q, result }
+  const askSeq = useRef(0)
 
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
@@ -139,6 +146,26 @@ export default function Mail() {
     const t = setTimeout(() => setQ(qInput.trim()), 350)
     return () => clearTimeout(t)
   }, [qInput])
+
+  // A new search, view or account leaves the AI answer behind.
+  useEffect(() => {
+    if (asked && asked.q !== qInput.trim()) setAsked(null)
+  }, [qInput]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setAsked(null) }, [view, accountId, folderCode])
+
+  async function askAi(question = qInput.trim()) {
+    if (!question || question.length < 3) return
+    const seq = ++askSeq.current
+    setAsked({ q: question, loading: true })
+    try {
+      const res = await get(`/api/ai/ask${qs({ q: question, accountId: accountId ?? '', tz: TZ })}`)
+      if (seq !== askSeq.current) return
+      setAsked({ q: question, result: res })
+      if (res.sources?.[0] && window.matchMedia('(min-width: 768px)').matches) setSelectedId(res.sources[0])
+    } catch (e) {
+      if (seq === askSeq.current) setAsked({ q: question, error: e.message })
+    }
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setFilter('from', fromInput.trim()), 350)
@@ -373,6 +400,7 @@ export default function Mail() {
             <IconSearch size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className="input !py-1.5 !pl-8 !pr-8" type="search" placeholder={cfg.drafts ? 'Search works in your mail folders' : 'Search people, subjects, words…'}
               value={qInput} onChange={(e) => setQInput(e.target.value)} aria-label="Search mail" disabled={!!cfg.drafts}
+              onKeyDown={(e) => { if (e.key === 'Enter' && aiEnabled && QUESTION.test(qInput.trim())) askAi() }}
               title="Also: from:priya  has:attachment  is:unread  is:flagged  after:2026-11-01  newer_than:7d" />
             {qInput && (
               <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand-ink" onClick={() => setQInput('')} aria-label="Clear search">
@@ -380,6 +408,13 @@ export default function Mail() {
               </button>
             )}
           </div>
+          {!cfg.drafts && aiEnabled && qInput.trim().length >= 3 && !asked && (
+            <button type="button" className="mt-1.5 flex w-full items-center gap-1.5 truncate rounded-lg border border-dashed border-peacock-300 bg-peacock-50/50 px-2 py-1 text-left text-xs font-semibold text-peacock-800 hover:bg-peacock-50"
+              onClick={() => askAi()} title="AI turns your question into a search and answers it from your mail">
+              <IconSparkle size={13} className="shrink-0" /><span className="truncate">Ask AI: “{qInput.trim()}”</span>
+              {QUESTION.test(qInput.trim()) && <span className="ml-auto shrink-0 font-normal text-slate-500">Enter</span>}
+            </button>
+          )}
           {!cfg.drafts && (
             <div className="mt-2 flex flex-wrap items-center gap-1" role="group" aria-label="Filters">
               <Toggle on={filters.unread} onClick={() => setFilter('unread', !filters.unread)}>Unread</Toggle>
@@ -410,6 +445,10 @@ export default function Mail() {
           )}
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto max-md:pb-24">
+          {asked && (
+            <AskCard question={asked.q} state={asked} items={asked.result?.items} onOpen={setSelectedId}
+              onClose={() => setAsked(null)} onRetry={() => askAi(asked.q)} />
+          )}
           {cfg.drafts ? (
             shownDrafts.length ? (
               <DraftList drafts={shownDrafts} accounts={accounts}
@@ -417,12 +456,12 @@ export default function Mail() {
             ) : <EmptyState view="drafts" accountChosen={accountId != null} />
           ) : (
           <MessageList
-            items={items}
-            loading={loading}
-            error={error}
+            items={asked ? asked.result?.items || [] : items}
+            loading={asked ? !!asked.loading : loading}
+            error={asked ? null : error}
             selectedId={selectedId}
             sentView={view === 'sent'}
-            nextCursor={nextCursor}
+            nextCursor={asked ? null : nextCursor}
             loadingMore={loadingMore}
             onLoadMore={loadMore}
             onRetry={() => load()}
@@ -432,7 +471,7 @@ export default function Mail() {
             onMoveLane={onMoveLane}
             onMove={onMove}
             onSnooze={onSnooze}
-            empty={<EmptyState view={view} q={q} filtered={filtered} accountChosen={accountId != null} />}
+            empty={asked ? (asked.error ? <span /> : <EmptyState q={asked.q} />) : <EmptyState view={view} q={q} filtered={filtered} accountChosen={accountId != null} />}
           />
           )}
         </div>

@@ -10,7 +10,7 @@ const TONES = {
 }
 
 /** Happiness gauge: a lit half-ring 0–100 with the server's label and message. */
-export default function HappinessGauge({ happiness }) {
+export default function HappinessGauge({ happiness, onOpen }) {
   const id = useId().replace(/:/g, '')
   const score = happiness?.score
   const tone = TONES[happinessTone(score)]
@@ -54,6 +54,16 @@ export default function HappinessGauge({ happiness }) {
         </div>
       </div>
       {happiness?.message && <p className="mt-1.5 text-xs leading-snug text-slate-600">{happiness.message}</p>}
+      {happiness?.waitingOnOthers > 0 && (
+        <p className="mt-0.5 text-xs leading-snug text-slate-600">
+          You're waiting on {happiness.waitingOnOthers === 1 ? '1 reply' : `${happiness.waitingOnOthers} replies`}
+        </p>
+      )}
+      {onOpen && (
+        <button type="button" className="mt-1.5 text-xs font-semibold text-peacock-700 hover:underline" onClick={onOpen}>
+          Today's briefing →
+        </button>
+      )}
     </div>
   )
 }

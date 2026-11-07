@@ -25,7 +25,8 @@ public final class MessageParser {
     private static final int MAX_TEXT = 100_000;
     private static final int MAX_HTML = 300_000;
 
-    public record Parsed(String text, String html, List<Map<String, Object>> attachments) {}
+    /** {@code calendar}: a calendar invite sent inside the mail (text/calendar), not as a file. */
+    public record Parsed(String text, String html, List<Map<String, Object>> attachments, String calendar) {}
 
     private MessageParser() {}
 
@@ -34,7 +35,7 @@ public final class MessageParser {
         walk(message, acc, null);
         String text = acc.text;
         if (text == null && acc.html != null) text = htmlToText(acc.html);
-        return new Parsed(cap(text, MAX_TEXT), cap(acc.html, MAX_HTML), acc.attachments);
+        return new Parsed(cap(text, MAX_TEXT), cap(acc.html, MAX_HTML), acc.attachments, cap(acc.calendar, 200_000));
     }
 
     /** Returns the n-th attachment part, walking in the same order as {@link #parse}. */
@@ -49,6 +50,7 @@ public final class MessageParser {
         String text;
         String html;
         List<Map<String, Object>> attachments = new ArrayList<>();
+        String calendar;
         int wanted = -1;
         Part found;
     }
@@ -77,6 +79,10 @@ public final class MessageParser {
             a.put("contentType", baseType(p.getContentType()));
             acc.attachments.add(a);
             if (acc.wanted == idx) acc.found = p;
+            return;
+        }
+        if (p.isMimeType("text/calendar")) {
+            if (acc.calendar == null) acc.calendar = asString(p);
             return;
         }
         if (p.isMimeType("text/plain") && acc.text == null) {

@@ -77,6 +77,20 @@ public class PushService {
         jdbc.update("UPDATE users SET notify = ? WHERE id = ?", mode, userId);
     }
 
+    /** The hour the morning briefing alert comes, or null when it's off. */
+    public Integer briefingHour(long userId) {
+        List<Integer> h = jdbc.query("SELECT briefing_hour FROM users WHERE id = ?", (rs, i) -> (Integer) rs.getObject(1, Integer.class), userId);
+        return h.isEmpty() ? null : h.get(0);
+    }
+
+    public void setBriefingHour(long userId, Integer hour) {
+        jdbc.update("UPDATE users SET briefing_hour = ? WHERE id = ?", hour, userId);
+    }
+
+    public void setZone(long userId, String zone) {
+        jdbc.update("UPDATE users SET tz = ? WHERE id = ?", zone, userId);
+    }
+
     public int devices(long userId) {
         Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?", Integer.class, userId);
         return n == null ? 0 : n;
