@@ -53,6 +53,22 @@ public class SuiteTokens {
         }
     }
 
+    /**
+     * The room in a "meeting ended" notice from Magizhchi Meet (issuer "magizhchi-meet", audience
+     * "magizhchi-maillook", signed with the same suite secret), or empty if it isn't genuine.
+     */
+    public Optional<String> verifyMeetNotice(String token) {
+        if (token == null || token.isBlank()) return Optional.empty();
+        try {
+            Claims c = Jwts.parser().verifyWith(key).requireIssuer("magizhchi-meet").requireAudience("magizhchi-maillook").build()
+                    .parseSignedClaims(token.trim()).getPayload();
+            String sub = c.getSubject();
+            return sub == null || !sub.matches("[0-9a-fA-F-]{36}") ? Optional.empty() : Optional.of(sub.toLowerCase(Locale.ROOT));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
     /** A five-minute Magizhchi ID token for this person, as Magizhchi ID itself would sign it. */
     public String mint(Identity who) {
         Date now = new Date();

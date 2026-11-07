@@ -30,7 +30,7 @@ function quote(m) {
 }
 
 /** Works out From/To/Cc/Subject/body for new, reply, reply all and forward. */
-function initialDraft({ mode, message: m, draftBody }, accounts, selectedAccountId) {
+function initialDraft({ mode, message: m, draftBody, to: toOverride }, accounts, selectedAccountId) {
   const own = new Set(accounts.map((a) => a.email.toLowerCase()))
   const fallbackFrom = selectedAccountId ?? accounts[0]?.id ?? ''
   if (!m || mode === 'new') return { accountId: fallbackFrom, to: [], cc: [], subject: '', text: '', replyToMessageId: null }
@@ -62,6 +62,11 @@ function initialDraft({ mode, message: m, draftBody }, accounts, selectedAccount
   to = uniq(to, fromMe ? new Set() : own)
   if (!to.length && m.fromEmail) to = [m.fromEmail]
   cc = uniq(cc, new Set([...own, ...to.map((x) => x.toLowerCase())]))
+  // A reply to chosen people (the meeting recap goes to who came; the catch-up to who missed it).
+  if (toOverride?.length) {
+    to = uniq(toOverride, own)
+    cc = []
+  }
   return {
     accountId, to, cc,
     subject: prefixed(m.subject, 'Re:', /^\s*re\s*:/i),

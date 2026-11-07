@@ -178,6 +178,22 @@ public class AiService {
         return out;
     }
 
+    /**
+     * The recap of one Magizhchi Meet meeting from its captions: a short summary, what was decided,
+     * and who does what by when. {@code people} lists who attended, so owners use real names.
+     */
+    public JsonNode meetingReport(long userId, String room, String people, String transcript) {
+        return llm(userId, """
+                You write the recap of an online meeting for the person who ran it ("You").
+                Use only what the transcript says; never invent decisions or tasks.
+                Reply as JSON: {"summary": two or three plain sentences,
+                "decisions": ["short decision", ...],
+                "actions": [{"owner": a name from the attendee list or "You", "task": "short task",
+                "due": "YYYY-MM-DD" or null}]}.
+                Empty lists when there are none. Write in the language the meeting was held in.
+                """, "Meeting: " + room + "\nAttended: " + people + "\n\nTranscript:\n" + cut(transcript, 20000), 0.2, 1500);
+    }
+
     private static String threadText(MessageRepo.Row msg, List<MessageRepo.Row> thread) {
         List<MessageRepo.Row> t = thread.isEmpty() ? List.of(msg) : thread;
         if (t.size() > 8) t = t.subList(t.size() - 8, t.size());

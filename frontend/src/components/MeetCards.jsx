@@ -26,24 +26,35 @@ function soonText(m, live) {
  * Join card: the Magizhchi Meet rooms this thread links to (rooms started from it, or a Meet link
  * in the mail). Turns into a "starting soon" bar from ten minutes before the room opens.
  */
-export function JoinCard({ messageId, refreshKey }) {
+export function JoinCard({ message, refreshKey }) {
   const meet = useMeet()
   const [rooms, setRooms] = useState([])
+  const [meetings, setMeetings] = useState([])
   const now = useTick(30000)
+  const messageId = message.id
 
   useEffect(() => {
     if (!meet?.configured) return undefined
     let cancelled = false
     get(`/api/messages/${messageId}/meet`)
-      .then((r) => !cancelled && setRooms(r?.rooms || []))
-      .catch(() => !cancelled && setRooms([]))
+      .then((r) => {
+        if (cancelled) return
+        setRooms(r?.rooms || [])
+        setMeetings(r?.meetings || [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setRooms([])
+        setMeetings([])
+      })
     return () => { cancelled = true }
   }, [messageId, refreshKey, meet?.configured])
 
-  if (!meet?.configured || rooms.length === 0) return null
+  if (!meet?.configured || (rooms.length === 0 && meetings.length === 0)) return null
 
   return (
     <div className="space-y-2">
+      {meetings.map((m, i) => <MeetingHeld key={m.id} meeting={m} message={message} defaultOpen={i === 0} />)}
       {rooms.map((r) => {
         const link = safeHttpUrl(r.link)
         const m = r.known ? minutesToStart(r, now) : null
@@ -72,6 +83,90 @@ export function JoinCard({ messageId, refreshKey }) {
         )
       })}
     </div>
+  )
+}
+
+const firstNames = (people) => people.map((p) => (p.name || p.email || '').split(/\s+/)[0]).filter(Boolean)
+
+function listNames(names) {
+  if (names.length <= 2) return names.join(' and ')
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`
+}
+
+/**
+ * A meeting held in this thread's room: when, how long, who came, the AI recap, and the two mails
+ * that follow a meeting — the recap to who came and a catch-up to who missed it — one tap each.
+ */
+function MeetingHeld({ meeting: m, message, defaultOpen }) {
+  const { openComposer } = useMail()
+  const [open, setOpen] = useState(defaultOpen)
+  const day = new Date(m.startedAt).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+  const time = new Date(m.startedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const missed = m.missed || []
+  const hasNotes = m.summary || m.decisions?.length || m.actions?.length
+
+  return (
+    <section aria-label={`Meeting held: ${m.name || 'Magizhchi Meet'}`} className="rounded-2xl border border-peacock-300/60 bg-white/80 p-3.5">
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-peacock-50 text-peacock-700"><IconVideo size={20} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-brand-ink">Meeting held · {day}, {time} · {m.minutes} min</p>
+          <p className="text-xs text-slate-500">
+            {m.attended?.length || 0} came{missed.length ? ` · ${listNames(firstNames(missed))} missed it` : ''}
+            {m.tasksAdded ? ` · ${m.tasksAdded} task${m.tasksAdded === 1 ? '' : 's'} on your PA board` : ''}
+          </p>
+        </div>
+        {hasNotes && (
+          <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+            {open ? 'Hide notes' : 'Notes'}
+          </button>
+        )}
+      </div>
+
+      {open && hasNotes && (
+        <div className="mt-3 space-y-2.5 border-t border-slate-100 pt-3 text-sm">
+          {m.summary && <p className="text-slate-700">{m.summary}</p>}
+          {m.decisions?.length > 0 && (
+            <div>
+              <p className="label !mb-1">Decided</p>
+              <ul className="list-disc space-y-0.5 pl-5 text-slate-700">{m.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul>
+            </div>
+          )}
+          {m.actions?.length > 0 && (
+            <div>
+              <p className="label !mb-1">Next steps</p>
+              <ul className="space-y-0.5 text-slate-700">
+                {m.actions.map((a, i) => (
+                  <li key={i}><span className="font-semibold text-brand-ink">{a.owner}</span>: {a.task}
+                    {a.due && <span className="text-slate-500"> · by {new Date(`${a.due}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+      {!hasNotes && (
+        <p className="mt-2 text-xs text-slate-500">
+          {m.hasTranscript ? 'The AI notes were not ready. The recap lists who came.' : 'Captions were off, so there are no notes. Turn on captions in Meet to get a summary next time.'}
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {m.attendeeEmails?.length > 0 && (
+          <button className="btn-primary !py-1.5 text-sm"
+            onClick={() => openComposer({ mode: 'reply', message, to: m.attendeeEmails, draftBody: m.recapBody })}>
+            Send recap
+          </button>
+        )}
+        {m.missedEmails?.length > 0 && (
+          <button className="btn-secondary !py-1.5 text-sm"
+            onClick={() => openComposer({ mode: 'reply', message, to: m.missedEmails, draftBody: m.catchUpBody })}>
+            Catch up {m.missedEmails.length === 1 ? firstNames(missed)[0] || '1 person' : `${m.missedEmails.length} who missed it`}
+          </button>
+        )}
+      </div>
+    </section>
   )
 }
 

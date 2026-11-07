@@ -49,6 +49,6 @@ public class WebConfig implements WebMvcConfigurer {
                 req.setAttribute("userId", userId);
                 return true;
             }
-        }).addPathPatterns("/api/**").excludePathPatterns("/api/auth/sso", "/api/health");
+        }).addPathPatterns("/api/**").excludePathPatterns("/api/auth/sso", "/api/health", "/api/hooks/meet");
     }
 }

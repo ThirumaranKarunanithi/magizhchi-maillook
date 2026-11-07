@@ -14,7 +14,7 @@ import {
   IconArchive, IconBack, IconFlag, IconForward, IconReply, IconReplyAll, IconTrash, IconUnsub,
 } from './Icons.jsx'
 
-const SOURCE_LABEL = { ai: 'sorted by AI', user: 'you moved it', rule: 'your sender rule', heuristic: 'sorted automatically' }
+const SOURCE_LABEL = { meet: 'after your meeting', ai: 'sorted by AI', user: 'you moved it', rule: 'your sender rule', heuristic: 'sorted automatically' }
 
 function Body({ detail }) {
   if (detail.bodyHtml) return <MailFrame html={detail.bodyHtml} title={`Message: ${detail.subject || ''}`} />
@@ -221,7 +221,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
           </div>
         </header>
 
-        <JoinCard messageId={detail.id} refreshKey={meetKey} />
+        <JoinCard message={detail} refreshKey={meetKey} />
 
         <ClassroomCard key={`cls-${detail.id}`} message={detail} onDone={() => setMeetKey((k) => k + 1)} />
 

@@ -7,6 +7,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
@@ -64,8 +66,13 @@ public class MeetController {
     private final MessageRepo messages;
     private final AiService ai;
     private final JdbcTemplate jdbc;
+    private final MeetRecaps recaps;
+    private final SuiteTokens tokens;
 
-    public MeetController(MeetClient meet, MailActions actions, MessageRepo messages, AiService ai, JdbcTemplate jdbc) {
+    public MeetController(MeetClient meet, MailActions actions, MessageRepo messages, AiService ai, JdbcTemplate jdbc,
+                          MeetRecaps recaps, SuiteTokens tokens) {
+        this.recaps = recaps;
+        this.tokens = tokens;
         this.meet = meet;
         this.actions = actions;
         this.messages = messages;
@@ -120,6 +127,7 @@ public class MeetController {
         out.put("configured", meet.configured());
         List<Map<String, Object>> found = new ArrayList<>();
         out.put("rooms", found);
+        out.put("meetings", recaps.forThread(msg.accountId(), msg.threadKey(), msg.accountEmail()));
         if (!meet.configured()) return out;
 
         Set<String> ids = new LinkedHashSet<>();
@@ -149,6 +157,23 @@ public class MeetController {
             found.add(r);
         }
         return out;
+    }
+
+    // ── after the meeting ─────────────────────────────────────────
+
+    /**
+     * Meet's "a meeting just ended" notice (no MailLook session: it carries a suite-signed token for
+     * the room instead). The recap work happens in the background; rooms MailLook never linked are ignored.
+     */
+    @PostMapping("/hooks/meet")
+    public ResponseEntity<Map<String, Object>> meetingEnded(@RequestHeader(value = "Authorization", required = false) String auth) {
+        String token = auth == null ? null : auth.replaceFirst("(?i)^Bearer\\s+", "");
+        return tokens.verifyMeetNotice(token)
+                .map(card -> {
+                    recaps.roomEnded(card);
+                    return ResponseEntity.accepted().body(Map.<String, Object>of("ok", true));
+                })
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Not a Magizhchi Meet notice.")));
     }
 
     // ── Meet now ──────────────────────────────────────────────────
