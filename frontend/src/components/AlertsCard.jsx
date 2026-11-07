@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { get, post, put } from '../api.js'
 import { useMail } from '../state.jsx'
 import { currentSubscription, disablePush, enablePush, needsHomeScreen, pushSupported } from '../push.js'
-import { desktop, setDesktopAlertMode } from '../desktop.js'
+import { desktop, desktopFeed, setDesktopAlertMode } from '../desktop.js'
 import { IconBell } from './Icons.jsx'
 
 const TZ = (() => {
@@ -101,7 +101,8 @@ export default function AlertsCard({ compact = false }) {
           <h2 className="text-sm font-bold">Alerts on your phone and computer</h2>
           <p className="mt-0.5 text-xs text-slate-500">
             {desktop ? (s.mode === 'off' ? 'Alerts are off. Choose which mail rings on this computer and your phone.'
-              : 'This app alerts you while it runs in the tray, and shows the Needs me count on the taskbar.')
+              : desktopFeed ? 'This app rings for new mail and for your reminders (snoozes, no reply, the morning briefing) while it runs in the tray. Sounds are in the MailLook for Windows card.'
+                : 'This app alerts you while it runs in the tray, and shows the Needs me count on the taskbar.')
               : !s.configured ? 'Alerts aren’t set up on this server yet.'
               : !supported ? 'This browser can’t show alerts. Chrome, Edge, Firefox and Safari can.'
                 : needsHomeScreen() ? 'On iPhone and iPad: tap Share, then “Add to Home Screen”, open MailLook from there, and turn alerts on.'

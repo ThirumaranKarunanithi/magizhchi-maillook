@@ -283,6 +283,19 @@ class ProductivityTest {
         call(post("/api/push/test"), token, 400);
         call(post("/api/push/unsubscribe").contentType(MediaType.APPLICATION_JSON).content("{\"endpoint\":\"https://push.example/abc\"}"), token, 200);
         assertThat(call(get("/api/push"), token, 200).path("devices").asInt()).isZero();
+
+        // ── The desktop app's alert feed: recorded even without Web Push keys ──
+        JsonNode start = call(get("/api/alerts").param("tz", "Asia/Kolkata"), token, 200);
+        assertThat(start.path("items").size()).isZero();           // a first start only learns where the feed is
+        long last = start.path("last").asLong();
+        assertThat(last).isPositive();
+        JsonNode all = call(get("/api/alerts").param("after", "0"), token, 200);
+        List<String> kinds = new ArrayList<>();
+        all.path("items").forEach(a -> kinds.add(a.path("kind").asText()));
+        assertThat(kinds).contains("reminder");                    // the two mails back from snooze
+        assertThat(all.path("items").get(0).path("title").asText()).isNotBlank();
+        assertThat(all.path("last").asLong()).isEqualTo(last);
+        assertThat(call(get("/api/alerts").param("after", String.valueOf(last)), token, 200).path("items").size()).isZero();
     }
 
     // ── a stand-in Magizhchi Box and Magizhchi PA ─────────────────

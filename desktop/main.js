@@ -6,11 +6,12 @@
 //   • it can be the computer's mail app: mailto: links open a new mail here
 //   • links in mail open in the default browser; sign-in pages stay in the window
 //   • right-click with spelling suggestions, remembered window size, and updates by itself
-const { app, BrowserWindow, Menu, Tray, Notification, dialog, shell, nativeImage, ipcMain, session } = require('electron')
+const { app, BrowserWindow, Menu, Tray, Notification, dialog, shell, nativeImage, ipcMain, session, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { classify, host } = require('./links.js')
 const { parseMailto, mailtoFromArgv } = require('./mailto.js')
+const { MAIL_SOUNDS, cleanAlertSettings, soundFor, plan } = require('./alerts.js')
 
 let autoUpdater = null
 try { autoUpdater = require('electron-updater').autoUpdater } catch { /* running from source */ }
@@ -24,7 +25,8 @@ const ICON = path.join(__dirname, 'icon.png')
 
 // Settings, sign-in and cache live in %APPDATA%\Magizhchi MailLook (not the package's npm name).
 app.setName('Magizhchi MailLook')
-app.setPath('userData', path.join(app.getPath('appData'), 'Magizhchi MailLook'))
+// MAILLOOK_PROFILE=<folder> keeps a test run apart from the real one.
+app.setPath('userData', process.env.MAILLOOK_PROFILE || path.join(app.getPath('appData'), 'Magizhchi MailLook'))
 
 let win = null
 let tray = null
@@ -110,10 +112,13 @@ function createWindow() {
       contextIsolation: true,
       sandbox: false,
       spellcheck: true,
+      // MailLook's alert sounds play in the page, often while the window is hidden.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   })
   if (settings.maximized) win.maximize()
   win.once('ready-to-show', () => { if (!START_HIDDEN) win.show() })
+  win.on('focus', () => win.flashFrame(false))
   win.on('resize', rememberBounds)
   win.on('move', rememberBounds)
 
@@ -125,7 +130,7 @@ function createWindow() {
     if (!settings.toldAboutTray) {
       settings.toldAboutTray = true
       saveSettings()
-      toast('MailLook is still running', 'It stays in the tray so you get alerts. Right-click the tray icon to quit.')
+      toast('MailLook is still running', 'It stays in the tray so you get alerts. Right-click the tray icon to quit.', null, { sound: false })
     }
   })
 
@@ -234,13 +239,109 @@ function contextMenu(wc, p) {
 
 // ── tray, menu, badge, alerts ────────────────────────────────────────────────
 
-function toast(title, body, path) {
+// Alerts on screen. Windows forgets the click handler of a notification that gets garbage-collected, so
+// each one is held here until it is clicked, closed or replaced.
+const showing = new Set()
+
+/**
+ * One alert. MailLook plays its own sound (so the Windows one is off); a sticky one (a reminder, a send
+ * that failed) stays until dismissed and flashes the taskbar button.
+ */
+function toast(title, body, path, { kind = 'mail', sticky = false, sound = true } = {}) {
   try {
     if (!Notification.isSupported()) return
-    const n = new Notification({ title, body, icon: ICON, silent: false })
-    n.on('click', () => (path ? openInApp(path) : showWin()))
+    const s = alertSettings()
+    const tune = sound ? soundFor(kind, s) : null
+    const n = new Notification({ title, body, icon: ICON, silent: true, timeoutType: sticky ? 'never' : 'default' })
+    showing.add(n)
+    const done = () => showing.delete(n)
+    n.on('click', () => { done(); if (win) win.flashFrame(false); path ? openInApp(path) : showWin() })
+    n.on('close', done)
+    n.on('failed', done)
     n.show()
+    if (process.env.MAILLOOK_DEBUG) console.log('[alert]', JSON.stringify({ kind, sticky, title, sound: tune }))
+    if (tune) send('maillook:sound', { name: tune, volume: s.volume })
+    if (sticky && win && !win.isFocused()) win.flashFrame(true)
+    // Let go of ordinary ones after a while; Windows keeps them in the Notification Centre anyway.
+    if (!sticky) setTimeout(done, 10 * 60 * 1000)
   } catch { /* alerts unavailable */ }
+}
+
+// ── alert sounds and settings ────────────────────────────────────────────────
+
+const alertSettings = () => cleanAlertSettings(settings.alerts)
+
+function alertView() {
+  return { ...alertSettings(), sounds: MAIL_SOUNDS, polling: !!feed.session, lastPollAt: feed.lastPollAt, error: feed.error }
+}
+
+function setAlertSettings(patch) {
+  settings.alerts = cleanAlertSettings({ ...alertSettings(), ...(patch || {}) })
+  saveSettings()
+  return alertView()
+}
+
+// ── the alert feed: everything the server rings for, read every half minute ──
+//
+// The web page tells us who is signed in (token and API address); we ask GET /api/alerts?after=<last id>.
+// The first ask after install only learns where the feed is, so nothing old rings. After a restart, what
+// came in meanwhile rings once, as "While you were away" when there's a pile.
+
+const FEED_EVERY_MS = 30 * 1000
+const feed = { session: null, timer: null, busy: false, firstPoll: true, lastPollAt: null, error: null }
+
+function setFeedSession(s) {
+  const same = feed.session && s && feed.session.token === s.token && feed.session.api === s.api
+  feed.session = s && s.token && /^https?:\/\//i.test(s.api) ? { token: s.token, api: s.api.replace(/\/+$/, '') } : null
+  if (!feed.session) { clearInterval(feed.timer); feed.timer = null; return }
+  if (same && feed.timer) return
+  clearInterval(feed.timer)
+  feed.timer = setInterval(pollAlerts, FEED_EVERY_MS)
+  pollAlerts()
+}
+
+async function pollAlerts() {
+  const s = feed.session
+  if (!s || feed.busy) return
+  feed.busy = true
+  try {
+    const cursor = settings.alertCursor && settings.alertCursor.api === s.api ? settings.alertCursor.last : null
+    const q = new URLSearchParams()
+    if (cursor != null) q.set('after', String(cursor))
+    try { q.set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone || '') } catch { /* no zone */ }
+    const res = await net.fetch(`${s.api}/api/alerts?${q}`, { headers: { Authorization: `Bearer ${s.token}` }, cache: 'no-store' })
+    if (res.status === 401) { feed.error = 'Signed out'; setFeedSession(null); return }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    feed.lastPollAt = Date.now()
+    feed.error = null
+    if (feed.session !== s) return // signed out or switched while we waited
+    const items = Array.isArray(data.items) ? data.items : []
+    settings.alertCursor = { api: s.api, last: Number(data.last) || cursor || 0 }
+    saveSettings()
+    if (cursor != null) {
+      const focused = !!(win && win.isVisible() && win.isFocused())
+      const shown = plan(items, { first: feed.firstPoll, focused })
+      // One sound per poll, the most urgent one, so five alerts don't make five chimes.
+      const loudest = shown.find((a) => a.sticky) || shown[shown.length - 1]
+      for (const a of shown) toast(a.title, a.body, a.url, { kind: a.kind, sticky: a.sticky, sound: a === loudest })
+    }
+    feed.firstPoll = false
+    if (data.more) setTimeout(pollAlerts, 1000)
+  } catch (e) {
+    feed.error = String((e && e.message) || e).slice(0, 120)
+  } finally {
+    feed.busy = false
+  }
+}
+
+function testAlert(kind) {
+  if (kind === 'reminder') {
+    toast('Reminder · a test', 'Reminders look like this: they stay until you close them, and the taskbar button flashes.', '/?view=needs_me', { kind: 'reminder', sticky: true })
+  } else {
+    toast('Needs you · MailLook', 'Alerts are working. New mail looks and sounds like this.', '/?view=needs_me', { kind: 'mail' })
+  }
+  return alertView()
 }
 
 function createTray() {
@@ -515,7 +616,9 @@ function updateToast(title, body, onClick) {
   try {
     if (!Notification.isSupported()) return
     const n = new Notification({ title, body, icon: ICON })
-    n.on('click', onClick)
+    showing.add(n)
+    n.on('click', () => { showing.delete(n); onClick() })
+    n.on('close', () => showing.delete(n))
     n.show()
   } catch { /* alerts unavailable */ }
 }
@@ -533,9 +636,19 @@ ipcMain.on('maillook:badge', (e, n) => {
   // The number is drawn here once per change; the overlay must be an image on Windows.
   setBadge(n, badgeImage(n))
 })
+// From a web app older than the alert feed (it diffs the counts). A current web app uses setSession instead.
 ipcMain.on('maillook:notify', (_e, { title, body, path: p }) => {
+  if (feed.session) return // the feed rings for it, with the sender
   if (win && win.isVisible() && win.isFocused()) return // they're looking at it already
   toast(title || 'Magizhchi MailLook', body || '', p || '/')
+})
+ipcMain.on('maillook:session', (_e, s) => setFeedSession(s))
+ipcMain.handle('maillook:alerts:get', () => alertView())
+ipcMain.handle('maillook:alerts:set', (_e, patch) => setAlertSettings(patch))
+ipcMain.handle('maillook:alerts:test', (_e, kind) => testAlert(kind))
+ipcMain.handle('maillook:alerts:play', (_e, name) => {
+  send('maillook:sound', { name: MAIL_SOUNDS.includes(name) || name === 'reminder' ? name : 'chime', volume: alertSettings().volume })
+  return alertView()
 })
 
 /** A small red disc with the count, for the taskbar overlay. Drawn as a 32×32 bitmap. */

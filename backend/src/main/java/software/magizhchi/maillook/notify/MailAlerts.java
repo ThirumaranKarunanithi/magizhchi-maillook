@@ -20,7 +20,8 @@ public class MailAlerts {
     }
 
     public void arrived(long userId, List<Long> ids) {
-        if (ids == null || ids.isEmpty() || !push.configured()) return;
+        // Recorded for the desktop app's feed even when this server has no Web Push keys.
+        if (ids == null || ids.isEmpty()) return;
         String mode = push.mode(userId);
         if (PushService.OFF.equals(mode)) return;
         List<MessageRepo.Row> rows = messages.byIds(new HashSet<>(ids)).stream()

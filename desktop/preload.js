@@ -11,6 +11,12 @@ function deliver(kind, payload) {
   else waiting[kind].push(payload)
 }
 
+// MailLook's own sounds play here, in the page; the main process says which one and how loud.
+const { playSound } = require('./sounds.js')
+ipcRenderer.on('maillook:sound', (_e, { name, volume } = {}) => {
+  try { playSound(name, volume) } catch { /* no audio device */ }
+})
+
 ipcRenderer.on('maillook:compose', (_e, fields) => deliver('compose', JSON.stringify(fields || {})))
 ipcRenderer.on('maillook:open', (_e, path) => deliver('open', String(path || '/')))
 
@@ -35,6 +41,19 @@ contextBridge.exposeInMainWorld('maillookDesktop', {
   onCompose: (fn) => listen('compose', fn),
   /** fn(path): a page to show, from a clicked alert or the tray. */
   onOpen: (fn) => listen('open', fn),
+  /**
+   * Who is signed in, so the app itself can fetch the alert feed every half minute (even while the window
+   * is hidden). { token, api } or null on sign-out. The token stays in memory only.
+   */
+  setSession: (s) => ipcRenderer.send('maillook:session', s && s.token ? { token: String(s.token), api: String(s.api || '') } : null),
+  /** Sound and alert settings: { sound, volume, mailSound, sounds }. */
+  alerts: {
+    get: () => ipcRenderer.invoke('maillook:alerts:get'),
+    set: (patch) => ipcRenderer.invoke('maillook:alerts:set', patch || {}),
+    /** kind: 'mail' (a sample new-mail alert) or 'reminder' (one that stays, with the reminder sound). */
+    test: (kind) => ipcRenderer.invoke('maillook:alerts:test', kind === 'reminder' ? 'reminder' : 'mail'),
+    play: (name) => ipcRenderer.invoke('maillook:alerts:play', String(name || 'chime')),
+  },
   /**
    * Updates of the desktop app. Each call resolves to
    * { state: idle|checking|available|downloading|ready, current, version, percent, auto, error, checkedAt, packaged }.

@@ -5,9 +5,16 @@ browser tab can't do:
 
 - **Stays in the tray.** Closing the window hides it, and it starts with Windows (hidden), so alerts keep
   coming all day. Quit from the tray icon or File → Quit (Ctrl+Q).
-- **Alerts and a taskbar count.** The web app tells the desktop app its counts; the taskbar icon carries the
-  unread "Needs me" number, and new mail rings according to the person's alert setting (Needs me / All new
-  mail / Off), the same setting phones use. Clicking an alert opens Needs me.
+- **Alerts, reminders and a taskbar count.** Every half minute the app reads the server's alert feed
+  (`GET /api/alerts`), the same alerts phones get by Web Push: new mail with the sender and subject (by the
+  person's setting: Needs me / All new mail / Off), mail back from snooze, "nobody replied", the morning
+  briefing, and a mail that didn't send. Clicking one opens that mail. Reminders and failed sends stay on
+  screen until closed and flash the taskbar button. After the computer was off, what came in meanwhile
+  arrives as one "While you were away". The taskbar icon carries the unread "Needs me" number.
+- **MailLook's own sounds.** A chime for new mail (Chime, Soft bell or Bright) and a double chime for
+  reminders, made with Web Audio in `sounds.js`. Sound on/off, volume, "Send a test alert" and "Test a
+  reminder" are in the **MailLook for Windows** card. MailLook's sound plays even when Windows' Do not
+  disturb is on; turn sounds off there if that matters.
 - **The computer's mail app.** The installer lists MailLook as a mail app in Windows (it doesn't take over
   the one in use). After picking it next to MAILTO in Settings → Default apps (Help → Make MailLook my mail
   app opens MailLook's page there), mail links in any app open a new mail here, with To, Cc, Subject and
@@ -28,7 +35,9 @@ changes to these files need a new installer.
 
 | File | What |
 |---|---|
-| `main.js` | Window, tray, menu, alerts, taskbar count, updates and their settings |
+| `main.js` | Window, tray, menu, the alert feed, taskbar count, updates and their settings |
+| `alerts.js` | Which alerts show, which stay, which sound, and "While you were away" (tested) |
+| `sounds.js` | The alert sounds, played in the page with Web Audio |
 | `build/installer.nsh` | Closes a running MailLook before install; lists MailLook as a Windows mail app |
 | `preload.js` | `window.maillookDesktop`: the only things the web app can ask for |
 | `links.js` | Which links stay in the window and which go to the browser |
@@ -48,7 +57,8 @@ npm start         # opens https://maillook.magizhchi.software
 ```
 
 Point it at a local MailLook with `set MAILLOOK_APP_URL=http://localhost:5177` and
-`set MAILLOOK_API_HOSTS=localhost:8097` before `npm start`.
+`set MAILLOOK_API_HOSTS=localhost:8097` before `npm start`. `MAILLOOK_PROFILE=<folder>` keeps a test run's
+settings apart from the real ones, and `MAILLOOK_DEBUG=1` logs each alert it shows.
 
 ## Make the installer
 

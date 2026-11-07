@@ -65,6 +65,70 @@ export default function DesktopCard() {
           </span>
         </label>
       )}
+      <AlertSounds />
     </section>
+  )
+}
+
+const SOUND_LABELS = { chime: 'Chime', soft: 'Soft bell', bright: 'Bright' }
+
+/** MailLook's own sounds: on or off, how loud, which one for new mail; and a test alert. */
+function AlertSounds() {
+  const alerts = desktop?.alerts
+  const [a, setA] = useState(null)
+  const [tested, setTested] = useState('')
+
+  useEffect(() => {
+    if (!alerts) return
+    alerts.get().then(setA).catch(() => {})
+  }, [alerts])
+
+  if (!alerts || !a) return null
+  const save = (patch) => {
+    setA((x) => ({ ...x, ...patch }))
+    alerts.set(patch).then(setA).catch(() => {})
+  }
+  const test = (kind) => {
+    alerts.test(kind).catch(() => {})
+    setTested(kind === 'reminder' ? 'A test reminder is on screen. It stays until you close it.' : 'A test alert is on screen. Didn’t see it? Check Windows Settings → System → Notifications → Magizhchi MailLook.')
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-3">
+      <h3 className="text-sm font-semibold">Alert sounds</h3>
+      <p className="mt-0.5 text-xs text-slate-500">
+        A chime for new mail and a double chime for reminders. Reminders and mails that didn’t send stay on screen until you close them.
+      </p>
+      <label className="mt-3 flex cursor-pointer items-center gap-2.5 text-sm">
+        <input type="checkbox" className="h-4 w-4 accent-peacock-600" checked={a.sound} onChange={(e) => save({ sound: e.target.checked })} />
+        <span className="font-semibold">Play sounds</span>
+      </label>
+      {a.sound && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="text-xs text-slate-600">
+            <label htmlFor="ml-mail-sound">New mail sound</label>
+            <div className="mt-1 flex gap-2">
+              <select id="ml-mail-sound" className="input !py-1 text-sm" value={a.mailSound} onChange={(e) => { save({ mailSound: e.target.value }); alerts.play(e.target.value) }}>
+                {(a.sounds || Object.keys(SOUND_LABELS)).map((s) => <option key={s} value={s}>{SOUND_LABELS[s] || s}</option>)}
+              </select>
+              <button type="button" className="btn-secondary !py-1 text-xs" onClick={() => alerts.play(a.mailSound)}>Play</button>
+              <button type="button" className="btn-secondary !py-1 text-xs whitespace-nowrap" onClick={() => alerts.play('reminder')}>Reminder sound</button>
+            </div>
+          </div>
+          <label className="text-xs text-slate-600">
+            Volume <span className="num">{Math.round(a.volume * 100)}%</span>
+            <input type="range" min="5" max="100" step="5" className="mt-2 block w-full accent-peacock-600" value={Math.round(a.volume * 100)}
+              onChange={(e) => setA((x) => ({ ...x, volume: Number(e.target.value) / 100 }))}
+              onPointerUp={(e) => { save({ volume: Number(e.currentTarget.value) / 100 }); alerts.play(a.mailSound) }}
+              onKeyUp={(e) => save({ volume: Number(e.currentTarget.value) / 100 })} />
+          </label>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className="btn-secondary !py-1 text-xs" onClick={() => test('mail')}>Send a test alert</button>
+        <button type="button" className="btn-secondary !py-1 text-xs" onClick={() => test('reminder')}>Test a reminder</button>
+      </div>
+      {tested && <p className="mt-2 text-xs text-slate-500" aria-live="polite">{tested}</p>}
+    </div>
   )
 }

@@ -121,8 +121,12 @@ public class PushService {
         send(userId, title, body, url, tag);
     }
 
-    /** Sends to every browser this person allowed, in the background. Dead subscriptions are dropped. */
+    /**
+     * Records the alert for the desktop app's feed, then sends it to every browser this person allowed, in
+     * the background. Dead subscriptions are dropped.
+     */
     public void send(long userId, String title, String body, String url, String tag) {
+        record(userId, title, body, url, tag);
         if (push == null) return;
         List<Subscription> subs = jdbc.query("SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
                 (rs, i) -> new Subscription(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)), userId);
@@ -145,6 +149,58 @@ public class PushService {
                 }
             }
         });
+    }
+
+    // ── the alert feed (the desktop app reads it) ────────────────────────────
+
+    public record Alert(long id, String kind, String title, String body, String url, String tag, java.time.OffsetDateTime createdAt) {}
+
+    /** mail | reminder (snooze, no reply, briefing) | problem (a send that failed) | test. */
+    static String kindOf(String tag) {
+        String t = tag == null ? "" : tag;
+        if (t.startsWith("maillook-snooze") || t.startsWith("maillook-noreply") || t.startsWith("maillook-briefing")) return "reminder";
+        if (t.startsWith("maillook-outbox")) return "problem";
+        if (t.equals("maillook-test")) return "test";
+        return "mail";
+    }
+
+    private void record(long userId, String title, String body, String url, String tag) {
+        try {
+            jdbc.update("INSERT INTO alerts (user_id, kind, title, body, url, tag) VALUES (?, ?, ?, ?, ?, ?)",
+                    userId, kindOf(tag), clip(title == null ? "Magizhchi MailLook" : title, 200),
+                    body == null ? null : clip(body, 400), url == null ? null : clip(url, 300), tag == null ? null : clip(tag, 120));
+        } catch (Exception e) {
+            log.debug("Alert not recorded: {}", e.toString());
+        }
+    }
+
+    /** Alerts after the given one, oldest first. */
+    public List<Alert> alertsAfter(long userId, long afterId, int limit) {
+        return jdbc.query("SELECT id, kind, title, body, url, tag, created_at FROM alerts WHERE user_id = ? AND id > ? ORDER BY id LIMIT ?",
+                (rs, i) -> new Alert(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                        rs.getObject(7, java.time.OffsetDateTime.class)), userId, afterId, limit);
+    }
+
+    public long lastAlertId(long userId) {
+        Long n = jdbc.queryForObject("SELECT MAX(id) FROM alerts WHERE user_id = ?", Long.class, userId);
+        return n == null ? 0 : n;
+    }
+
+    /** The desktop app is running for this person (it asks every half minute). */
+    public void desktopSeen(long userId, String tz) {
+        jdbc.update("UPDATE users SET desktop_seen_at = ? WHERE id = ?", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC), userId);
+        if (tz != null && !tz.isBlank()) {
+            try {
+                jdbc.update("UPDATE users SET tz = ? WHERE id = ? AND tz IS NULL", java.time.ZoneId.of(tz.trim()).getId(), userId);
+            } catch (java.time.DateTimeException ignored) {
+                // an odd zone name: the briefing just waits for one it knows
+            }
+        }
+    }
+
+    /** Alerts older than a week are gone; the feed is for catching up, not an archive. */
+    public int forgetOldAlerts(java.time.Instant now) {
+        return jdbc.update("DELETE FROM alerts WHERE created_at < ?", java.time.OffsetDateTime.ofInstant(now.minus(java.time.Duration.ofDays(7)), java.time.ZoneOffset.UTC));
     }
 
     private static String clip(String s, int n) {

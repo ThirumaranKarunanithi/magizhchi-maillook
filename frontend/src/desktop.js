@@ -3,10 +3,16 @@
 // In a browser this is all null and nothing changes.
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { get } from './api.js'
+import { API_BASE, get, getToken } from './api.js'
 import { useMail } from './state.jsx'
 
 export const desktop = typeof window !== 'undefined' ? window.maillookDesktop || null : null
+
+/**
+ * A desktop app that reads the server's alert feed itself (1.1 and later): it rings for new mail with the
+ * sender, and for reminders, so the page only keeps the taskbar count.
+ */
+export const desktopFeed = !!(desktop && typeof desktop.setSession === 'function')
 
 let lastSeen = null
 let alertMode = 'needs_me'
@@ -14,11 +20,12 @@ let alertMode = 'needs_me'
 const lanes = (c) => c?.lanes || {}
 const unread = (c, lane) => lanes(c)[lane]?.unread ?? 0
 
-/** Called with each /api/counts: the taskbar count, and an alert when more mail arrives. */
+/** Called with each /api/counts: the taskbar count (and, for an older desktop app, an alert on more mail). */
 export function desktopCounts(c) {
   if (!desktop || !c) return
   const needsMe = unread(c, 'needs_me')
   desktop.setBadge(needsMe)
+  if (desktopFeed) return
   const watched = alertMode === 'all' ? Object.keys(lanes(c)).reduce((n, k) => n + unread(c, k), 0) : needsMe
   if (lastSeen != null && alertMode !== 'off' && watched > lastSeen) {
     const more = watched - lastSeen
@@ -40,6 +47,7 @@ export function DesktopBridge() {
   useEffect(() => {
     if (!desktop) return undefined
     get('/api/push').then((s) => setDesktopAlertMode(s?.mode)).catch(() => {})
+    if (desktopFeed) desktop.setSession({ token: getToken(), api: API_BASE || window.location.origin })
     const offOpen = desktop.onOpen((path) => navigate(path))
     const offCompose = desktop.onCompose((json) => {
       let f = {}
@@ -53,6 +61,8 @@ export function DesktopBridge() {
     return () => {
       offOpen()
       offCompose()
+      // Signed out (the mail shell goes away): the desktop app stops asking for alerts.
+      if (desktopFeed && !getToken()) desktop.setSession(null)
     }
   }, [navigate, openComposer])
   return null

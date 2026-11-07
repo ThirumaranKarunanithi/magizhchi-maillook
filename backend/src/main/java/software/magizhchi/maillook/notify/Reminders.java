@@ -89,6 +89,11 @@ public class Reminders {
             }
         }
         briefings(now);
+        try {
+            push.forgetOldAlerts(now);
+        } catch (Exception e) {
+            // best effort; tomorrow's run tries again
+        }
         return back;
     }
 
@@ -98,10 +103,11 @@ public class Reminders {
      * @return how many people got it.
      */
     public int briefings(Instant now) {
-        if (!push.configured()) return 0;
+        // People with a browser or phone that allowed alerts, or the desktop app running in the last two days.
         List<Map<String, Object>> due = jdbc.queryForList(
                 "SELECT u.id, u.tz, u.briefing_hour, u.briefing_sent_on FROM users u WHERE u.briefing_hour IS NOT NULL AND u.tz IS NOT NULL " +
-                        "AND u.notify <> 'off' AND EXISTS (SELECT 1 FROM push_subscriptions p WHERE p.user_id = u.id)");
+                        "AND u.notify <> 'off' AND (EXISTS (SELECT 1 FROM push_subscriptions p WHERE p.user_id = u.id) OR u.desktop_seen_at > ?)",
+                OffsetDateTime.ofInstant(now.minus(java.time.Duration.ofDays(2)), ZoneOffset.UTC));
         int sent = 0;
         for (Map<String, Object> u : due) {
             try {
