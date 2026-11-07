@@ -6,6 +6,8 @@ import AiCard from './AiCard.jsx'
 import AttachmentShelf from './AttachmentShelf.jsx'
 import LaneMenu from './LaneMenu.jsx'
 import PaMenu from './PaMenu.jsx'
+import MeetMenu from './MeetMenu.jsx'
+import { ClassroomCard, JoinCard } from './MeetCards.jsx'
 import MailFrame from './MailFrame.jsx'
 import { AccountDot } from './Sidebar.jsx'
 import {
@@ -71,6 +73,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
   const [error, setError] = useState('')
   const [unsub, setUnsub] = useState(null) // { busy } | result
   const seenSent = useRef(new Set())
+  const [meetKey, setMeetKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -174,6 +177,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
         </button>
         <LaneMenu currentLane={detail.lane} onMove={moveLane} sender={detail.fromEmail} />
         <PaMenu message={detail} />
+        <MeetMenu message={detail} onStarted={() => setMeetKey((k) => k + 1)} />
         {detail.canUnsubscribe && (
           <button className="btn-ghost" onClick={unsubscribe} disabled={unsub?.busy} title="Unsubscribe from this sender">
             {unsub?.busy ? <span className="spinner" /> : <IconUnsub size={17} />}<span className="hidden sm:inline">Unsubscribe</span>
@@ -216,6 +220,10 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
             <div className="mt-0.5 text-xs text-slate-500">{fullDate(detail.receivedAt)}</div>
           </div>
         </header>
+
+        <JoinCard messageId={detail.id} refreshKey={meetKey} />
+
+        <ClassroomCard key={`cls-${detail.id}`} message={detail} onDone={() => setMeetKey((k) => k + 1)} />
 
         <AttachmentShelf messageId={detail.id} attachments={detail.attachments} notify={notify} />
 

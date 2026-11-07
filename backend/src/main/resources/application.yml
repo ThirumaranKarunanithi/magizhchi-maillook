@@ -52,6 +52,11 @@ magizhchi:
       # tasks and calendar events. Blank turns the PA connection off.
       api: ${MAGIZHCHI_PA_URL:https://paback.magizhchi.software}
       web: ${MAGIZHCHI_PA_WEB:https://pa.magizhchi.software}
+    meet:
+      # Magizhchi Meet's API and web app. MailLook signs in there as the same person (suite SSO)
+      # to start rooms from an email and run the classroom actions. Blank turns Meet off.
+      api: ${MAGIZHCHI_MEET_URL:}
+      web: ${MAGIZHCHI_MEET_WEB:https://meet.magizhchi.software}
     box:
       # Magizhchi Box. Saving an attachment connects the person to their own Box drive by itself,
       # through Box's provisioning endpoint. A blank secret hides "Save to Box".

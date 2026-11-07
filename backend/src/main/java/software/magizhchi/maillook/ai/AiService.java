@@ -148,6 +148,36 @@ public class AiService {
                 """, user.toString(), 0.6, 2000);
     }
 
+    // ── classroom actions (Magizhchi Meet) ────────────────────────
+
+    /**
+     * Whether this mail asks to change a class room's weekly time, or asks to attend a class online,
+     * and which of the owner's rooms it means. {@code rooms} lines look like
+     * "- id <uuid> | <name> | WEEKLY SAT 15:00-17:00 Asia/Kolkata". Cached per mail; the caller
+     * checks the answer against the rooms it actually has.
+     */
+    public JsonNode classroom(MessageRepo.Row msg, String rooms) {
+        var cached = messages.aiCache(msg.id(), "classroom");
+        if (cached.isPresent()) return parse(cached.get());
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        JsonNode out = llm(msg.userId(), """
+                The mailbox owner ("You") runs these online class rooms in Magizhchi Meet:
+                %s
+
+                Read the latest email and decide if it asks for one of these:
+                "reschedule": change the regular time a class/batch meets (e.g. "can we move Saturday batch to 4 PM").
+                "attend_online": the sender (a student/attendee) wants to join a class online today, e.g. because of
+                illness, travel or leave.
+                "none": anything else, including one-off meetings, questions, or a time change already refused.
+                Pick the room the email means from the list (match batch names, days, subjects); null when unsure.
+                For "reschedule", newTime is the new start time as 24-hour "HH:mm" in the room's own time zone.
+                Reply as JSON: {"kind":"reschedule|attend_online|none","roomId":"<id from the list>"|null,
+                "newTime":"HH:mm"|null,"why":"one short sentence"}
+                """.formatted(rooms), threadText(msg, thread), 0.0, 400);
+        messages.putAiCache(msg.id(), "classroom", out.toString());
+        return out;
+    }
+
     private static String threadText(MessageRepo.Row msg, List<MessageRepo.Row> thread) {
         List<MessageRepo.Row> t = thread.isEmpty() ? List.of(msg) : thread;
         if (t.size() > 8) t = t.subList(t.size() - 8, t.size());

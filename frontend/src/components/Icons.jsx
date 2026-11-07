@@ -42,3 +42,4 @@ export const IconAlert = (p) => <Svg {...p}><path d="M10.3 3.9 1.8 18a2 2 0 0 0 
 export const IconMore = (p) => <Svg {...p}><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></Svg>
 export const IconCloudUp = (p) => <Svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10a4 4 0 0 1 0 8" /><path d="m9 15 3-3 3 3M12 12v8" /></Svg>
 export const IconCloudCheck = (p) => <Svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10a4 4 0 0 1-.5 7.97" /><path d="m9 15 2.2 2.2L15.5 13" /></Svg>
+export const IconVideo = (p) => <Svg {...p}><rect x="2" y="6" width="14" height="12" rx="2" /><path d="m16 10 6-3.5v11L16 14" /></Svg>
