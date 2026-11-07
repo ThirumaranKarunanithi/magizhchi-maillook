@@ -1,0 +1,89 @@
+{
+  "name": "magizhchi-maillook-desktop",
+  "version": "1.0.0",
+  "description": "Magizhchi MailLook for Windows: one calm inbox in its own window, in the tray, with alerts",
+  "main": "main.js",
+  "author": "Magizhchi",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "icon": "electron make-icon.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "software.magizhchi.maillook",
+    "productName": "Magizhchi MailLook",
+    "artifactName": "MagizhchiMailLook-Setup.${ext}",
+    "afterPack": "afterPack.js",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://maillook.magizhchi.software/downloads/"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "links.js",
+      "mailto.js",
+      "offline.html",
+      "icon.png",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Email (mailto)",
+        "schemes": [
+          "mailto"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Magizhchi MailLook",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "include": "build/installer.nsh"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": "universal"
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.productivity",
+      "darkModeSupport": true,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
+    },
+    "dmg": {
+      "title": "Magizhchi MailLook",
+      "artifactName": "MagizhchiMailLook-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "^24.13.3",
+    "rcedit": "^5.0.2"
+  }
+}

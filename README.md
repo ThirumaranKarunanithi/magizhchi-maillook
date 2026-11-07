@@ -13,7 +13,8 @@ It includes a Happiness score, AI thread summaries, AI reply drafts in your own 
 | `backend/` | Spring Boot 3 (Java 17). IMAP sync and SMTP send (Jakarta MailLook), H2 or Postgres, Flyway |
 | `frontend/` | React 18 + Vite + Tailwind web app |
 | `docs/API.md` | The REST contract between them |
-| `desktop/`, `mobile app/` | Later phases |
+| `desktop/` | Windows app (Electron): the web app in its own window, tray, alerts, taskbar count, mailto links. See `desktop/README.md` |
+| `mobile app/` | Later phase |
 
 ## Run it locally
 

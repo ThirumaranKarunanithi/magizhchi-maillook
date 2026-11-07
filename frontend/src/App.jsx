@@ -13,6 +13,7 @@ import Contacts from './pages/Contacts.jsx'
 import Today from './pages/Today.jsx'
 import Scheduled from './pages/Scheduled.jsx'
 import Files from './pages/Files.jsx'
+import { DesktopBridge } from './desktop.js'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -42,6 +43,7 @@ function Shell() {
       </main>
       {composer && <Composer key={composer.key} />}
       <Toast />
+      <DesktopBridge />
     </div>
   )
 }

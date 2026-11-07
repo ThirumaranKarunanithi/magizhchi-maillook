@@ -78,7 +78,7 @@ function quote(m) {
 }
 
 /** Works out From/To/Cc/Subject/body for new, reply, reply all and forward, or a saved draft. */
-function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: subjectOverride, invite, draft }, accounts, selectedAccountId) {
+function initialDraft({ mode, message: m, draftBody, to: toOverride, cc: ccOverride, subject: subjectOverride, invite, draft }, accounts, selectedAccountId) {
   const own = new Set(accounts.map((a) => a.email.toLowerCase()))
   const fallbackFrom = selectedAccountId ?? accounts[0]?.id ?? ''
   const sig = (id) => signatureBlock(accounts.find((a) => a.id === id)?.signature)
@@ -96,7 +96,7 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: su
     // A new mail can still start from one (the weekly digest): same mailbox, chosen people, ready text.
     const from = m && accounts.some((a) => a.id === m.accountId) ? m.accountId : fallbackFrom
     return {
-      accountId: from, to: uniq(toOverride || [], own), cc: [], bcc: [], subject: subjectOverride || '',
+      accountId: from, to: uniq(toOverride || [], own), cc: uniq(ccOverride || [], own), bcc: [], subject: subjectOverride || '',
       text: `${draftBody || ''}${sig(from)}`,
       replyToMessageId: null, invite: null, draftId: null, anchor: null,
     }

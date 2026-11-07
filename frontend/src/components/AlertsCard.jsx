@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { get, post, put } from '../api.js'
 import { useMail } from '../state.jsx'
 import { currentSubscription, disablePush, enablePush, needsHomeScreen, pushSupported } from '../push.js'
+import { desktop, setDesktopAlertMode } from '../desktop.js'
 import { IconBell } from './Icons.jsx'
 
 const TZ = (() => {
@@ -67,6 +68,7 @@ export default function AlertsCard({ compact = false }) {
   async function setMode(mode) {
     try {
       setS(await put('/api/push', { mode }))
+      setDesktopAlertMode(mode)
     } catch (e) {
       notify(e.message, 'error')
     }
@@ -98,7 +100,9 @@ export default function AlertsCard({ compact = false }) {
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-bold">Alerts on your phone and computer</h2>
           <p className="mt-0.5 text-xs text-slate-500">
-            {!s.configured ? 'Alerts aren’t set up on this server yet.'
+            {desktop ? (s.mode === 'off' ? 'Alerts are off. Choose which mail rings on this computer and your phone.'
+              : 'This app alerts you while it runs in the tray, and shows the Needs me count on the taskbar.')
+              : !s.configured ? 'Alerts aren’t set up on this server yet.'
               : !supported ? 'This browser can’t show alerts. Chrome, Edge, Firefox and Safari can.'
                 : needsHomeScreen() ? 'On iPhone and iPad: tap Share, then “Add to Home Screen”, open MailLook from there, and turn alerts on.'
                   : blocked ? 'Alerts are blocked for MailLook in this browser. Allow them in the site settings, then come back.'

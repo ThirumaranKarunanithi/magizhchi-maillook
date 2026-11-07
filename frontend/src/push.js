@@ -2,6 +2,8 @@
 import { get, post } from './api.js'
 
 export function pushSupported() {
+  // The desktop app has no push service; it shows alerts of its own while it runs in the tray.
+  if (typeof window !== 'undefined' && window.maillookDesktop) return false
   return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
 

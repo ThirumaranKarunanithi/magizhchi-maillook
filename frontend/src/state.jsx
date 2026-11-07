@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { get, post } from './api.js'
 import { clearBackup, readBackup } from './backup.js'
+import { desktopCounts } from './desktop.js'
 
 // App-wide mail state shared by the sidebar, pages and the composer.
 const MailCtx = createContext(null)
@@ -69,7 +70,9 @@ export function MailProvider({ children }) {
 
   const refreshCounts = useCallback(async () => {
     try {
-      setCounts(await get('/api/counts'))
+      const c = await get('/api/counts')
+      setCounts(c)
+      desktopCounts(c)
     } catch {
       /* the gauge just keeps its last value */
     }
