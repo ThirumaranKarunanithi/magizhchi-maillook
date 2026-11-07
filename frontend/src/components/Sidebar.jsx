@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
+import { get } from '../api.js'
 import { useMail } from '../state.jsx'
 import HappinessGauge from './HappinessGauge.jsx'
 import Logo from './Logo.jsx'
@@ -11,8 +12,27 @@ import { useInstall } from '../install.js'
 import { ANDROID_APK_URL, onAndroidBrowser } from './GetAppsCard.jsx'
 import {
   IconAlert, IconArchive, IconBook, IconCalendar, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo,
-  IconInstall, IconLogout, IconNews, IconPaperclip, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
+  IconInstall, IconLogout, IconReceipt, IconNews, IconPaperclip, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
 } from './Icons.jsx'
+
+/** Bills, with how many are overdue or due this week. Hidden when the server has no Magizhchi Data. */
+function BillsNav({ active, onGo }) {
+  const location = useLocation()
+  const [c, setC] = useState(null)
+  useEffect(() => {
+    let live = true
+    get('/api/bills/count').then((r) => live && setC(r)).catch(() => {})
+    return () => { live = false }
+  }, [location.pathname])
+  if (!c?.configured) return null
+  return (
+    <button className={`nav-item ${active ? 'active' : ''}`} onClick={onGo}>
+      <IconReceipt size={17} className="text-slate-500" />
+      <span>Bills</span>
+      {c.dueSoon > 0 && <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800 num" title="Overdue or due in the next 7 days">{c.dueSoon}</span>}
+    </button>
+  )
+}
 
 /** "Install MailLook" on the home screen or desktop: the browser's own prompt, or Safari's steps on iPhone. */
 function InstallButton() {
@@ -263,6 +283,7 @@ export default function Sidebar({ onNavigate }) {
           <IconPaperclip size={17} className="text-slate-500" />
           <span>Files</span>
         </button>
+        <BillsNav active={location.pathname === '/bills'} onGo={() => go('/bills')} />
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>
           <IconNews size={17} className="text-slate-500" />
           <span>Subscriptions</span>

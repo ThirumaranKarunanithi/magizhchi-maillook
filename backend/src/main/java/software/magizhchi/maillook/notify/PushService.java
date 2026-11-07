@@ -199,7 +199,8 @@ public class PushService {
     /** mail | reminder (snooze, no reply, briefing) | problem (a send that failed) | test. */
     static String kindOf(String tag) {
         String t = tag == null ? "" : tag;
-        if (t.startsWith("maillook-snooze") || t.startsWith("maillook-noreply") || t.startsWith("maillook-briefing")) return "reminder";
+        if (t.startsWith("maillook-snooze") || t.startsWith("maillook-noreply") || t.startsWith("maillook-briefing")
+                || t.startsWith("maillook-bill")) return "reminder";
         if (t.startsWith("maillook-outbox")) return "problem";
         if (t.equals("maillook-test")) return "test";
         return "mail";

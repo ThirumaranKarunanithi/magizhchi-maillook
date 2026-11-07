@@ -13,6 +13,7 @@ import Contacts from './pages/Contacts.jsx'
 import Today from './pages/Today.jsx'
 import Scheduled from './pages/Scheduled.jsx'
 import Files from './pages/Files.jsx'
+import Bills from './pages/Bills.jsx'
 import { DesktopBridge } from './desktop.js'
 import AlertsPrompt from './components/AlertsPrompt.jsx'
 import { NativeBridge } from './native.js'
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/today" element={<Today />} />
         <Route path="/scheduled" element={<Scheduled />} />
         <Route path="/files" element={<Files />} />
+        <Route path="/bills" element={<Bills />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

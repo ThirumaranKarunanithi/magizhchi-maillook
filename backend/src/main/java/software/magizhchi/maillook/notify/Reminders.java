@@ -37,7 +37,11 @@ public class Reminders {
     private final PushService push;
     private final Waiting waiting;
 
-    public Reminders(JdbcTemplate jdbc, MessageRepo messages, FollowUps followUps, PushService push, Waiting waiting) {
+    private final software.magizhchi.maillook.bills.BillService bills;
+
+    public Reminders(JdbcTemplate jdbc, MessageRepo messages, FollowUps followUps, PushService push, Waiting waiting,
+                     software.magizhchi.maillook.bills.BillService bills) {
+        this.bills = bills;
         this.waiting = waiting;
         this.jdbc = jdbc;
         this.messages = messages;
@@ -122,6 +126,8 @@ public class Reminders {
                 int waits = waiting.list(userId, null, now, false).size();
                 String body = needs == 0 ? "Nobody is waiting on you" : needs == 1 ? "1 person is waiting on you" : needs + " people are waiting on you";
                 if (waits > 0) body += " · you're waiting on " + waits + (waits == 1 ? " reply" : " replies");
+                String billLine = bills.briefingLine(userId, local.toLocalDate());
+                if (billLine != null) body += " · " + billLine;
                 push.reminder(userId, "Your morning briefing", body + ". Tap for today's plan.", "/today", "maillook-briefing");
                 sent++;
             } catch (Exception e) {

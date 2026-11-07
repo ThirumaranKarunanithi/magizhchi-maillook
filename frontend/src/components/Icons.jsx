@@ -56,3 +56,4 @@ export const IconBell = (p) => <Svg {...p}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 
 export const IconBook = (p) => <Svg {...p}><path d="M5 4a2 2 0 0 1 2-2h12v18H7a2 2 0 0 0-2 2Z" /><path d="M5 20V4" /><circle cx="12.5" cy="9" r="2.5" /><path d="M8.5 15.5a4 4 0 0 1 8 0" /></Svg>
 export const IconPhone = (p) => <Svg {...p}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2Z" /></Svg>
 export const IconUserPlus = (p) => <Svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M22 11h-6" /></Svg>
+export const IconReceipt = (p) => <Svg {...p}><path d="M5 2h14v20l-2.3-1.5L14.3 22 12 20.5 9.7 22l-2.4-1.5L5 22Z" /><path d="M9 7h6M9 11h6M9 15h4" /></Svg>

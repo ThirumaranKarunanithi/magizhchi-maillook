@@ -32,6 +32,9 @@ maillook:
     initial-inbox: ${MAILLOOK_SYNC_INITIAL_INBOX:300}
     initial-sent: ${MAILLOOK_SYNC_INITIAL_SENT:100}
     threads: ${MAILLOOK_SYNC_THREADS:4}
+  bills:
+    # Bills read each month at MailLook's cost before the person's Data credits are used.
+    free-per-month: ${MAILLOOK_BILLS_FREE_PER_MONTH:20}
   # Where this API and the web app are reached from the internet. Sign in with Google / Microsoft
   # sends people back to {public-url}/api/oauth/{google|microsoft}/callback, then on to {web-url}/accounts.
   public-url: ${MAILLOOK_PUBLIC_URL:http://localhost:8097}
@@ -78,6 +81,11 @@ magizhchi:
       api: ${MAGIZHCHI_BOX_URL:https://box.magizhchi.software}
       web: ${MAGIZHCHI_BOX_WEB:https://box.magizhchi.software}
       provision-secret: ${MAGIZHCHI_BOX_PROVISION_SECRET:}
+    data:
+      # Magizhchi Data reads bills out of mail ("Bills"), on the person's own Data credits.
+      # The secret must match MAILLOOK_INTEGRATION_SECRET on Data. Blank hides Bills.
+      api: ${MAGIZHCHI_DATA_URL:}
+      secret: ${MAGIZHCHI_DATA_SECRET:}
 
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:5177,http://localhost:4173}

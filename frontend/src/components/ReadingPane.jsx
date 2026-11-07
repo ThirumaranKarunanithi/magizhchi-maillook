@@ -16,6 +16,7 @@ import NoteCard from './NoteCard.jsx'
 import FollowUpCard from './FollowUpCard.jsx'
 import PersonCard from './PersonCard.jsx'
 import InviteCard from './InviteCard.jsx'
+import BillCard from './BillCard.jsx'
 import WaitingCard from './WaitingCard.jsx'
 import { QuickReplies, Translate } from './MailExtras.jsx'
 import { whenLabel } from '../when.js'
@@ -246,6 +247,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
         </header>
 
         <InviteCard key={`inv-${detail.id}`} message={detail} />
+        <BillCard key={`bill-${detail.id}`} message={detail} />
         {detail.folder !== 'SENT' && <PersonCard email={detail.fromEmail} name={detail.fromName} />}
         <WaitingCard key={`wt-${detail.id}`} message={detail} />
         <FollowUpCard message={detail} />
