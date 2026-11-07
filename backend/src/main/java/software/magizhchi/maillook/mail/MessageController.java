@@ -53,9 +53,16 @@ public class MessageController {
     private final software.magizhchi.maillook.suite.MeetSoon meetSoon;
     private final FolderCursors cursors;
     private final DraftRepo drafts;
+    private final FollowUps followUps;
+    private final NoteRepo notes;
+    private final software.magizhchi.maillook.contacts.PeopleService people;
 
     public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box,
-                             software.magizhchi.maillook.suite.MeetSoon meetSoon, FolderCursors cursors, DraftRepo drafts) {
+                             software.magizhchi.maillook.suite.MeetSoon meetSoon, FolderCursors cursors, DraftRepo drafts,
+                             FollowUps followUps, NoteRepo notes, software.magizhchi.maillook.contacts.PeopleService people) {
+        this.people = people;
+        this.followUps = followUps;
+        this.notes = notes;
         this.meetSoon = meetSoon;
         this.cursors = cursors;
         this.drafts = drafts;
@@ -81,6 +88,12 @@ public class MessageController {
                                     @RequestParam(required = false) String after,
                                     @RequestParam(required = false) String before,
                                     @RequestParam(required = false) String tz) {
+        if ("SNOOZED".equalsIgnoreCase(folder)) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("items", messages.snoozed(userId, accountId, 200).stream().map(MessageRepo.Row::summary).toList());
+            out.put("nextCursor", null);
+            return out;
+        }
         String f = folderCode(userId, folder);
         Instant now = Instant.now();
         MailSearch search = MailSearch.parse(q, zone(tz), now)
@@ -115,6 +128,13 @@ public class MessageController {
                 Map<String, Object> m = p.row().summary();
                 m.put("meetingStartsAt", p.startsAt().toString());
                 items.add(m);
+            }
+        }
+        // Back from snooze, or nobody replied: on top of the first page until opened.
+        if (cAt == null && search.isEmpty() && "INBOX".equals(f)) {
+            OffsetDateTime since = OffsetDateTime.ofInstant(now.minus(Duration.ofDays(14)), ZoneOffset.UTC);
+            for (MessageRepo.Row b : messages.back(userId, accountId, l, since)) {
+                if (pinned.add(b.id())) items.add(b.summary());
             }
         }
         for (MessageRepo.Row r : rows) if (!pinned.contains(r.id())) items.add(r.summary());
@@ -197,7 +217,10 @@ public class MessageController {
         List<Long> ids = new java.util.ArrayList<>(thread.stream().map(MessageRepo.Row::id).toList());
         if (!ids.contains(r.id())) ids.add(r.id());
         java.util.Set<String> inBox = new java.util.HashSet<>(box.savedKeys(ids));
+        if (r.backAt() != null) messages.clearBack(r.id());
         Map<String, Object> out = r.summary();
+        out.put("followUpAt", followUps.due(r.id()).map(Instant::toString).orElse(null));
+        out.put("note", notes.find(r.accountId(), r.threadKey()).map(NoteRepo.Note::json).orElse(null));
         out.put("bodyHtml", r.bodyHtml());
         out.put("bodyText", r.bodyText());
         out.put("attachments", withBox(r, inBox));
@@ -327,11 +350,23 @@ public class MessageController {
             throw ApiException.bad("The message couldn't be read.");
         }
         MessageRepo.Row sent = actions.send(userId, o, files == null ? List.of() : files);
+        people.forget(userId);              // who they write to just changed
         // The draft it came from is done with.
+        JsonNode tree = null;
         try {
-            JsonNode draftId = mapper.readTree(payload).path("draftId");
+            tree = mapper.readTree(payload);
+            JsonNode draftId = tree.path("draftId");
             if (draftId.canConvertToLong()) drafts.delete(userId, draftId.asLong());
         } catch (Exception ignored) {
+        }
+        // "Remind me if nobody replies by …"
+        String remindAt = tree == null ? null : tree.path("remindAt").asText(null);
+        if (sent != null && remindAt != null && !remindAt.isBlank()) {
+            try {
+                followUps.set(userId, sent.id(), NoteController.future(remindAt, "reminder"));
+            } catch (ApiException ignored) {
+                // The mail is sent either way; a bad reminder time isn't worth failing it.
+            }
         }
         return sent == null ? Map.of("status", "sent") : sent.summary();
     }

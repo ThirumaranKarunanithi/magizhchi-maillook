@@ -11,9 +11,14 @@ import MeetMenu from './MeetMenu.jsx'
 import { ClassroomCard, FindTimeCard, JoinCard } from './MeetCards.jsx'
 import { DigestCard, EventCard } from './AcademyCards.jsx'
 import MailFrame from './MailFrame.jsx'
+import SnoozeMenu from './SnoozeMenu.jsx'
+import NoteCard from './NoteCard.jsx'
+import FollowUpCard from './FollowUpCard.jsx'
+import PersonCard from './PersonCard.jsx'
+import { whenLabel } from '../when.js'
 import { AccountDot } from './Sidebar.jsx'
 import {
-  IconArchive, IconBack, IconFlag, IconForward, IconInbox, IconReply, IconReplyAll, IconTrash, IconUnsub,
+  IconArchive, IconBack, IconFlag, IconForward, IconInbox, IconNote, IconReply, IconReplyAll, IconTrash, IconUnsub,
 } from './Icons.jsx'
 
 const SOURCE_LABEL = { meet: 'after your meeting', ai: 'sorted by AI', user: 'you moved it', rule: 'your sender rule', heuristic: 'sorted automatically' }
@@ -68,7 +73,7 @@ function ThreadItem({ summary, notify }) {
   )
 }
 
-export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onTrash, onMoveLane, onMove }) {
+export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onTrash, onMoveLane, onMove, onSnooze, onNote }) {
   const { openComposer, notify } = useMail()
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -76,6 +81,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
   const [unsub, setUnsub] = useState(null) // { busy } | result
   const seenSent = useRef(new Set())
   const [meetKey, setMeetKey] = useState(0)
+  const [noteOpen, setNoteOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -183,8 +189,12 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
         <button className={`btn-ghost ${detail.flagged ? '!text-red-600' : ''}`} onClick={toggleFlag} title={detail.flagged ? 'Unflag' : 'Flag'}>
           <IconFlag filled={detail.flagged} size={17} /><span className="hidden xl:inline">{detail.flagged ? 'Flagged' : 'Flag'}</span>
         </button>
+        {detail.folder === 'INBOX' && onSnooze && <SnoozeMenu message={detail} onSnooze={onSnooze} />}
         {detail.folder === 'INBOX' && <LaneMenu currentLane={detail.lane} onMove={moveLane} sender={detail.fromEmail} />}
         {onMove && detail.folder !== 'SENT' && <MoveMenu message={detail} onMove={onMove} />}
+        <button className={`btn-ghost ${noteOpen || detail.note?.body ? '!text-amber-700' : ''}`} onClick={() => setNoteOpen(true)} title="A private note on this conversation">
+          <IconNote size={17} /><span className="hidden xl:inline">Note</span>
+        </button>
         <PaMenu message={detail} />
         <MeetMenu message={detail} onStarted={() => setMeetKey((k) => k + 1)} />
         {detail.canUnsubscribe && (
@@ -211,6 +221,8 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-700">
               <AccountDot color={detail.accountColor} size={8} /> {detail.accountEmail}
             </span>
+            {detail.backReason === 'snooze' && <span className="chip !bg-amber-50 !text-amber-800 !ring-amber-200">Back from snooze</span>}
+            {detail.snoozedUntil && <span className="chip !bg-amber-50 !text-amber-800 !ring-amber-200">Snoozed until {whenLabel(detail.snoozedUntil)}</span>}
             {detail.lane && (
               <span className="chip" title={SOURCE_LABEL[detail.laneSource] || ''}>
                 {LANE_LABEL[detail.lane] || detail.lane}{detail.laneSource && <span className="font-normal text-peacock-600"> · {SOURCE_LABEL[detail.laneSource] || detail.laneSource}</span>}
@@ -229,6 +241,11 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
             <div className="mt-0.5 text-xs text-slate-500">{fullDate(detail.receivedAt)}</div>
           </div>
         </header>
+
+        {detail.folder !== 'SENT' && <PersonCard email={detail.fromEmail} name={detail.fromName} />}
+        <FollowUpCard message={detail} />
+        <NoteCard message={detail} open={noteOpen} onClose={() => setNoteOpen(false)}
+          onChange={(has) => { setDetail((d) => ({ ...d, note: has ? { ...(d.note || {}), body: 'x' } : null })); onNote?.(detail.id, has) }} />
 
         <JoinCard message={detail} refreshKey={meetKey} onStarted={() => setMeetKey((k) => k + 1)} />
 

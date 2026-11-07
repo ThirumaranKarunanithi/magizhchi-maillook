@@ -9,6 +9,7 @@ import { PROVIDER_LABEL, ProviderMark } from '../oauth.jsx'
 import BulkAdd from '../components/BulkAdd.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import BoxCard from '../components/BoxCard.jsx'
+import AlertsCard from '../components/AlertsCard.jsx'
 import { AccountDot } from '../components/Sidebar.jsx'
 import { IconCheck, IconRefresh, IconTrash } from '../components/Icons.jsx'
 
@@ -266,6 +267,7 @@ export default function Accounts() {
       </PageHeader>
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6">
+        <AlertsCard />
         <section>
           <h2 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Your mailboxes ({accounts.length})</h2>
           {!accountsLoaded ? (

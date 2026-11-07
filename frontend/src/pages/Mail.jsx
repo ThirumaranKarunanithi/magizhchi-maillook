@@ -6,6 +6,7 @@ import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
 import MessageList from '../components/MessageList.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
 import { folderLabel } from '../components/MoveMenu.jsx'
+import { whenLabel } from '../when.js'
 import { IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconTrash, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
@@ -21,6 +22,7 @@ const EMPTY = {
   trash: { emoji: '🧺', title: 'Trash is empty', text: 'Mail you trash waits here. Restore puts it back in the Inbox.' },
   folder: { emoji: '📁', title: 'Nothing in this folder', text: 'Mail you move here, or that your other mail apps file here, shows up after the next sync.' },
   drafts: { emoji: '📝', title: 'No drafts', text: 'Close the composer before sending and what you wrote waits here.' },
+  snoozed: { emoji: '⏰', title: 'Nothing snoozed', text: 'Snooze a mail and it waits here, then comes back on top when you said, with a ping on your phone.' },
 }
 
 const SINCE = [
@@ -109,7 +111,7 @@ function EmptyState({ view, q, accountChosen, filtered }) {
 }
 
 export default function Mail() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const folderCode = params.get('view') === 'folder' && params.get('f')?.startsWith('F:') ? params.get('f') : null
   const view = folderCode ? 'folder' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
   const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode } : VIEWS[view]
@@ -204,6 +206,15 @@ export default function Mail() {
   useEffect(() => {
     setSelectedId(null)
   }, [view, accountId, folderCode])
+
+  // A tapped alert opens its mail (?open=123).
+  const openParam = params.get('open')
+  useEffect(() => {
+    const id = Number(openParam)
+    if (!id) return
+    setSelectedId(id)
+    setParams((p) => { const n = new URLSearchParams(p); n.delete('open'); return n }, { replace: true })
+  }, [openParam]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadMore() {
     if (!nextCursor) return
@@ -309,6 +320,20 @@ export default function Mail() {
     }
   }
 
+  async function onSnooze(id, at) {
+    const inSnoozed = cfg.folder === 'SNOOZED'
+    if (at || inSnoozed) removeLocal(id)
+    try {
+      await post(`/api/messages/${id}/snooze`, { at })
+      notify(at ? `Snoozed until ${whenLabel(at)}. It comes back on top.` : 'Back in your inbox', 'success')
+      refreshCounts()
+      if (!at && !inSnoozed) load({ silent: true })
+    } catch (e) {
+      notify(e.message, 'error')
+      load({ silent: true })
+    }
+  }
+
   async function onMoveLane(id, lane, rememberSender) {
     try {
       await post(`/api/messages/${id}/lane`, { lane, rememberSender: !!rememberSender })
@@ -406,6 +431,7 @@ export default function Mail() {
             onTrash={onTrash}
             onMoveLane={onMoveLane}
             onMove={onMove}
+            onSnooze={onSnooze}
             empty={<EmptyState view={view} q={q} filtered={filtered} accountChosen={accountId != null} />}
           />
           )}
@@ -433,6 +459,8 @@ export default function Mail() {
             onTrash={onTrash}
             onMoveLane={onMoveLane}
             onMove={onMove}
+            onSnooze={onSnooze}
+            onNote={(id, has) => patchLocal(id, { hasNote: has })}
           />
         ) : cfg.drafts ? (
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">

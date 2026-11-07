@@ -13,6 +13,11 @@ import software.magizhchi.maillook.common.ApiException;
 import software.magizhchi.maillook.mail.MailActions;
 import software.magizhchi.maillook.mail.MessageParser;
 import software.magizhchi.maillook.mail.MessageRepo;
+import software.magizhchi.maillook.mail.NoteRepo;
+import org.springframework.web.bind.annotation.RequestParam;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -34,10 +39,134 @@ public class PaController {
 
     private final PaClient pa;
     private final MailActions actions;
+    private final NoteRepo notes;
 
-    public PaController(PaClient pa, MailActions actions) {
+    public PaController(PaClient pa, MailActions actions, NoteRepo notes) {
         this.pa = pa;
         this.actions = actions;
+        this.notes = notes;
+    }
+
+    /**
+     * Your Magizhchi PA calendar for a stretch of days (at most 6 weeks): events, with repeats expanded,
+     * and open tasks due in it.
+     */
+    @GetMapping("/pa/agenda")
+    public Map<String, Object> agenda(@RequestAttribute long userId, @RequestParam String from, @RequestParam String to) {
+        Instant a = instant(from, "start");
+        Instant b = instant(to, "end");
+        if (!b.isAfter(a) || Duration.between(a, b).toDays() > 42) throw ApiException.bad("Show between a day and six weeks at a time.");
+
+        Map<String, String> colors = new LinkedHashMap<>();
+        List<Map<String, Object>> cals = new ArrayList<>();
+        PaClient.Reply cr = pa.as(userId, "GET", "/api/v1/calendars", null);
+        if (cr.ok() && cr.json() != null) {
+            for (JsonNode c : cr.json()) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", c.path("id").asText());
+                m.put("name", c.path("name").asText());
+                m.put("color", c.path("color").asText(null));
+                cals.add(m);
+                colors.put(c.path("id").asText(), c.path("color").asText(null));
+            }
+        } else {
+            throw failed("load your calendar", cr);
+        }
+
+        PaClient.Reply er = pa.as(userId, "GET", "/api/v1/events?from=" + enc(a.toString()) + "&to=" + enc(b.toString()), null);
+        if (!er.ok() || er.json() == null) throw failed("load your calendar", er);
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (JsonNode e : er.json()) {
+            if ("CANCELLED".equalsIgnoreCase(e.path("status").asText(""))) continue;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", e.path("eventId").asText());
+            m.put("calendarId", e.path("calendarId").asText(null));
+            m.put("title", e.path("title").asText("(no title)"));
+            m.put("location", e.path("location").asText(null));
+            m.put("description", clip(e.path("description").asText(""), 600));
+            m.put("start", e.path("occurrenceStart").asText(null));
+            m.put("end", e.path("occurrenceEnd").asText(null));
+            m.put("allDay", e.path("allDay").asBoolean(false));
+            m.put("recurring", e.path("recurring").asBoolean(false));
+            m.put("response", e.path("attendeeResponse").asText(null));
+            m.put("organizer", e.path("organizerName").asText(null));
+            String color = e.path("color").asText(null);
+            m.put("color", color == null || color.isBlank() ? colors.get(e.path("calendarId").asText()) : color);
+            events.add(m);
+        }
+
+        // Tasks are a nice-to-have here: if PA can't list them, the calendar still shows.
+        List<Map<String, Object>> tasks = new ArrayList<>();
+        PaClient.Reply tr = pa.as(userId, "GET", "/api/v1/tasks", null);
+        if (tr.ok() && tr.json() != null) {
+            for (JsonNode t : tr.json()) {
+                if ("DONE".equalsIgnoreCase(t.path("status").asText(""))) continue;
+                String due = t.path("dueAt").asText(null);
+                if (due == null || due.isBlank()) continue;
+                Instant d;
+                try {
+                    d = Instant.parse(due);
+                } catch (DateTimeParseException ex) {
+                    continue;
+                }
+                if (d.isBefore(a) || !d.isBefore(b)) continue;
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", t.path("id").asText());
+                m.put("title", t.path("title").asText("(untitled task)"));
+                m.put("dueAt", d.toString());
+                m.put("priority", t.path("priority").asText(null));
+                m.put("status", t.path("status").asText(null));
+                tasks.add(m);
+            }
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("calendars", cals);
+        out.put("events", events);
+        out.put("tasks", tasks);
+        out.put("webUrl", pa.webUrl().isBlank() ? null : pa.webUrl());
+        return out;
+    }
+
+    /** Copies the note on this conversation into Magizhchi PA Notes (updating the copy made before). */
+    @PostMapping("/messages/{id}/pa/note")
+    public Map<String, Object> note(@RequestAttribute long userId, @PathVariable long id) {
+        MessageRepo.Row msg = actions.owned(userId, id);
+        NoteRepo.Note n = notes.find(msg.accountId(), msg.threadKey())
+                .orElseThrow(() -> ApiException.bad("Write a note first, then send it to Magizhchi PA."));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("title", clip("Note: " + defaultTitle(msg), 300));
+        body.put("content", noteHtml(n.body(), msg));
+        body.put("labels", List.of("Magizhchi MailLook"));
+        PaClient.Reply r = null;
+        if (n.paNoteId() != null) {
+            r = pa.as(userId, "PUT", "/api/v1/notes/" + enc(n.paNoteId()), body);
+            if (r.code() == 404) r = null;             // they deleted it in PA: make a new one
+        }
+        if (r == null) r = pa.as(userId, "POST", "/api/v1/notes", body);
+        if (!r.ok()) throw failed("save the note", r);
+        String paId = r.json() == null ? null : r.json().path("id").asText(null);
+        if (paId != null) notes.setPaNote(msg.accountId(), msg.threadKey(), paId);
+        return done(r, "Your note is in Magizhchi PA Notes.");
+    }
+
+    private static String noteHtml(String note, MessageRepo.Row m) {
+        StringBuilder sb = new StringBuilder();
+        for (String para : note.split("\\n\\s*\\n")) {
+            sb.append("<p>").append(esc(para.trim()).replace("\n", "<br>")).append("</p>");
+        }
+        sb.append("<p><em>About the email “").append(esc(m.subject() == null ? "(no subject)" : m.subject()))
+                .append("” from ").append(esc(blank(m.fromName()) ? String.valueOf(m.fromEmail()) : m.fromName()))
+                .append(" in ").append(esc(m.accountEmail())).append(". Added from Magizhchi MailLook.</em></p>");
+        return sb.toString();
+    }
+
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    private static String enc(String s) {
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
     @GetMapping("/pa/status")

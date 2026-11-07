@@ -39,7 +39,8 @@ public class MessageRepo {
                       String subject, String snippet, String bodyText, String bodyHtml,
                       List<Map<String, Object>> attachments, OffsetDateTime receivedAt,
                       boolean seen, boolean flagged, String lane, String laneSource,
-                      String listUnsubscribe, boolean listUnsubscribePost, boolean unsubscribed, int threadCount) {
+                      String listUnsubscribe, boolean listUnsubscribePost, boolean unsubscribed, int threadCount,
+                      OffsetDateTime snoozedUntil, OffsetDateTime backAt, String backReason, boolean hasNote) {
 
         public Map<String, Object> summary() {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -67,6 +68,11 @@ public class MessageRepo {
             m.put("threadKey", threadKey);
             m.put("threadCount", Math.max(1, threadCount));
             m.put("canUnsubscribe", listUnsubscribe != null && !unsubscribed);
+            m.put("snoozedUntil", snoozedUntil == null ? null : snoozedUntil.toInstant().toString());
+            // Back on top: a snooze ended, or nobody replied to a mail you sent.
+            m.put("backAt", backAt == null ? null : backAt.toInstant().toString());
+            m.put("backReason", backAt == null ? null : backReason);
+            m.put("hasNote", hasNote);
             return m;
         }
     }
@@ -75,6 +81,8 @@ public class MessageRepo {
             "m.id, m.account_id, a.email AS account_email, a.color AS account_color, a.user_id, m.folder, m.uid, m.message_id, " +
             "m.thread_key, m.from_name, m.from_email, m.to_list, m.cc_list, m.subject, m.snippet, m.attachments, m.received_at, " +
             "m.seen, m.flagged, m.lane, m.lane_source, m.list_unsubscribe, m.list_unsubscribe_post, m.unsubscribed, " +
+            "m.snoozed_until, m.back_at, m.back_reason, " +
+            "EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key) AS has_note, " +
             "(SELECT COUNT(*) FROM messages t WHERE t.account_id = m.account_id AND t.thread_key = m.thread_key) AS thread_count";
 
     private static RowMapper<Row> mapper(boolean bodies) {
@@ -87,7 +95,9 @@ public class MessageRepo {
                 Json.maps(rs.getString("attachments")), rs.getObject("received_at", OffsetDateTime.class),
                 rs.getBoolean("seen"), rs.getBoolean("flagged"), rs.getString("lane"), rs.getString("lane_source"),
                 rs.getString("list_unsubscribe"), rs.getBoolean("list_unsubscribe_post"), rs.getBoolean("unsubscribed"),
-                rs.getInt("thread_count"));
+                rs.getInt("thread_count"), rs.getObject("snoozed_until", OffsetDateTime.class),
+                rs.getObject("back_at", OffsetDateTime.class), rs.getString("back_reason"),
+                rs.getBoolean("has_note"));
     }
 
     private final JdbcTemplate jdbc;
@@ -228,7 +238,8 @@ public class MessageRepo {
 
     public List<Row> list(long userId, String folder, String lane, Long accountId, MailSearch search,
                           OffsetDateTime cursorAt, Long cursorId, int limit) {
-        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = ?");
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE a.user_id = ? AND m.folder = ? AND m.snoozed_until IS NULL");
         List<Object> args = new ArrayList<>(List.of(userId, folder));
         if (lane != null) {
             sql.append(" AND m.lane = ?");
@@ -250,10 +261,50 @@ public class MessageRepo {
         return jdbc.query(sql.toString(), mapper(false), args.toArray());
     }
 
+    /** Mail snoozed for later, soonest back first. */
+    public List<Row> snoozed(long userId, Long accountId, int limit) {
+        return jdbc.query("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                        "WHERE a.user_id = ? AND m.snoozed_until IS NOT NULL" + (accountId != null ? " AND m.account_id = ?" : "") +
+                        " ORDER BY m.snoozed_until, m.id LIMIT " + Math.max(1, limit), mapper(false),
+                accountId != null ? new Object[]{userId, accountId} : new Object[]{userId});
+    }
+
+    /**
+     * Mail that came back and isn't read yet: a snooze that ended (in its own lane) or a sent mail nobody
+     * answered (in Needs me). Shown on top of the first page until it is read.
+     */
+    public List<Row> back(long userId, Long accountId, String lane, OffsetDateTime since) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE a.user_id = ? AND m.back_at >= ? AND m.snoozed_until IS NULL");
+        List<Object> args = new ArrayList<>(List.of(userId, since));
+        if (accountId != null) {
+            sql.append(" AND m.account_id = ?");
+            args.add(accountId);
+        }
+        if (lane != null) {
+            sql.append(" AND ((m.back_reason = 'snooze' AND m.folder = 'INBOX' AND m.lane = ?) OR (m.back_reason = 'no_reply' AND ? = 'needs_me'))");
+            args.add(lane);
+            args.add(lane);
+        } else {
+            sql.append(" AND (m.folder = 'INBOX' OR m.back_reason = 'no_reply')");
+        }
+        sql.append(" ORDER BY m.back_at DESC LIMIT 20");
+        return jdbc.query(sql.toString(), mapper(false), args.toArray());
+    }
+
+    /** Opened: it no longer needs to sit on top. */
+    public void clearBack(long id) {
+        jdbc.update("UPDATE messages SET back_at = NULL, back_reason = NULL WHERE id = ? AND back_at IS NOT NULL", id);
+    }
+
+    public void snooze(long id, OffsetDateTime until) {
+        jdbc.update("UPDATE messages SET snoozed_until = ?, back_at = NULL, back_reason = NULL WHERE id = ?", until, id);
+    }
+
     public Map<String, long[]> laneCounts(long userId, Long accountId) {
         Map<String, long[]> out = new LinkedHashMap<>();
         String sql = "SELECT m.lane, COUNT(*), SUM(CASE WHEN m.seen THEN 0 ELSE 1 END) FROM messages m JOIN accounts a ON a.id = m.account_id " +
-                "WHERE a.user_id = ? AND m.folder = 'INBOX'" + (accountId != null ? " AND m.account_id = ?" : "") + " GROUP BY m.lane";
+                "WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.snoozed_until IS NULL" + (accountId != null ? " AND m.account_id = ?" : "") + " GROUP BY m.lane";
         Object[] args = accountId != null ? new Object[]{userId, accountId} : new Object[]{userId};
         jdbc.query(sql, (ResultSet rs) -> {
             out.put(rs.getString(1), new long[]{rs.getLong(2), rs.getLong(3)});
@@ -264,7 +315,7 @@ public class MessageRepo {
     public Map<Long, Long> unreadByAccount(long userId) {
         Map<Long, Long> out = new LinkedHashMap<>();
         jdbc.query("SELECT m.account_id, SUM(CASE WHEN m.seen THEN 0 ELSE 1 END) FROM messages m JOIN accounts a ON a.id = m.account_id " +
-                "WHERE a.user_id = ? AND m.folder = 'INBOX' GROUP BY m.account_id", (ResultSet rs) -> {
+                "WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.snoozed_until IS NULL GROUP BY m.account_id", (ResultSet rs) -> {
             out.put(rs.getLong(1), rs.getLong(2));
         }, userId);
         return out;
@@ -272,7 +323,7 @@ public class MessageRepo {
 
     /** Count of unseen inbox mail in a lane received between two instants. */
     public long unseenInLane(long userId, Long accountId, String lane, Instant from, Instant to) {
-        String sql = "SELECT COUNT(*) FROM messages m JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = 'INBOX' " +
+        String sql = "SELECT COUNT(*) FROM messages m JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.snoozed_until IS NULL " +
                 "AND m.lane = ? AND m.seen = FALSE AND m.received_at >= ? AND m.received_at < ?" + (accountId != null ? " AND m.account_id = ?" : "");
         List<Object> args = new ArrayList<>(List.of(userId, lane, OffsetDateTime.ofInstant(from, ZoneOffset.UTC), OffsetDateTime.ofInstant(to, ZoneOffset.UTC)));
         if (accountId != null) args.add(accountId);

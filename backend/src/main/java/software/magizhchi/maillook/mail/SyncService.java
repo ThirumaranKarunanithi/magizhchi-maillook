@@ -56,12 +56,16 @@ public class SyncService {
     static final int INITIAL_EXTRA = 100;
     private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
+    private final software.magizhchi.maillook.notify.MailAlerts alerts;
+
     public SyncService(AccountRepo accounts, MessageRepo messages, ImapClient imap, AiService ai, FolderCursors cursors,
+                       software.magizhchi.maillook.notify.MailAlerts alerts,
                        @Value("${maillook.sync.initial-inbox}") int initialInbox,
                        @Value("${maillook.sync.initial-sent}") int initialSent,
                        @Value("${maillook.sync.threads}") int threads) {
         this.accounts = accounts;
         this.cursors = cursors;
+        this.alerts = alerts;
         this.messages = messages;
         this.imap = imap;
         this.ai = ai;
@@ -111,6 +115,14 @@ public class SyncService {
             }
             syncExtras(store, a, own, rules);
             accounts.syncDone(a.id());
+            // Ring their browsers and phones, but not for the first fill of a mailbox just added.
+            if (a.inboxLastUid() != null && !newInbox.isEmpty()) {
+                try {
+                    alerts.arrived(a.userId(), newInbox);
+                } catch (Exception e) {
+                    log.debug("Alerts failed: {}", e.toString());
+                }
+            }
             // New mail plus anything an earlier AI pass missed (newest first; AI marks what it checked).
             List<Long> unchecked = messages.awaitingAiLane(a.id(), 100);
             if (!unchecked.isEmpty()) ai.classifyLater(a.userId(), unchecked);

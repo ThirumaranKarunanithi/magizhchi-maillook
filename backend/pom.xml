@@ -66,6 +66,25 @@
             <version>3.0.3</version>
         </dependency>
 
+        <!-- Browser and phone alerts (Web Push, VAPID); same versions as Magizhchi Meet -->
+        <dependency>
+            <groupId>nl.martijndwars</groupId>
+            <artifactId>web-push</artifactId>
+            <version>5.1.1</version>
+            <exclusions>
+                <!-- Only the Apache client is used; this one pulls in Netty -->
+                <exclusion>
+                    <groupId>org.asynchttpclient</groupId>
+                    <artifactId>async-http-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.78.1</version>
+        </dependency>
+
         <!-- DB: H2 file DB for zero-setup local runs, Postgres in production -->
         <dependency>
             <groupId>com.h2database</groupId>

@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom'
 import { del, postForm, put } from '../api.js'
 import { useMail } from '../state.jsx'
 import { bodyAsText, EMAIL_RE, formatSize, fullDate, signatureBlock, splitAddresses } from '../util.js'
-import { IconCalendar, IconPaperclip, IconSend, IconTrash, IconX } from './Icons.jsx'
+import { IconAlert, IconBell, IconCalendar, IconPaperclip, IconPlus, IconSend, IconTrash, IconX } from './Icons.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import { SuggestList, useAddressCheck, useOftenWith, useSuggestions } from './AddressSuggest.jsx'
+import { FOLLOW_UP, followUpAt } from '../when.js'
 
 function uniq(list, exclude = new Set()) {
   const seen = new Set()
@@ -116,21 +118,33 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: su
 }
 
 /** To/Cc/Bcc: chips plus the half-typed text, both owned by the parent so Send never loses a typed address. */
-function RecipientField({ label, chips, setChips, text, setText, autoFocus, children }) {
+function RecipientField({ label, chips, setChips, text, setText, autoFocus, accountId, others = [], names, onName, children }) {
+  const suggestions = useSuggestions(text, accountId, [...others, ...chips])
+  const [active, setActive] = useState(0)
+  const [hidden, setHidden] = useState(false)
+  useEffect(() => { setActive(0); setHidden(false) }, [suggestions])
+  const showing = !hidden && suggestions.length > 0 && text.trim().length > 0
+
   function commit() {
     const parts = splitAddresses(text)
     if (parts.length) setChips(uniq([...chips, ...parts]))
     setText('')
   }
+  function pick(s) {
+    setChips(uniq([...chips, s.email]))
+    if (s.name) onName?.(s.email, s.name)
+    setText('')
+  }
   return (
-    <div className="flex items-start gap-2 border-b border-slate-200/80 px-4 py-1.5">
+    <div className="relative flex items-start gap-2 border-b border-slate-200/80 px-4 py-1.5">
       <span className="w-10 shrink-0 pt-1.5 text-xs font-semibold text-slate-500">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {chips.map((c) => {
           const ok = EMAIL_RE.test(c)
+          const name = names?.[c.toLowerCase()]
           return (
-            <span key={c} className={`chip ${ok ? '' : '!bg-red-50 !text-red-700'}`} title={ok ? c : 'This does not look like an email address'}>
-              {c}
+            <span key={c} className={`chip ${ok ? '' : '!bg-red-50 !text-red-700'}`} title={ok ? (name ? `${name} <${c}>` : c) : 'This does not look like an email address'}>
+              {name || c}
               <button type="button" onClick={() => setChips(chips.filter((x) => x !== c))} aria-label={`Remove ${c}`} className="opacity-60 hover:opacity-100">
                 <IconX size={11} />
               </button>
@@ -152,16 +166,23 @@ function RecipientField({ label, chips, setChips, text, setText, autoFocus, chil
             } else setText(v)
           }}
           onKeyDown={(e) => {
+            if (showing && e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => (a + 1) % suggestions.length); return }
+            if (showing && e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => (a - 1 + suggestions.length) % suggestions.length); return }
+            if (showing && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); pick(suggestions[active]); return }
+            if (showing && e.key === 'Escape') { e.stopPropagation(); setHidden(true); return }
             if (e.key === 'Enter' && text.trim()) { e.preventDefault(); commit() }
             if (e.key === 'Backspace' && !text && chips.length) setChips(chips.slice(0, -1))
           }}
           onBlur={commit}
           aria-label={label}
+          aria-autocomplete="list"
+          aria-expanded={showing}
           type="text"
-          autoComplete="email"
+          autoComplete="off"
         />
       </div>
       {children}
+      {showing && <SuggestList items={suggestions} active={active} onPick={pick} onHover={setActive} />}
     </div>
   )
 }
@@ -185,6 +206,9 @@ export default function Composer() {
   const [files, setFiles] = useState([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
+  const [remind, setRemind] = useState('')
+  const [names, setNames] = useState({}) // email → name, from suggestions
+  const [typoOk, setTypoOk] = useState(false) // they chose to send to an address that looked mistyped
   const fileInput = useRef(null)
   const bodyRef = useRef(null)
   // Drafts: saved a moment after each change and on close. One save at a time, in order.
@@ -211,6 +235,20 @@ export default function Composer() {
   // only what the user typed or changed counts: an untouched reply (prefilled To, subject and quote) closes without a question
   const dirty = to.join() !== init.to.join() || cc.join() !== init.cc.join() || bcc.join() !== init.bcc.join() || toText || ccText || bccText
     || subject !== init.subject || text !== init.text || files.length
+
+  const everyone = uniq([...to, ...cc, ...bcc])
+  const oftenWith = useOftenWith(everyone, fromId).filter((s) => !everyone.some((x) => x.toLowerCase() === s.email))
+  const checks = useAddressCheck(everyone)
+  const typos = checks.filter((c) => c.problem === 'typo' || c.problem === 'invalid')
+  const rememberName = (email, name) => setNames((n) => ({ ...n, [email.toLowerCase()]: name }))
+
+  /** Swaps a mistyped address for the suggested one, wherever it is. */
+  function fix(bad, good) {
+    const swap = (list) => uniq(list.map((x) => (x.toLowerCase() === bad.toLowerCase() ? good : x)))
+    setTo(swap)
+    setCc(swap)
+    setBcc(swap)
+  }
 
   function changeFrom(id) {
     const block = (x) => signatureBlock(accounts.find((a) => a.id === Number(x))?.signature)
@@ -292,6 +330,10 @@ export default function Composer() {
     if (!fromId) return setError('Add a mailbox under Manage accounts before sending.')
     if (!toList.length && !ccList.length && !bccList.length) return setError('Who is this going to? Add at least one recipient.')
     if (bad.length) return setError(`These don't look like email addresses: ${bad.join(', ')}`)
+    if (typos.length && !typoOk) {
+      setTypoOk(true)
+      return setError('One address looks mistyped (see above). Fix it, or press Send again to send as it is.')
+    }
     if (!subject.trim() && !sendWithoutSubject) return setAsk('nosubject')
 
     const payload = {
@@ -300,6 +342,7 @@ export default function Composer() {
       subject, text,
       ...(init.replyToMessageId ? { replyToMessageId: init.replyToMessageId } : {}),
       ...(invite ? { inviteCardId: invite.cardId } : {}),
+      ...(remind ? { remindAt: followUpAt(remind).toISOString() } : {}),
     }
     const form = new FormData()
     form.append('payload', new Blob([JSON.stringify(payload)], { type: 'application/json' }))
@@ -313,7 +356,7 @@ export default function Composer() {
     form.set('payload', new Blob([JSON.stringify(payload)], { type: 'application/json' }))
     try {
       await postForm('/api/send', form)
-      notify('Sent ✓', 'success')
+      notify(remind ? 'Sent ✓ If nobody replies, it comes back to Needs me.' : 'Sent ✓', 'success')
       closeComposer()
       bumpMail()
       refreshCounts()
@@ -365,14 +408,43 @@ export default function Composer() {
             return a ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: a.color }} /> : null
           })()}
         </div>
-        <RecipientField label="To" chips={to} setChips={setTo} text={toText} setText={setToText} autoFocus={composer.mode === 'new' || composer.mode === 'forward'}>
+        <RecipientField label="To" chips={to} setChips={setTo} text={toText} setText={setToText} autoFocus={composer.mode === 'new' || composer.mode === 'forward'}
+          accountId={fromId} others={[...cc, ...bcc]} names={names} onName={rememberName}>
           {!showCc && <button type="button" className="pt-1 text-xs font-semibold text-peacock-600 hover:underline" onClick={() => setShowCc(true)}>Cc/Bcc</button>}
         </RecipientField>
         {showCc && (
           <>
-            <RecipientField label="Cc" chips={cc} setChips={setCc} text={ccText} setText={setCcText} />
-            <RecipientField label="Bcc" chips={bcc} setChips={setBcc} text={bccText} setText={setBccText} />
+            <RecipientField label="Cc" chips={cc} setChips={setCc} text={ccText} setText={setCcText}
+              accountId={fromId} others={[...to, ...bcc]} names={names} onName={rememberName} />
+            <RecipientField label="Bcc" chips={bcc} setChips={setBcc} text={bccText} setText={setBccText}
+              accountId={fromId} others={[...to, ...cc]} names={names} onName={rememberName} />
           </>
+        )}
+        {(oftenWith.length > 0 || checks.length > 0) && (
+          <div className="space-y-1 border-b border-slate-200/80 bg-slate-50/60 px-4 py-1.5 text-xs">
+            {checks.map((c) => (
+              <p key={c.email} className={`flex flex-wrap items-center gap-1.5 ${c.problem === 'typo' || c.problem === 'invalid' ? 'text-amber-800' : 'text-slate-600'}`}>
+                {c.problem === 'typo' || c.problem === 'invalid' ? <IconAlert size={13} /> : <span aria-hidden="true">👋</span>}
+                <span>{c.message}</span>
+                {c.didYouMean && (
+                  <button type="button" className="font-semibold text-peacock-700 hover:underline" onClick={() => fix(c.email, c.didYouMean)}>
+                    Use {c.didYouMean}
+                  </button>
+                )}
+              </p>
+            ))}
+            {oftenWith.length > 0 && (
+              <p className="flex flex-wrap items-center gap-1.5 text-slate-600">
+                <span className="font-semibold">Often on these mails:</span>
+                {oftenWith.map((s) => (
+                  <button key={s.email} type="button" className="chip !bg-white hover:!bg-peacock-50" title={`${s.why || ''} · add to ${showCc ? 'Cc' : 'To'}`}
+                    onClick={() => { if (s.name) rememberName(s.email, s.name); (showCc ? setCc : setTo)((l) => uniq([...l, s.email])) }}>
+                    <IconPlus size={11} />{s.name || s.email}
+                  </button>
+                ))}
+              </p>
+            )}
+          </div>
         )}
         <div className="flex items-center gap-2 border-b border-slate-200/80 px-4 py-1.5">
           <span className="w-10 shrink-0 text-xs font-semibold text-slate-500">Subject</span>
@@ -413,6 +485,12 @@ export default function Composer() {
           <button className="btn-ghost" onClick={() => fileInput.current?.click()} disabled={sending} title="Attach files">
             <IconPaperclip size={16} /> Attach
           </button>
+          <label className={`btn-ghost !px-1.5 ${remind ? '!text-brand-primary' : ''}`} title="If nobody replies by then, the mail comes back to Needs me">
+            <IconBell size={15} />
+            <select className="max-w-[9.5rem] bg-transparent text-sm outline-none" value={remind} onChange={(e) => setRemind(e.target.value)} aria-label="Remind me if nobody replies">
+              {FOLLOW_UP.map((f) => <option key={f.key} value={f.key}>{f.key ? `No reply? ${f.label.toLowerCase()}` : 'No reminder'}</option>)}
+            </select>
+          </label>
           <input ref={fileInput} type="file" multiple className="hidden"
             onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
           <span className="ml-auto truncate text-[11px] text-slate-500" role="status" aria-live="polite">

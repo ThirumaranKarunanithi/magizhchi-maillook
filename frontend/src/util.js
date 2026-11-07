@@ -17,6 +17,7 @@ export const VIEWS = {
   spam: { title: 'Spam', lane: 'all', folder: 'SPAM' },
   trash: { title: 'Trash', lane: 'all', folder: 'TRASH' },
   drafts: { title: 'Drafts', drafts: true },
+  snoozed: { title: 'Snoozed', lane: 'all', folder: 'SNOOZED' },
 }
 
 /** The signature block MailLook puts under new mail: the usual "-- " line, then the text. */

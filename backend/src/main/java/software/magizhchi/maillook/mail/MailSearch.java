@@ -115,8 +115,9 @@ public record MailSearch(String text, String from, boolean hasAttachment, boolea
     void appendTo(StringBuilder sql, List<Object> args) {
         if (text != null && !text.isBlank()) {
             String l = like(text);
-            sql.append(" AND (LOWER(m.subject) LIKE ? OR LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ? OR LOWER(m.body_text) LIKE ?)");
-            args.addAll(List.of(l, l, l, l));
+            sql.append(" AND (LOWER(m.subject) LIKE ? OR LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ? OR LOWER(m.body_text) LIKE ?" +
+                    " OR EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key AND LOWER(tn.body) LIKE ?))");
+            args.addAll(List.of(l, l, l, l, l));
         }
         if (from != null && !from.isBlank()) {
             String l = like(from);

@@ -1,6 +1,8 @@
 import { senderName, shortTime } from '../util.js'
-import { IconArchive, IconFlag, IconPaperclip, IconTrash, IconVideo } from './Icons.jsx'
+import { IconArchive, IconBell, IconFlag, IconNote, IconPaperclip, IconSnooze, IconTrash, IconVideo } from './Icons.jsx'
 import MoveMenu from './MoveMenu.jsx'
+import SnoozeMenu from './SnoozeMenu.jsx'
+import { whenLabel } from '../when.js'
 import LaneMenu from './LaneMenu.jsx'
 
 /** "Starts in 12 min" for mail whose Magizhchi Meet meeting is close; the server pins these first. */
@@ -11,9 +13,10 @@ function startsBadge(at) {
   return m > 0 ? `Starts in ${m} min` : 'Meeting now'
 }
 
-function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onMove }) {
+function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onMove, onSnooze }) {
   const unread = !m.seen
-  const who = sentView ? `To: ${(m.to || []).join(', ') || '(no recipients)'}` : senderName(m)
+  const toLine = `To: ${(m.to || []).join(', ') || '(no recipients)'}`
+  const who = sentView || m.backReason === 'no_reply' ? toLine : senderName(m)
   return (
     <div
       role="button"
@@ -31,6 +34,7 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
         {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-gold" aria-label="Unread" />}
         <span className={`min-w-0 flex-1 truncate text-sm ${unread ? 'font-bold text-brand-ink' : 'font-medium text-slate-700'}`}>{who}</span>
         {m.threadCount > 1 && <span className="rounded bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600 num">{m.threadCount}</span>}
+        {m.hasNote && <IconNote size={13} className="text-amber-600" aria-label="Has your note" />}
         {m.flagged && <IconFlag filled size={13} className="text-red-600" />}
         {m.hasAttachments && <IconPaperclip size={14} className="text-brand-primary" aria-label="Has attachments" />}
         <span className={`shrink-0 text-xs num ${unread ? 'font-semibold text-brand-primary' : 'text-slate-500'}`}>{shortTime(m.receivedAt)}</span>
@@ -39,6 +43,21 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
         {startsBadge(m.meetingStartsAt) && (
           <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-300">
             <IconVideo size={11} />{startsBadge(m.meetingStartsAt)}
+          </span>
+        )}
+        {m.backReason === 'snooze' && (
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
+            <IconSnooze size={11} />Back
+          </span>
+        )}
+        {m.backReason === 'no_reply' && (
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
+            <IconBell size={11} />No reply yet
+          </span>
+        )}
+        {m.snoozedUntil && (
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
+            <IconSnooze size={11} />{whenLabel(m.snoozedUntil)}
           </span>
         )}
         {m.subject || '(no subject)'}
@@ -59,6 +78,7 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
         <button className="icon-btn" title="Done (archive)" onClick={(e) => { e.stopPropagation(); onDone(m.id) }}>
           <IconArchive size={16} />
         </button>
+        {m.folder === 'INBOX' && onSnooze && <SnoozeMenu compact message={m} onSnooze={onSnooze} />}
         {m.folder === 'INBOX' && <LaneMenu compact currentLane={m.lane} sender={m.fromEmail} onMove={(lane, remember) => onMoveLane(m.id, lane, remember)} />}
         {onMove && !sentView && <MoveMenu compact message={m} onMove={onMove} />}
         <button className="icon-btn hover:!text-red-700" title="Move to Trash" onClick={(e) => { e.stopPropagation(); onTrash(m.id) }}>

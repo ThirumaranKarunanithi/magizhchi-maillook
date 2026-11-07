@@ -156,6 +156,33 @@ public class BoxClient {
         return r.json();
     }
 
+    /** A GET on Box with this person's stored key (no connecting). Code 0 = not connected or unreachable. */
+    public Reply get(long userId, String path) {
+        Optional<Link> link = existing(userId);
+        if (link.isEmpty()) return new Reply(0, null, "not connected");
+        Reply r = send("GET", path, link.get().apiKey(), null, null);
+        if (r.code() == 401) forget(userId);
+        return r;
+    }
+
+    /** Downloads a presigned file link Box handed out (needs no key). Null when it can't. */
+    public String fetchText(String url) {
+        if (url == null || url.isBlank()) return null;
+        String full = url.startsWith("http") ? url : api + (url.startsWith("/") ? "" : "/") + url;
+        try {
+            HttpResponse<byte[]> res = http.send(HttpRequest.newBuilder(URI.create(full)).timeout(Duration.ofSeconds(30)).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (res.statusCode() / 100 != 2) return null;
+            return new String(res.body(), StandardCharsets.UTF_8);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            log.debug("Box download failed: {}", e.toString());
+            return null;
+        }
+    }
+
     /** Drops the stored connection (Box revoked it); the next save connects again. */
     public void forget(long userId) {
         jdbc.update("UPDATE users SET box_api_key_enc = NULL, box_drive_id = NULL, box_connected_at = NULL WHERE id = ?", userId);

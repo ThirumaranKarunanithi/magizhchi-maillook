@@ -8,6 +8,8 @@ import Login, { SsoCallback } from './pages/Login.jsx'
 import Mail from './pages/Mail.jsx'
 import Accounts from './pages/Accounts.jsx'
 import Subscriptions from './pages/Subscriptions.jsx'
+import Calendar from './pages/Calendar.jsx'
+import Contacts from './pages/Contacts.jsx'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -58,6 +60,8 @@ export default function App() {
         <Route path="/" element={<Mail />} />
         <Route path="/accounts" element={<Accounts />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
+        <Route path="/calendar" element={<Calendar />} />
+        <Route path="/contacts" element={<Contacts />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

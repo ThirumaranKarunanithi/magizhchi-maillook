@@ -1,0 +1,14 @@
+{
+  "name": "Magizhchi MailLook",
+  "short_name": "MailLook",
+  "description": "Every mailbox in one calm place.",
+  "start_url": "/?view=needs_me",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fbf8f2",
+  "theme_color": "#0e7c86",
+  "icons": [
+    { "src": "/brand/maillook-mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

@@ -7,8 +7,8 @@ import Logo from './Logo.jsx'
 import Badge3D from './Badge3D.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
 import {
-  IconAlert, IconArchive, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo, IconLogout, IconNews,
-  IconRefresh, IconSend, IconSettings, IconSpam, IconTrash,
+  IconAlert, IconArchive, IconBook, IconCalendar, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo,
+  IconLogout, IconNews, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconTrash,
 } from './Icons.jsx'
 
 const LANE_ITEMS = [
@@ -20,6 +20,7 @@ const LANE_ITEMS = [
 const FOLDER_ITEMS = [
   { view: 'all', label: 'All mail', Icon: IconInbox },
   { view: 'drafts', label: 'Drafts', Icon: IconDraft },
+  { view: 'snoozed', label: 'Snoozed', Icon: IconSnooze },
   { view: 'sent', label: 'Sent', Icon: IconSend },
   { view: 'archive', label: 'Archive', Icon: IconArchive },
   { view: 'spam', label: 'Spam', Icon: IconSpam },
@@ -203,6 +204,18 @@ export default function Sidebar({ onNavigate }) {
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>
           <IconNews size={17} className="text-slate-500" />
           <span>Subscriptions</span>
+        </button>
+      </div>
+
+      <div>
+        <button className={`nav-item ${location.pathname === '/calendar' ? 'active' : ''}`} onClick={() => go('/calendar')}>
+          <IconCalendar size={17} className="text-slate-500" />
+          <span>Calendar</span>
+          <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-slate-400">PA</span>
+        </button>
+        <button className={`nav-item ${location.pathname === '/contacts' ? 'active' : ''}`} onClick={() => go('/contacts')}>
+          <IconBook size={17} className="text-slate-500" />
+          <span>Contacts</span>
         </button>
       </div>
 
