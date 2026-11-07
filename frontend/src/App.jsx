@@ -14,6 +14,7 @@ import Today from './pages/Today.jsx'
 import Scheduled from './pages/Scheduled.jsx'
 import Files from './pages/Files.jsx'
 import { DesktopBridge } from './desktop.js'
+import AlertsPrompt from './components/AlertsPrompt.jsx'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -44,6 +45,7 @@ function Shell() {
       {composer && <Composer key={composer.key} />}
       <Toast />
       <DesktopBridge />
+      <AlertsPrompt />
     </div>
   )
 }
