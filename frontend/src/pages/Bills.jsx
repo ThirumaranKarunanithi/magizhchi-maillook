@@ -288,7 +288,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
           </div>
           <IconChevron size={15} className={`shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`} />
         </button>
-        {bill.kind === 'bill' && bill.status === 'due' && !bill.autopay && (safeHttpUrl(bill.payLink) || upiLink(bill)) && !expanded && (
+        {bill.kind === 'bill' && bill.status === 'due' && !bill.autopay && (safeHttpUrl(bill.payLink) || upiLink(bill) || bill.messageId) && !expanded && (
           <button className="btn-primary shrink-0 !px-2.5 !py-1 text-xs" onClick={() => setExpanded(true)} title="Pay this bill">Pay</button>
         )}
         {bill.kind === 'bill' && bill.status === 'due' && (
@@ -304,7 +304,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
             : (
               <>
                 <BillFacts bill={bill} />
-                <div className="mt-2.5"><PayNow bill={bill} compact onPaid={() => setStatus('paid')} busy={!!busy} /></div>
+                <div className="mt-2.5"><PayNow bill={bill} compact onPaid={() => setStatus('paid')} busy={!!busy} onSetUp={() => setEditing(true)} /></div>
                 {bill.mailFrom && <p className="mt-1.5 truncate text-xs text-slate-500">From the mail “{bill.mailSubject}” · {bill.mailFrom}</p>}
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {bill.messageId && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.messageId}`)}>Open the mail</button>}

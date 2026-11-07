@@ -86,6 +86,14 @@ class BillsTest {
     @Autowired JdbcTemplate jdbc;
 
     @Test
+    void findsTheAccountNameInTheMail() {
+        assertThat(BillService.accountNameIn("Bill Amount: Rs. 6010.92\nBill Category: Broadband\nAccount Name: alwarpuram\nDue Date: Nov 15, 2026")).isEqualTo("alwarpuram");
+        assertThat(BillService.accountNameIn("Account Name\nalwarpuram\nDue Date")).isEqualTo("alwarpuram");
+        assertThat(BillService.accountNameIn("Consumer name: R. Kumar Due date 19 Nov")).isEqualTo("R. Kumar");
+        assertThat(BillService.accountNameIn("Your account number 1146")).isNull();
+    }
+
+    @Test
     void theWordFilterPicksLikelyBills() {
         assertThat(BillDetector.looksLikeBill("Your ACT Fibernet bill for November", "Amount due Rs. 1,180", List.of(), null)).isTrue();
         assertThat(BillDetector.looksLikeBill("Tax Invoice INV-77", "", List.of("INV-77.pdf"), null)).isTrue();
@@ -186,6 +194,9 @@ class BillsTest {
         assertThat(joined.has("amountInr")).isFalse();
         assertThat(call(get("/api/messages/" + gpayMail + "/bill"), token, 200).path("bill").path("id").asLong())
                 .isEqualTo(act.path("id").asLong());
+        // Set by hand: the pay link is checked, and the biller's other bills still to pay get it too.
+        call(patch("/api/bills/" + usd(three)).contentType(MediaType.APPLICATION_JSON).content("{\"payLink\":\"http://plain.example\"}"), token, 400);
+        call(patch("/api/bills/" + usd(three)).contentType(MediaType.APPLICATION_JSON).content("{\"upiId\":\"not a upi\"}"), token, 400);
         // A dollar bill also says what it comes to in rupees.
         JsonNode usd = find(three, "Railway");
         assertThat(usd.path("currency").asText()).isEqualTo("USD");
@@ -200,7 +211,18 @@ class BillsTest {
         JsonNode bsnl = find(call(get("/api/bills"), token, 200).path("bills"), "BSNL Landline");
         assertThat(bsnl.path("accountName").asText()).isEqualTo("home");
         assertThat(bsnl.path("dueDate").asText()).isEqualTo(DUE.plusDays(1).toString());
-        jdbc.update("DELETE FROM bills WHERE vendor_key = 'bsnl landline'");
+        // A bill with no way to pay borrows the biller's link; one the person sets is shared.
+        jdbc.update("INSERT INTO bills (user_id, kind, vendor, vendor_key, due_date, amount, currency, status) VALUES (?, 'bill', 'ACT Fibernet', 'act fibernet', ?, 2271.50, 'INR', 'due')", userId, DUE);
+        long small = jdbc.queryForObject("SELECT id FROM bills WHERE amount = 2271.50", Long.class);
+        assertThat(bills.fillPayWays()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT pay_link FROM bills WHERE id = ?", String.class, small)).isEqualTo("https://pay.example/act?b=1&c=2");
+        long bsnlId = bsnl.path("id").asLong();
+        jdbc.update("INSERT INTO bills (user_id, kind, vendor, vendor_key, due_date, amount, currency, status) VALUES (?, 'bill', 'BSNL Mobile', 'bsnl mobile', ?, 299, 'INR', 'due')", userId, DUE.plusDays(20));
+        JsonNode set = call(patch("/api/bills/" + bsnlId).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"payLink\":\"https://portal.bsnl.example/pay\",\"upiId\":\" bsnl@sbi \"}"), token, 200);
+        assertThat(set.path("upiId").asText()).isEqualTo("bsnl@sbi");
+        assertThat(jdbc.queryForObject("SELECT upi_id FROM bills WHERE vendor_key = 'bsnl mobile'", String.class)).isEqualTo("bsnl@sbi");
+        jdbc.update("DELETE FROM bills WHERE vendor_key IN ('bsnl landline', 'bsnl mobile') OR id = ?", small);
 
         // The free allowance (5 a month here) is used up: the next bill goes on credits, and Data says
         // there are none. It waits, and doesn't ask Data again on every pass.
@@ -343,6 +365,10 @@ class BillsTest {
         m.setSentDate(Date.from(Instant.now()));
         m.saveChanges();
         greenMail.getUserManager().getUserByEmail("tiru@magizhchi.test").deliver(m);
+    }
+
+    private static long usd(JsonNode list) {
+        return find(list, "Railway").path("id").asLong();
     }
 
     private void deliverHtml(String from, String subject, String html) throws Exception {

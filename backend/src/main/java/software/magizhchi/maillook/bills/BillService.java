@@ -183,6 +183,11 @@ public class BillService {
             log.warn("Bills pass failed: {}", e.toString());
         }
         try {
+            fillPayWays();
+        } catch (Exception e) {
+            log.warn("Filling pay links failed: {}", e.toString());
+        }
+        try {
             mergeDuplicates();
         } catch (Exception e) {
             log.warn("Bill merging failed: {}", e.toString());
@@ -267,7 +272,12 @@ public class BillService {
             state(messageId, "not_bill");
             return new Result(Outcome.NOT_BILL, null, "This mail doesn't look like a bill.");
         }
+        if (b instanceof com.fasterxml.jackson.databind.node.ObjectNode o && text(b, "accountName") == null) {
+            String named = accountNameIn(body);
+            if (named != null) o.put("accountName", named);
+        }
         long billId = save(userId, m, b, kind, amount, reply.json().path("source").asText("text"));
+        borrowPayWay(billId);
         jdbc.update("UPDATE messages SET bill_state = 'read', bill_id = ? WHERE id = ?", billId, messageId);
         return new Result(Outcome.BILL, billId, null);
     }
@@ -408,6 +418,104 @@ public class BillService {
                 d.get("due_date"), d.get("due_date"), d.get("status"), d.get("paid_at"), now, keepId);
         jdbc.update("UPDATE messages SET bill_id = ? WHERE bill_id = ?", keepId, dupId);
         jdbc.update("DELETE FROM bills WHERE id = ?", dupId);
+    }
+
+    private final Set<Long> nameLooked = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    private static final Pattern ACCOUNT_NAME = Pattern.compile(
+            "(?:account|customer|consumer|subscriber)\\s*name\\s*[:：\\-]?\\s*\\n?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N} .&'/-]{1,59})",
+            Pattern.CASE_INSENSITIVE);
+
+    /** "Account Name: alwarpuram" in a bill mail's text, or null. */
+    public static String accountNameIn(String text) {
+        if (text == null) return null;
+        Matcher m = ACCOUNT_NAME.matcher(text.length() > 20_000 ? text.substring(0, 20_000) : text);
+        if (!m.find()) return null;
+        String v = m.group(1).replaceAll("\\s+", " ").trim();
+        // Stop at the next label on the same line ("alwarpuram Due Date …").
+        v = v.replaceAll("(?i)\\s+(bill|due|amount|account|invoice|date|category|plan|mobile|email)\\b.*$", "").trim();
+        return v.length() >= 2 && v.length() <= 60 ? v : null;
+    }
+
+    private final Set<Long> payLooked = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /**
+     * Bills still to pay with no way to pay them: looks in their mails for a Pay now button or a UPI
+     * link (free, no Data), then borrows the link the same biller's other bills have. Each bill is
+     * looked at once per run of the server.
+     * @return how many bills got a way to pay
+     */
+    public int fillPayWays() {
+        int filled = 0;
+        for (Long id : jdbc.queryForList("SELECT id FROM bills WHERE account_name IS NULL AND (status = 'due' OR updated_at >= ?) ORDER BY id",
+                Long.class, OffsetDateTime.now(ZoneOffset.UTC).minusDays(60))) {
+            if (!nameLooked.add(id)) continue;
+            for (Map<String, Object> r : jdbc.queryForList("SELECT body_text, body_html FROM messages WHERE " +
+                    "(bill_id = ? OR id = (SELECT message_id FROM bills WHERE id = ?)) ORDER BY id DESC", id, id)) {
+                String text = r.get("body_text") != null && !r.get("body_text").toString().isBlank() ? r.get("body_text").toString()
+                        : r.get("body_html") == null ? "" : MessageParser.htmlToText(r.get("body_html").toString());
+                String named = accountNameIn(text);
+                if (named != null) {
+                    jdbc.update("UPDATE bills SET account_name = ? WHERE id = ? AND account_name IS NULL", named, id);
+                    break;
+                }
+            }
+        }
+        for (Long id : jdbc.queryForList("SELECT id FROM bills WHERE kind = 'bill' AND status = 'due' AND autopay = FALSE " +
+                "AND pay_link IS NULL AND upi_id IS NULL ORDER BY id", Long.class)) {
+            if (!payLooked.add(id)) continue;
+            String link = null, upi = null;
+            for (String html : jdbc.queryForList("SELECT body_html FROM messages WHERE body_html IS NOT NULL AND " +
+                    "(bill_id = ? OR id = (SELECT message_id FROM bills WHERE id = ?)) ORDER BY id DESC", String.class, id, id)) {
+                if (link == null) link = payLinkIn(html);
+                if (upi == null) upi = upiIn(html);
+            }
+            if (link != null || upi != null) {
+                jdbc.update("UPDATE bills SET pay_link = COALESCE(pay_link, ?), upi_id = COALESCE(upi_id, ?) WHERE id = ?",
+                        clip(link, 1000), clip(upi, 100), id);
+                filled++;
+            } else if (borrowPayWay(id)) {
+                filled++;
+            }
+        }
+        return filled;
+    }
+
+    /**
+     * A bill with no way to pay takes the newest pay link and UPI ID the same biller's other bills
+     * have (by the first word of the name: "ACT Broadband" and "ACT Fibernet" are one biller).
+     */
+    boolean borrowPayWay(long billId) {
+        List<Map<String, Object>> me = jdbc.queryForList("SELECT user_id, vendor_key, pay_link, upi_id FROM bills WHERE id = ?", billId);
+        if (me.isEmpty() || me.get(0).get("pay_link") != null || me.get(0).get("upi_id") != null) return false;
+        String first = firstWord(str(me.get(0).get("vendor_key")));
+        if (first == null) return false;
+        for (Map<String, Object> o : jdbc.queryForList("SELECT vendor_key, pay_link, upi_id FROM bills WHERE user_id = ? AND id <> ? " +
+                "AND (pay_link IS NOT NULL OR upi_id IS NOT NULL) ORDER BY updated_at DESC, id DESC LIMIT 50", me.get(0).get("user_id"), billId)) {
+            if (!first.equals(firstWord(str(o.get("vendor_key"))))) continue;
+            jdbc.update("UPDATE bills SET pay_link = ?, upi_id = ? WHERE id = ?", o.get("pay_link"), o.get("upi_id"), billId);
+            return true;
+        }
+        return false;
+    }
+
+    /** The person set how to pay this biller: other bills of theirs still to pay with no way to pay get it too. */
+    public void sharePayWay(long userId, long billId) {
+        Map<String, Object> me = jdbc.queryForMap("SELECT vendor_key, pay_link, upi_id FROM bills WHERE id = ?", billId);
+        String first = firstWord(str(me.get("vendor_key")));
+        if (first == null || (me.get("pay_link") == null && me.get("upi_id") == null)) return;
+        for (Map<String, Object> o : jdbc.queryForList("SELECT id, vendor_key FROM bills WHERE user_id = ? AND id <> ? AND status = 'due' " +
+                "AND pay_link IS NULL AND upi_id IS NULL", userId, billId)) {
+            if (first.equals(firstWord(str(o.get("vendor_key"))))) {
+                jdbc.update("UPDATE bills SET pay_link = ?, upi_id = ? WHERE id = ?", me.get("pay_link"), me.get("upi_id"), o.get("id"));
+            }
+        }
+    }
+
+    /** A UPI ID as people write it (name@bank), or null. */
+    static String upiId(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.matches("[A-Za-z0-9._-]{2,64}@[A-Za-z][A-Za-z0-9.-]{1,32}") ? t : null;
     }
 
     private static String firstWord(String vendorKey) {

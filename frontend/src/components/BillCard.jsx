@@ -19,6 +19,8 @@ export function BillEditor({ bill, onSaved, onCancel }) {
     dueDate: bill.dueDate || '',
     invoiceNo: bill.invoiceNo || '',
     accountName: bill.accountName || '',
+    payLink: bill.payLink || '',
+    upiId: bill.upiId || '',
     autopay: !!bill.autopay,
   })
   const [busy, setBusy] = useState(false)
@@ -29,7 +31,7 @@ export function BillEditor({ bill, onSaved, onCancel }) {
     e.preventDefault()
     setBusy(true)
     try {
-      onSaved(await patch(`/api/bills/${bill.id}`, { ...f, dueDate: f.dueDate || null }))
+      onSaved(await patch(`/api/bills/${bill.id}`, { ...f, dueDate: f.dueDate || null, payLink: f.payLink.trim() || null, upiId: f.upiId.trim() || null }))
       notify('Bill updated ✓', 'success')
     } catch (err) {
       notify(err.message, 'error')
@@ -55,6 +57,13 @@ export function BillEditor({ bill, onSaved, onCancel }) {
       </label>
       <label className="font-semibold text-slate-600">Account name
         <input className={`${input} ${flag('accountName')}`} value={f.accountName} onChange={set('accountName')} maxLength={100} placeholder="e.g. Home" />
+      </label>
+      <label className="col-span-2 font-semibold text-slate-600">Pay link <span className="font-normal text-slate-400">(the biller’s payment page)</span>
+        <input className={`${input} border-slate-200`} value={f.payLink} onChange={set('payLink')} type="url" pattern="https://.*" placeholder="https://…" maxLength={1000} />
+      </label>
+      <label className="col-span-2 font-semibold text-slate-600">UPI ID <span className="font-normal text-slate-400">(name@bank, if the bill gives one)</span>
+        <input className={`${input} border-slate-200`} value={f.upiId} onChange={set('upiId')} placeholder="e.g. biller@hdfcbank" maxLength={100} autoCapitalize="none" spellCheck={false} />
+        <span className="mt-0.5 block font-normal text-slate-400">Saved for this biller’s other bills too.</span>
       </label>
       <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700">
         <input type="checkbox" checked={f.autopay} onChange={set('autopay')} /> Paid automatically (auto-debit) — no reminders
@@ -108,15 +117,24 @@ function UpiQr({ link }) {
  * Pay now: the biller's own payment page, or (with a UPI ID) the phone's UPI apps with the amount
  * filled in, or on a computer a QR code to scan with them. Then it asks whether it went through.
  */
-export function PayNow({ bill, onPaid, busy, compact = false }) {
+export function PayNow({ bill, onPaid, busy, compact = false, onSetUp }) {
+  const navigate = useNavigate()
   const [asked, setAsked] = useState(false)
   const [qr, setQr] = useState(false)
   if (bill.kind !== 'bill' || bill.status !== 'due' || bill.autopay) return null
   const page = safeHttpUrl(bill.payLink)
   const upi = upiLink(bill)
-  if (!page && !upi) return null
-  const phone = onPhone()
   const size = compact ? '!px-2.5 !py-1 text-xs' : '!px-3 !py-1.5 text-sm'
+  if (!page && !upi) {
+    // Nothing to pay with yet: the mail itself (its own button or bank details), or set it once.
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+        {bill.messageId && <button type="button" className={`btn-primary ${size}`} onClick={() => navigate(`/?open=${bill.messageId}`)}>Pay from the mail</button>}
+        {onSetUp && <button type="button" className="font-semibold text-peacock-700 hover:underline" onClick={onSetUp}>Add a pay link or UPI ID</button>}
+      </div>
+    )
+  }
+  const phone = onPhone()
 
   function pay() {
     setAsked(true)
@@ -275,7 +293,7 @@ export default function BillCard({ message }) {
       ) : (
         <>
           <BillFacts bill={bill} />
-          <div className="mt-2.5"><PayNow bill={bill} onPaid={() => setStatus('paid')} busy={!!busy} /></div>
+          <div className="mt-2.5"><PayNow bill={message.id === bill.messageId ? { ...bill, messageId: null } : bill} onPaid={() => setStatus('paid')} busy={!!busy} onSetUp={() => setEditing(true)} /></div>
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {bill.kind === 'bill' && (bill.status === 'due'
               ? <button className="btn-primary !px-2.5 !py-1 text-xs" onClick={() => setStatus('paid')} disabled={!!busy}>{busy === 'paid' ? <span className="spinner" /> : <IconCheck size={13} />} Mark paid</button>

@@ -135,6 +135,21 @@ public class BillsController {
             sets.add("vendor = ?");
             args.add(v);
         }
+        boolean payWay = false;
+        if (body.containsKey("payLink")) {
+            String l = trimmed(body.get("payLink"), 1000);
+            if (l != null && !l.startsWith("https://")) throw ApiException.bad("The pay link should start with https://");
+            sets.add("pay_link = ?");
+            args.add(l);
+            payWay = true;
+        }
+        if (body.containsKey("upiId")) {
+            String u = trimmed(body.get("upiId"), 100);
+            if (u != null && BillService.upiId(u) == null) throw ApiException.bad("A UPI ID looks like name@bank, e.g. actfibernet@hdfcbank.");
+            sets.add("upi_id = ?");
+            args.add(u == null ? null : BillService.upiId(u));
+            payWay = true;
+        }
         if (body.containsKey("accountName")) { sets.add("account_name = ?"); args.add(trimmed(body.get("accountName"), 100)); }
         if (body.containsKey("invoiceNo")) { sets.add("invoice_no = ?"); args.add(trimmed(body.get("invoiceNo"), 100)); }
         if (body.containsKey("dueDate")) { sets.add("due_date = ?"); args.add(dateOrNull(body.get("dueDate"))); sets.add("remind_before_sent = FALSE"); sets.add("remind_day_sent = FALSE"); }
@@ -163,6 +178,7 @@ public class BillsController {
         args.add(OffsetDateTime.now(ZoneOffset.UTC));
         args.add(id);
         jdbc.update("UPDATE bills SET " + String.join(", ", sets) + " WHERE id = ?", args.toArray());
+        if (payWay) bills.sharePayWay(userId, id);
         return one(userId, id);
     }
 
