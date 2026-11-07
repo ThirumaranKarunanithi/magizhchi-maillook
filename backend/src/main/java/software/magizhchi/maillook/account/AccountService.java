@@ -23,6 +23,7 @@ public class AccountService {
 
     public static final List<String> COLORS = List.of(
             "#0e7c86", "#B45309", "#7c3aed", "#be185d", "#15803d", "#1d4ed8", "#c2410c", "#0f766e", "#a16207", "#4338ca");
+    private static final Pattern APP_PASSWORD = Pattern.compile("^[A-Za-z]{4}( [A-Za-z]{4}){3}$");
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
 
     public record NewAccount(String email, String password, String displayName,
@@ -34,16 +35,18 @@ public class AccountService {
     private final ImapClient imap;
     private final SecretBox secrets;
     private final SyncService sync;
+    private final OAuthTokens oauth;
     private final ExecutorService bulkPool = Executors.newFixedThreadPool(5);
 
     public AccountService(AccountRepo repo, MessageRepo messages, ProviderDetector detector, ImapClient imap,
-                          SecretBox secrets, SyncService sync) {
+                          SecretBox secrets, SyncService sync, OAuthTokens oauth) {
         this.repo = repo;
         this.messages = messages;
         this.detector = detector;
         this.imap = imap;
         this.secrets = secrets;
         this.sync = sync;
+        this.oauth = oauth;
     }
 
     public static String normalize(String email) {
@@ -69,17 +72,47 @@ public class AccountService {
         if (repo.findByEmail(userId, email).isPresent()) {
             throw new ApiException(HttpStatus.CONFLICT, email + " is already in Magizhchi MailLook.");
         }
-        NewAccount clean = new NewAccount(email, n.password(), n.displayName(), n.imapHost(), n.imapPort(), n.smtpHost(), n.smtpPort());
+        // Google shows App Passwords as "abcd efgh ijkl mnop"; the spaces aren't part of it.
+        String password = APP_PASSWORD.matcher(n.password().trim()).matches() ? n.password().replace(" ", "") : n.password();
+        NewAccount clean = new NewAccount(email, password, n.displayName(), n.imapHost(), n.imapPort(), n.smtpHost(), n.smtpPort());
         ProviderDetector.Preset p = preset(clean);
-        imap.verify(p.imapHost(), p.imapPort(), email, n.password());
+        if ("proton".equals(p.provider()) && blank(n.imapHost())) throw ApiException.bad(p.note());
+        imap.verify(p.imapHost(), p.imapPort(), email, password);
         int existing = repo.forUser(userId).size();
         String name = blank(n.displayName()) ? defaultName(email) : n.displayName().trim();
         long id;
         try {
-            id = repo.insert(userId, email, name, COLORS.get(existing % COLORS.size()), p, secrets.encrypt(n.password()));
+            id = repo.insert(userId, email, name, COLORS.get(existing % COLORS.size()), p, secrets.encrypt(password));
         } catch (org.springframework.dao.DuplicateKeyException race) {
             throw new ApiException(HttpStatus.CONFLICT, email + " is already in Magizhchi MailLook.");
         }
+        sync.request(id);
+        return repo.find(id).orElseThrow();
+    }
+
+    /**
+     * Adds (or switches over) a mailbox signed in with Google / Microsoft: checks the token opens
+     * the mailbox, keeps the refresh token encrypted, and starts syncing.
+     */
+    public Account connectOAuth(long userId, OAuthTokens.Provider p, OAuthTokens.Grant g) {
+        ProviderDetector.Preset servers = p.servers();
+        imap.verifyToken(servers.imapHost(), servers.imapPort(), g.email(), g.accessToken(), p.label());
+        String enc = secrets.encrypt(g.refreshToken());
+        long id;
+        var existing = repo.findByEmail(userId, g.email());
+        if (existing.isPresent()) {
+            id = existing.get().id();
+            repo.updateSignIn(id, "oauth", servers, enc);
+            imap.forget(id);
+        } else {
+            int count = repo.forUser(userId).size();
+            try {
+                id = repo.insert(userId, g.email(), defaultName(g.email()), COLORS.get(count % COLORS.size()), servers, enc, "oauth");
+            } catch (org.springframework.dao.DuplicateKeyException race) {
+                throw new ApiException(HttpStatus.CONFLICT, g.email() + " is already in Magizhchi MailLook.");
+            }
+        }
+        oauth.remember(id, g);
         sync.request(id);
         return repo.find(id).orElseThrow();
     }
@@ -116,6 +149,10 @@ public class AccountService {
         if (color != null && !color.matches("^#[0-9a-fA-F]{6}$")) throw ApiException.bad("Colour must look like #0e7c86.");
         repo.updateProfile(id, blank(displayName) ? null : displayName.trim(), color);
         if (password != null && !password.isEmpty()) {
+            if (a.oauth()) {
+                throw ApiException.bad(a.email() + " signs in with " + ("microsoft".equals(a.provider()) ? "Microsoft" : "Google")
+                        + ", so it has no password here. Use Sign in again instead.");
+            }
             imap.verify(a.imapHost(), a.imapPort(), a.email(), password);
             repo.updatePassword(id, secrets.encrypt(password));
             sync.request(id);
@@ -127,6 +164,7 @@ public class AccountService {
         owned(userId, id);
         repo.delete(id);
         imap.forget(id);
+        oauth.forget(id);
     }
 
     public List<Map<String, Object>> list(long userId) {
@@ -141,6 +179,7 @@ public class AccountService {
         m.put("displayName", a.displayName());
         m.put("color", a.color());
         m.put("provider", a.provider());
+        m.put("auth", a.oauth() ? "oauth" : "password");
         m.put("imapHost", a.imapHost());
         m.put("imapPort", a.imapPort());
         m.put("smtpHost", a.smtpHost());

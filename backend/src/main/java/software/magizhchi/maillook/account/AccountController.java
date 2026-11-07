@@ -28,11 +28,13 @@ public class AccountController {
     private final AccountService service;
     private final ProviderDetector detector;
     private final SyncService sync;
+    private final OAuthTokens oauth;
 
-    public AccountController(AccountService service, ProviderDetector detector, SyncService sync) {
+    public AccountController(AccountService service, ProviderDetector detector, SyncService sync, OAuthTokens oauth) {
         this.service = service;
         this.detector = detector;
         this.sync = sync;
+        this.oauth = oauth;
     }
 
     @GetMapping("/accounts")
@@ -50,6 +52,9 @@ public class AccountController {
         m.put("smtpHost", p.smtpHost());
         m.put("smtpPort", p.smtpPort());
         m.put("note", p.note());
+        // "google" / "microsoft" when this server can sign in there, so the form offers that button.
+        m.put("oauth", oauth.offers(p.provider()) ? p.provider() : null);
+        m.put("help", SignInHelp.forProvider(p.provider()));
         return m;
     }
 

@@ -22,7 +22,8 @@ public class AccountRepo {
             rs.getString("smtp_host"), rs.getInt("smtp_port"), rs.getString("password_enc"), rs.getString("status"),
             rs.getObject("last_sync_at", OffsetDateTime.class), rs.getString("last_error"),
             (Long) rs.getObject("inbox_uid_validity", Long.class), (Long) rs.getObject("inbox_last_uid", Long.class),
-            (Long) rs.getObject("sent_uid_validity", Long.class), (Long) rs.getObject("sent_last_uid", Long.class));
+            (Long) rs.getObject("sent_uid_validity", Long.class), (Long) rs.getObject("sent_last_uid", Long.class),
+            rs.getString("auth"));
 
     public AccountRepo(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
@@ -51,11 +52,15 @@ public class AccountRepo {
     }
 
     public long insert(long userId, String email, String displayName, String color, ProviderDetector.Preset p, String passwordEnc) {
+        return insert(userId, email, displayName, color, p, passwordEnc, "password");
+    }
+
+    public long insert(long userId, String email, String displayName, String color, ProviderDetector.Preset p, String passwordEnc, String auth) {
         GeneratedKeyHolder kh = new GeneratedKeyHolder();
         jdbc.update(con -> {
             PreparedStatement ps = con.prepareStatement(
-                    "INSERT INTO accounts (user_id, email, display_name, color, provider, imap_host, imap_port, smtp_host, smtp_port, password_enc, status) " +
-                            "VALUES (?,?,?,?,?,?,?,?,?,?, 'new')", Statement.RETURN_GENERATED_KEYS);
+                    "INSERT INTO accounts (user_id, email, display_name, color, provider, imap_host, imap_port, smtp_host, smtp_port, password_enc, auth, status) " +
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?, 'new')", Statement.RETURN_GENERATED_KEYS);
             ps.setLong(1, userId);
             ps.setString(2, email);
             ps.setString(3, displayName);
@@ -66,6 +71,7 @@ public class AccountRepo {
             ps.setString(8, p.smtpHost());
             ps.setInt(9, p.smtpPort());
             ps.setString(10, passwordEnc);
+            ps.setString(11, auth);
             return ps;
         }, kh);
         return ((Number) kh.getKeys().get("id")).longValue();
@@ -78,6 +84,18 @@ public class AccountRepo {
 
     public void updatePassword(long id, String passwordEnc) {
         jdbc.update("UPDATE accounts SET password_enc = ?, status = 'new', last_error = NULL WHERE id = ?", passwordEnc, id);
+    }
+
+    /** Switches a mailbox to a new way of signing in (and its servers), e.g. password → Sign in with Microsoft. */
+    public void updateSignIn(long id, String auth, ProviderDetector.Preset p, String secretEnc) {
+        jdbc.update("UPDATE accounts SET auth = ?, provider = ?, imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?, " +
+                "password_enc = ?, status = 'new', last_error = NULL WHERE id = ?",
+                auth, p.provider(), p.imapHost(), p.imapPort(), p.smtpHost(), p.smtpPort(), secretEnc, id);
+    }
+
+    /** Stores a rotated refresh token without touching the sync status. */
+    public void updateSecret(long id, String secretEnc) {
+        jdbc.update("UPDATE accounts SET password_enc = ? WHERE id = ?", secretEnc, id);
     }
 
     public void setStatus(long id, String status, String error) {

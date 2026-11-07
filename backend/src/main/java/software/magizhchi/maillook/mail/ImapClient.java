@@ -9,6 +9,7 @@ import org.eclipse.angus.mail.imap.IMAPFolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import software.magizhchi.maillook.account.Account;
+import software.magizhchi.maillook.account.OAuthTokens;
 import software.magizhchi.maillook.common.ApiException;
 import software.magizhchi.maillook.common.SecretBox;
 
@@ -27,11 +28,18 @@ public class ImapClient {
     public enum Role { SENT, ARCHIVE, TRASH }
 
     private final SecretBox secrets;
+    private final OAuthTokens oauth;
     /** accountId -> role -> full folder name */
     private final Map<Long, Map<Role, String>> folderCache = new ConcurrentHashMap<>();
 
-    public ImapClient(SecretBox secrets) {
+    public ImapClient(SecretBox secrets, OAuthTokens oauth) {
         this.secrets = secrets;
+        this.oauth = oauth;
+    }
+
+    /** What to sign in with: the saved password, or a fresh access token for Google / Microsoft sign-in. */
+    public String secret(Account a) {
+        return a.oauth() ? oauth.accessToken(a) : password(a);
     }
 
     public String password(Account a) {
@@ -43,10 +51,21 @@ public class ImapClient {
     }
 
     public Store connect(Account a) throws MessagingException {
-        return connect(a.imapHost(), a.imapPort(), a.email(), password(a));
+        try {
+            return connect(a.imapHost(), a.imapPort(), a.email(), secret(a), a.oauth());
+        } catch (AuthenticationFailedException e) {
+            // A token the provider no longer takes: drop it so the next try refreshes.
+            if (a.oauth()) oauth.forget(a.id());
+            throw e;
+        }
     }
 
     public Store connect(String host, int port, String email, String password) throws MessagingException {
+        return connect(host, port, email, password, false);
+    }
+
+    /** {@code xoauth2}: {@code password} is an OAuth access token (Sign in with Google / Microsoft). */
+    public Store connect(String host, int port, String email, String password, boolean xoauth2) throws MessagingException {
         boolean ssl = port == 993;
         String proto = ssl ? "imaps" : "imap";
         Properties p = new Properties();
@@ -62,6 +81,7 @@ public class ImapClient {
             p.put("mail.imap.starttls.enable", "true");
             p.put("mail.imap.starttls.required", String.valueOf(!isLocal(host)));
         }
+        if (xoauth2) p.put("mail." + proto + ".auth.mechanisms", "XOAUTH2");
         Session session = Session.getInstance(p);
         Store store = session.getStore(proto);
         store.connect(host, port, email, password);
@@ -80,11 +100,26 @@ public class ImapClient {
         }
     }
 
+    /** Checks that a Google / Microsoft sign-in really opens the mailbox. */
+    public void verifyToken(String host, int port, String email, String accessToken, String providerLabel) {
+        Store s = null;
+        try {
+            s = connect(host, port, email, accessToken, true);
+        } catch (AuthenticationFailedException e) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, providerLabel + " signed you in, but the mailbox " + email
+                    + " didn't accept it. Check that IMAP is turned on for this mailbox" + said(e) + ".");
+        } catch (MessagingException e) {
+            throw friendly(e, host);
+        } finally {
+            closeQuietly(s);
+        }
+    }
+
     public ApiException friendly(Exception e, String host) {
         Throwable t = e;
         while (t != null) {
-            if (t instanceof AuthenticationFailedException) {
-                return new ApiException(HttpStatus.UNAUTHORIZED, "Wrong email or password (or IMAP access is turned off for this mailbox).");
+            if (t instanceof AuthenticationFailedException af) {
+                return new ApiException(HttpStatus.UNAUTHORIZED, loginRefused(host, af.getMessage()));
             }
             if (t instanceof UnknownHostException) {
                 return new ApiException(HttpStatus.BAD_REQUEST, "Can't find the mail server " + host + ". Check the server name.");
@@ -97,11 +132,71 @@ public class ImapClient {
         return new ApiException(HttpStatus.BAD_GATEWAY, "The mail server said: " + e.getMessage());
     }
 
+    /**
+     * Why a password sign-in was refused, in words that say what to do next. Big providers refuse
+     * normal passwords from mail apps, so for them the answer is an App Password or Sign in with ….
+     */
+    static String loginRefused(String host, String serverSaid) {
+        String h = host == null ? "" : host.toLowerCase(Locale.ROOT);
+        String m = serverSaid == null ? "" : serverSaid.toLowerCase(Locale.ROOT);
+        if (m.contains("web browser") || m.contains("weblogin") || m.contains("web login")) {
+            return "Your provider wants you to confirm this sign-in in a web browser first. Sign in to your mail on the web, "
+                    + "approve the new sign-in if it asks, then try again here.";
+        }
+        if (h.contains("gmail") || h.contains("googlemail") || m.contains("application-specific password")) {
+            return "Google refused this password. Gmail only accepts an App Password from mail apps: turn on 2-Step Verification, "
+                    + "make one at myaccount.google.com/apppasswords and paste its 16 letters here. Or use Sign in with Google.";
+        }
+        if (h.contains("office365") || h.contains("outlook") || h.contains("hotmail")) {
+            return "Microsoft has turned off password sign-in for Outlook, Hotmail and Microsoft 365 mail. Use Sign in with Microsoft instead.";
+        }
+        if (h.contains("yahoo")) {
+            return "Yahoo refused this password. Yahoo only accepts an App Password from mail apps: make one under Account security → "
+                    + "Generate app password, and paste it here.";
+        }
+        if (h.contains("aol.com")) {
+            return "AOL refused this password. AOL only accepts an App Password from mail apps: make one under Account security → "
+                    + "Generate app password, and paste it here.";
+        }
+        if (h.contains("mail.me.com")) {
+            return "Apple refused this password. iCloud Mail only accepts an app-specific password: make one at account.apple.com → "
+                    + "Sign-In and Security → App-Specific Passwords, and paste it here.";
+        }
+        if (h.contains("yandex")) {
+            return "Yandex refused this password. Make an app password for mail at id.yandex.com → Security → App passwords, and paste it here.";
+        }
+        if (h.contains("mail.ru")) {
+            return "Mail.ru refused this password. Make a password for external apps in your Mail.ru security settings, and paste it here.";
+        }
+        if (h.contains("gmx") || h.contains("web.de")) {
+            return "Wrong email or password, or IMAP is turned off. In your mailbox settings, turn on \"POP3/IMAP access\" and try again.";
+        }
+        if (h.contains("fastmail")) {
+            return "Fastmail refused this password. Make an app password under Settings → Privacy & Security → App passwords, and paste it here.";
+        }
+        if (h.contains("zoho")) {
+            return "Zoho refused this password. Turn on IMAP access in Zoho Mail settings; if you use two-factor sign-in, make an App Password and paste it here.";
+        }
+        return "Wrong email or password, or IMAP access is turned off for this mailbox" + said(serverSaid) + ".";
+    }
+
+    private static String said(Exception e) {
+        return said(e.getMessage());
+    }
+
+    private static String said(String serverSaid) {
+        if (serverSaid == null || serverSaid.isBlank()) return "";
+        String t = serverSaid.replaceAll("\\s+", " ").trim();
+        if (t.equalsIgnoreCase("authentication failed") || t.equalsIgnoreCase("[AUTHENTICATIONFAILED] Invalid credentials (Failure)")) return "";
+        return " (the server said: " + (t.length() > 160 ? t.substring(0, 160) + "…" : t) + ")";
+    }
+
     public Session smtpSession(Account a) {
         Properties p = new Properties();
         p.put("mail.smtp.host", a.smtpHost());
         p.put("mail.smtp.port", String.valueOf(a.smtpPort()));
         p.put("mail.smtp.auth", "true");
+        if (a.oauth()) p.put("mail.smtp.auth.mechanisms", "XOAUTH2");
         p.put("mail.smtp.connectiontimeout", "15000");
         p.put("mail.smtp.timeout", "60000");
         if (a.smtpPort() == 465) {

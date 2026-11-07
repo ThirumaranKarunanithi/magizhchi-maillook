@@ -32,6 +32,21 @@ maillook:
     initial-inbox: ${MAILLOOK_SYNC_INITIAL_INBOX:300}
     initial-sent: ${MAILLOOK_SYNC_INITIAL_SENT:100}
     threads: ${MAILLOOK_SYNC_THREADS:4}
+  # Where this API and the web app are reached from the internet. Sign in with Google / Microsoft
+  # sends people back to {public-url}/api/oauth/{google|microsoft}/callback, then on to {web-url}/accounts.
+  public-url: ${MAILLOOK_PUBLIC_URL:http://localhost:8097}
+  web-url: ${MAILLOOK_WEB_URL:http://localhost:5177}
+  oauth:
+    # Sign in with Google for Gmail / Google Workspace mailboxes (Google Cloud → APIs & Services →
+    # Credentials → OAuth client ID, type Web application). Blank hides the button.
+    google:
+      client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+      client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+    # Sign in with Microsoft for Outlook, Hotmail, Live and Microsoft 365 (Microsoft Entra →
+    # App registrations, accounts in any organisation and personal Microsoft accounts). Blank hides it.
+    microsoft:
+      client-id: ${MICROSOFT_OAUTH_CLIENT_ID:}
+      client-secret: ${MICROSOFT_OAUTH_CLIENT_SECRET:}
   ai:
     api-key: ${GEMINI_API_KEY:}
     model: ${GEMINI_MODEL:gemini-2.5-flash}

@@ -228,7 +228,7 @@ public class MailActions {
                 msg.setHeader("References", refs);
             }
             msg.saveChanges();
-            Transport.send(msg, a.email(), imap.password(a));
+            Transport.send(msg, a.email(), imap.secret(a));
 
             Long uid = saveToSent(a, msg);
             String messageId = SyncService.trimId(msg.getMessageID());

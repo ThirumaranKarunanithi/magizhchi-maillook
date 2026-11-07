@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { del, patch, post } from '../api.js'
 import { useMail } from '../state.jsx'
 import { PRESET_COLORS, relativeTime } from '../util.js'
 import PageHeader from '../components/PageHeader.jsx'
-import AddAccountForm from '../components/AddAccountForm.jsx'
+import AddAccountForm, { OAuthButton } from '../components/AddAccountForm.jsx'
+import { PROVIDER_LABEL, ProviderMark } from '../oauth.jsx'
 import BulkAdd from '../components/BulkAdd.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import BoxCard from '../components/BoxCard.jsx'
@@ -27,6 +29,7 @@ function AccountCard({ account, onChanged, onRemove }) {
   const [pwError, setPwError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const status = STATUS[account.status] || STATUS.new
+  const oauth = account.auth === 'oauth'
 
   async function save(body) {
     const updated = await patch(`/api/accounts/${account.id}`, body)
@@ -95,8 +98,11 @@ function AccountCard({ account, onChanged, onRemove }) {
             <span className={`rounded-full border px-2 py-px text-[11px] font-semibold ${status.cls}`}>{status.label}</span>
             {account.unread > 0 && <span className="text-xs font-semibold text-brand-primary">{account.unread} unread</span>}
           </div>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {account.provider || 'mail'} · {account.imapHost}:{account.imapPort} · last synced {relativeTime(account.lastSyncAt)}
+          <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+            {oauth
+              ? <><ProviderMark provider={account.provider} size={12} /> Signed in with {PROVIDER_LABEL[account.provider] || account.provider}</>
+              : <>{account.provider || 'mail'} · {account.imapHost}:{account.imapPort}</>}
+            <span>· last synced {relativeTime(account.lastSyncAt)}</span>
           </p>
           {account.lastError && <p className="mt-1 rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">{account.lastError}</p>}
         </div>
@@ -104,9 +110,14 @@ function AccountCard({ account, onChanged, onRemove }) {
           <button className="btn-secondary !py-1 text-xs" onClick={syncNow} disabled={syncing}>
             <IconRefresh size={14} className={syncing ? 'animate-spin' : ''} /> Sync now
           </button>
-          <button className="btn-secondary !py-1 text-xs" onClick={() => { setPwOpen((o) => !o); setPassword(''); setPwError('') }}>
-            Update password
-          </button>
+          {oauth ? (
+            <OAuthButton provider={account.provider} email={account.email} label="Sign in again"
+              className={`${account.status === 'error' ? 'btn-primary' : 'btn-secondary'} !py-1 text-xs`} onError={(m) => notify(m, 'error')} />
+          ) : (
+            <button className="btn-secondary !py-1 text-xs" onClick={() => { setPwOpen((o) => !o); setPassword(''); setPwError('') }}>
+              Update password
+            </button>
+          )}
           <button className="btn-secondary !py-1 text-xs hover:!text-red-700" onClick={() => onRemove(account)}>
             <IconTrash size={14} /> Remove
           </button>
@@ -163,6 +174,22 @@ export default function Accounts() {
   const [removing, setRemoving] = useState(null)
   const [removeBusy, setRemoveBusy] = useState(false)
   const existing = useMemo(() => new Set(accounts.map((a) => a.email.toLowerCase())), [accounts])
+  const [params, setParams] = useSearchParams()
+
+  // Back from Google / Microsoft sign-in: say how it went, once, and tidy the address bar.
+  useEffect(() => {
+    const ok = params.get('connected')
+    const bad = params.get('connectError')
+    if (!ok && !bad) return
+    if (ok) {
+      notify(`${ok} is connected. Syncing your mail now 🎉`, 'success')
+      refreshAccounts()
+      refreshCounts()
+    } else {
+      notify(bad, 'error')
+    }
+    setParams({}, { replace: true })
+  }, [params]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function changed(updated) {
     if (updated?.id != null) setAccounts((list) => list.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)))
