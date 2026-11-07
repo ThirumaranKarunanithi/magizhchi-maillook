@@ -24,7 +24,7 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(m.id)}
       onKeyDown={(e) => { if (e.key === 'Enter') onSelect(m.id) }}
-      className={`msg-row group relative cursor-pointer border-b border-slate-200/70 py-2.5 pl-4 pr-3 transition-colors ${
+      className={`msg-row group relative cursor-pointer border-b border-slate-200/70 py-3 pl-4 pr-3 transition-colors sm:py-2.5 ${
         selected ? 'bg-amber-50' : unread ? 'bg-white hover:bg-slate-50' : 'bg-white/60 hover:bg-slate-50'
       }`}
     >
@@ -32,46 +32,46 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
       {selected && <span className="absolute inset-y-0 left-1 w-0.5 bg-brand-gold" />}
       <div className="flex items-center gap-2">
         {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-gold" aria-label="Unread" />}
-        <span className={`min-w-0 flex-1 truncate text-sm ${unread ? 'font-bold text-brand-ink' : 'font-medium text-slate-700'}`}>{who}</span>
+        <span className={`min-w-0 flex-1 truncate text-[17px] sm:text-sm ${unread ? 'font-bold text-brand-ink' : 'font-medium text-slate-700'}`}>{who}</span>
         {m.threadCount > 1 && <span className="rounded bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600 num">{m.threadCount}</span>}
         {m.hasNote && <IconNote size={13} className="text-amber-600" aria-label="Has your note" />}
         {m.flagged && <IconFlag filled size={13} className="text-red-600" />}
         {m.hasAttachments && <IconPaperclip size={14} className="text-brand-primary" aria-label="Has attachments" />}
-        <span className={`shrink-0 text-xs num ${unread ? 'font-semibold text-brand-primary' : 'text-slate-500'}`}>{shortTime(m.receivedAt)}</span>
+        <span className={`shrink-0 text-sm sm:text-xs num ${unread ? 'font-semibold text-brand-primary' : 'text-slate-500'}`}>{shortTime(m.receivedAt)}</span>
       </div>
-      <div className={`truncate text-[13px] ${unread ? 'font-semibold text-brand-ink' : 'text-slate-700'}`}>
+      <div className={`mt-0.5 truncate text-base sm:mt-0 sm:text-[13px] ${unread ? 'font-semibold text-brand-ink' : 'text-slate-800 sm:text-slate-700'}`}>
         {startsBadge(m.meetingStartsAt) && (
-          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-300">
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 align-[1px] text-xs sm:text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-300">
             <IconVideo size={11} />{startsBadge(m.meetingStartsAt)}
           </span>
         )}
         {m.backReason === 'snooze' && (
-          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 align-[1px] text-xs sm:text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
             <IconSnooze size={11} />Back
           </span>
         )}
         {m.backReason === 'no_reply' && (
-          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 align-[1px] text-xs sm:text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
             <IconBell size={11} />No reply yet
           </span>
         )}
         {m.waitingDays > 0 && (
-          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-peacock-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-peacock-800 ring-1 ring-peacock-200">
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-peacock-50 px-1.5 py-0.5 align-[1px] text-xs sm:text-[11px] font-semibold text-peacock-800 ring-1 ring-peacock-200">
             <IconClock size={11} />{m.waitingDays} days, no reply
           </span>
         )}
         {m.snoozedUntil && (
-          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 align-[1px] text-xs sm:text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
             <IconSnooze size={11} />{whenLabel(m.snoozedUntil)}
           </span>
         )}
         {m.subject || '(no subject)'}
       </div>
-      <div className="truncate pr-24 text-xs text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : m.snippet}</div>
+      <div className="mt-0.5 truncate text-[15px] text-slate-600 sm:mt-0 sm:pr-24 sm:text-xs sm:text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : m.snippet}</div>
       {m.attachmentNames?.length > 0 && (
-        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 pr-24">
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 sm:pr-24">
           {m.attachmentNames.slice(0, 2).map((n, i) => (
-            <span key={i} className="inline-flex min-w-0 max-w-[60%] items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200/70" title={n}>
+            <span key={i} className="inline-flex min-w-0 max-w-[60%] items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[13px] sm:text-[11px] font-medium text-amber-700 ring-1 ring-amber-200/70" title={n}>
               <IconPaperclip size={11} className="shrink-0" /><span className="truncate">{n}</span>
             </span>
           ))}

@@ -28,7 +28,7 @@ const SOURCE_LABEL = { meet: 'after your meeting', ai: 'sorted by AI', user: 'yo
 
 function Body({ detail }) {
   if (detail.bodyHtml) return <MailFrame html={detail.bodyHtml} title={`Message: ${detail.subject || ''}`} />
-  if (detail.bodyText) return <pre className="paper whitespace-pre-wrap break-words px-[clamp(18px,4vw,40px)] pb-8 pt-7 font-sans text-[15px] leading-[1.65]">{detail.bodyText}</pre>
+  if (detail.bodyText) return <pre className="paper whitespace-pre-wrap break-words px-[clamp(18px,4vw,40px)] pb-8 pt-7 font-sans text-[17px] leading-[1.65] sm:text-[15px]">{detail.bodyText}</pre>
   return <p className="text-sm italic text-slate-500">{detail.snippet || 'This message has no text.'}</p>
 }
 

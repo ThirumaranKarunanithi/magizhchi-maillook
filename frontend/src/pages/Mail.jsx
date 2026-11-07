@@ -54,7 +54,7 @@ function sinceIso(key) {
 function Toggle({ on, onClick, children, title }) {
   return (
     <button type="button" aria-pressed={on} onClick={onClick} title={title}
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold transition-colors ${on
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm sm:px-2 sm:py-0.5 sm:text-[11px] font-semibold transition-colors ${on
         ? 'border-peacock-300 bg-peacock-50 text-peacock-800'
         : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:text-brand-ink'}`}>
       {on && <IconCheck size={11} strokeWidth={2.6} />}
@@ -478,7 +478,7 @@ export default function Mail() {
                 {filters.from ? <span className="max-w-[90px] truncate">From: {filters.from}</span> : 'From…'}
               </Toggle>
               <select value={filters.since} onChange={(e) => setFilter('since', e.target.value)} aria-label="When"
-                className={`rounded-full border bg-transparent px-1.5 py-0.5 text-[11px] font-semibold outline-none ${filters.since
+                className={`rounded-full border bg-transparent px-2 py-1 text-sm sm:px-1.5 sm:py-0.5 sm:text-[11px] font-semibold outline-none ${filters.since
                   ? 'border-peacock-300 bg-peacock-50 text-peacock-800' : 'border-slate-200 text-slate-600'}`}>
                 {SINCE.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
