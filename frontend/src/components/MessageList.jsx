@@ -1,6 +1,14 @@
 import { senderName, shortTime } from '../util.js'
-import { IconArchive, IconFlag, IconPaperclip, IconTrash } from './Icons.jsx'
+import { IconArchive, IconFlag, IconPaperclip, IconTrash, IconVideo } from './Icons.jsx'
 import LaneMenu from './LaneMenu.jsx'
+
+/** "Starts in 12 min" for mail whose Magizhchi Meet meeting is close; the server pins these first. */
+function startsBadge(at) {
+  if (!at) return null
+  const m = Math.round((new Date(at).getTime() - Date.now()) / 60000)
+  if (m > 30 || m < -15) return null
+  return m > 0 ? `Starts in ${m} min` : 'Meeting now'
+}
 
 function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane }) {
   const unread = !m.seen
@@ -26,7 +34,14 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane }) {
         {m.hasAttachments && <IconPaperclip size={14} className="text-brand-primary" aria-label="Has attachments" />}
         <span className={`shrink-0 text-xs num ${unread ? 'font-semibold text-brand-primary' : 'text-slate-500'}`}>{shortTime(m.receivedAt)}</span>
       </div>
-      <div className={`truncate text-[13px] ${unread ? 'font-semibold text-brand-ink' : 'text-slate-700'}`}>{m.subject || '(no subject)'}</div>
+      <div className={`truncate text-[13px] ${unread ? 'font-semibold text-brand-ink' : 'text-slate-700'}`}>
+        {startsBadge(m.meetingStartsAt) && (
+          <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 align-[1px] text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-300">
+            <IconVideo size={11} />{startsBadge(m.meetingStartsAt)}
+          </span>
+        )}
+        {m.subject || '(no subject)'}
+      </div>
       <div className="truncate pr-24 text-xs text-slate-500">{m.snippet}</div>
       {m.attachmentNames?.length > 0 && (
         <div className="mt-1.5 flex min-w-0 items-center gap-1.5 pr-24">

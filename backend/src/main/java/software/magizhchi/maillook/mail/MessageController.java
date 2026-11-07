@@ -46,7 +46,11 @@ public class MessageController {
     private final ObjectMapper mapper;
     private final BoxClient box;
 
-    public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box) {
+    private final software.magizhchi.maillook.suite.MeetSoon meetSoon;
+
+    public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box,
+                             software.magizhchi.maillook.suite.MeetSoon meetSoon) {
+        this.meetSoon = meetSoon;
         this.box = box;
         this.messages = messages;
         this.actions = actions;
@@ -85,7 +89,19 @@ public class MessageController {
             next = last.receivedAt().toInstant().toEpochMilli() + ":" + last.id();
         }
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("items", rows.stream().map(MessageRepo.Row::summary).toList());
+        // A meeting about to start puts its mail first in Needs me (first page only, not while searching).
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
+        java.util.Set<Long> pinned = new java.util.HashSet<>();
+        if (cAt == null && (q == null || q.isBlank()) && "INBOX".equals(f) && (l == null || LaneClassifier.NEEDS_ME.equals(l))) {
+            for (var p : meetSoon.soon(userId, accountId, Instant.now())) {
+                if (!pinned.add(p.row().id())) continue;
+                Map<String, Object> m = p.row().summary();
+                m.put("meetingStartsAt", p.startsAt().toString());
+                items.add(m);
+            }
+        }
+        for (MessageRepo.Row r : rows) if (!pinned.contains(r.id())) items.add(r.summary());
+        out.put("items", items);
         out.put("nextCursor", next);
         return out;
     }

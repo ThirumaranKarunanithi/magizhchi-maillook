@@ -228,6 +228,8 @@ public class MeetController {
                     msg.accountId(), msg.threadKey(), cardId, name, startAt == null ? null : OffsetDateTime.ofInstant(startAt, ZoneOffset.UTC));
         } catch (DuplicateKeyException ignored) {
         }
+        // A booked time settles any times offered earlier in this thread.
+        if (startAt != null) jdbc.update("DELETE FROM meet_offers WHERE account_id = ? AND thread_key = ?", msg.accountId(), msg.threadKey());
 
         String link = meet.roomLink(cardId);
         Map<String, Object> out = new LinkedHashMap<>();

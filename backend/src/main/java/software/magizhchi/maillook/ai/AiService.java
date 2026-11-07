@@ -179,6 +179,47 @@ public class AiService {
     }
 
     /**
+     * Does the latest mail ask to talk or meet? With {@code offered} (the times You already proposed,
+     * numbered from 1), the question is instead which of those the sender picked. Cached per mail.
+     */
+    public JsonNode meetingRequest(MessageRepo.Row msg, String offered) {
+        String kind = offered == null ? "meeting_request" : "meeting_pick";
+        var cached = messages.aiCache(msg.id(), kind);
+        if (cached.isPresent()) return parse(cached.get());
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        String system = offered == null ? """
+                Decide if the latest email asks the mailbox owner ("You") for a call or meeting that has no time
+                agreed yet: "can we talk?", "call me", "let's meet", "can I get 15 minutes", "discuss on a call".
+                Not a request: newsletters, automated invites that already have a time, or a one-way update.
+                Reply as JSON: {"kind":"request"|"none","minutes": how long they want (15-120, default 30),
+                "topic":"3-6 word meeting name"|null,"why":"one short sentence"}
+                """ : """
+                You (the mailbox owner) offered these meeting times earlier in the thread:
+                %s
+                Read the latest email. If the sender accepts one of them, give its number.
+                Reply as JSON: {"kind":"picked"|"none","pick": number or null,"why":"one short sentence"}
+                """.formatted(offered);
+        JsonNode out = llm(msg.userId(), system, threadText(msg, thread), 0.0, 300);
+        messages.putAiCache(msg.id(), kind, out.toString());
+        return out;
+    }
+
+    /** What You need before a meeting about this thread: a short summary and the questions still open. Cached. */
+    public JsonNode briefing(MessageRepo.Row msg) {
+        var cached = messages.aiCache(msg.id(), "briefing");
+        if (cached.isPresent()) return parse(cached.get());
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        JsonNode out = llm(msg.userId(), """
+                You prepare the mailbox owner ("You") for a meeting about this email thread.
+                Reply as JSON: {"summary": two plain sentences on what the thread is about and where it stands,
+                "questions": ["each question or decision still open in the thread, short", ...]} (at most 6 questions,
+                empty list if none). Use the language the emails are written in.
+                """, threadText(msg, thread), 0.2, 900);
+        messages.putAiCache(msg.id(), "briefing", out.toString());
+        return out;
+    }
+
+    /**
      * The recap of one Magizhchi Meet meeting from its captions: a short summary, what was decided,
      * and who does what by when. {@code people} lists who attended, so owners use real names.
      */
