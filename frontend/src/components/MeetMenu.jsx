@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { post } from '../api.js'
-import { useMeet } from '../meet.js'
+import { inviteChip, inviteFromMailbox, setInviteFromMailbox, useMeet } from '../meet.js'
 import { useMail } from '../state.jsx'
 import { IconVideo, IconX } from './Icons.jsx'
 
@@ -34,6 +34,7 @@ export default function MeetMenu({ message, onStarted }) {
   const [at, setAt] = useState('')
   const [minutes, setMinutes] = useState(30)
   const [busy, setBusy] = useState(false)
+  const [mine, setMine] = useState(inviteFromMailbox)
   const ref = useRef(null)
   const popRef = useRef(null)
   const [pos, setPos] = useState(null)
@@ -80,8 +81,9 @@ export default function MeetMenu({ message, onStarted }) {
     const tab = when === 'now' ? window.open('', '_blank') : null
     setBusy(true)
     try {
+      const fromMailbox = when === 'later' && mine
       const res = await post(`/api/messages/${message.id}/meet`, {
-        name: name.trim(), emails: chosen, startAt: startAt ? startAt.toISOString() : null, minutes: Number(minutes),
+        name: name.trim(), emails: chosen, startAt: startAt ? startAt.toISOString() : null, minutes: Number(minutes), fromMailbox,
       })
       if (tab) {
         tab.opener = null
@@ -90,7 +92,7 @@ export default function MeetMenu({ message, onStarted }) {
       setOpen(false)
       notify(res.message || 'Room ready in Magizhchi Meet', res.failed?.length ? 'error' : 'success')
       onStarted?.()
-      openComposer({ mode: 'replyAll', message, draftBody: res.replyBody })
+      openComposer({ mode: 'replyAll', message, to: res.invited, draftBody: res.replyBody, invite: inviteChip(res, Number(minutes)) })
     } catch (err) {
       tab?.close()
       notify(err.message, 'error')
@@ -149,8 +151,17 @@ export default function MeetMenu({ message, onStarted }) {
                 </ul>
               )}
             </div>
+            {when === 'later' && (
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs text-slate-700">
+                <input type="checkbox" className="mt-0.5 accent-peacock-600" checked={mine}
+                  onChange={(e) => { setMine(e.target.checked); setInviteFromMailbox(e.target.checked) }} />
+                <span><span className="font-semibold text-brand-ink">Send the invite from my mailbox.</span> Your reply carries the calendar invite, so answers come back to this thread.</span>
+              </label>
+            )}
             <p className="text-[11px] text-slate-500">
-              Magizhchi Meet emails them the link{when === 'later' ? ' with a calendar invite' : ''}. Guests can join from a browser. You'll get a reply ready to send.
+              {when === 'later' && mine
+                ? 'Magizhchi Meet adds them to the room but sends no email. Guests can join from a browser.'
+                : `Magizhchi Meet emails them the link${when === 'later' ? ' with a calendar invite' : ''}. Guests can join from a browser.`} You'll get a reply ready to send.
             </p>
             {past && <p className="text-xs text-red-700">That time has already passed.</p>}
             <button className="btn-primary w-full" disabled={busy || !name.trim() || chosen.length === 0 || past || (when === 'later' && !at)}>

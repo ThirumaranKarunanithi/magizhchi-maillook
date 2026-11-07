@@ -59,6 +59,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Reads the text of PDF reports (Scrum digest) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
         <!-- DB: H2 file DB for zero-setup local runs, Postgres in production -->
         <dependency>
             <groupId>com.h2database</groupId>

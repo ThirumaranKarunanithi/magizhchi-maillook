@@ -298,6 +298,7 @@ public class MeetPlanner {
         String subject = blank(msg.subject()) ? "" : " (from \"" + clip(msg.subject().replaceAll("(?i)^((re|fwd?)\\s*:\\s*)+", "").trim(), 120) + "\")";
         StringBuilder text = new StringBuilder("Agenda").append(subject).append('\n');
         for (int i = 0; i < items.size(); i++) text.append(i + 1).append(". ").append(items.get(i)).append('\n');
+        meet.requireRun(userId, req.roomId().toLowerCase(Locale.ROOT), "post an agenda in it");
         meet.call(userId, "POST", "/api/v1/cards/" + req.roomId().toLowerCase(Locale.ROOT) + "/chat",
                 Map.of("text", text.toString().trim()), "post the agenda");
         return Map.of("message", "Agenda posted in the room's chat.", "text", text.toString().trim());

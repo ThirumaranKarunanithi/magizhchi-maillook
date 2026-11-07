@@ -8,6 +8,7 @@ import LaneMenu from './LaneMenu.jsx'
 import PaMenu from './PaMenu.jsx'
 import MeetMenu from './MeetMenu.jsx'
 import { ClassroomCard, FindTimeCard, JoinCard } from './MeetCards.jsx'
+import { DigestCard, EventCard } from './AcademyCards.jsx'
 import MailFrame from './MailFrame.jsx'
 import { AccountDot } from './Sidebar.jsx'
 import {
@@ -221,10 +222,12 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
           </div>
         </header>
 
-        <JoinCard message={detail} refreshKey={meetKey} />
+        <JoinCard message={detail} refreshKey={meetKey} onStarted={() => setMeetKey((k) => k + 1)} />
 
         <FindTimeCard key={`ft-${detail.id}`} message={detail} onBooked={() => setMeetKey((k) => k + 1)} />
         <ClassroomCard key={`cls-${detail.id}`} message={detail} onDone={() => setMeetKey((k) => k + 1)} />
+        <EventCard key={`ev-${detail.id}`} message={detail} onBooked={() => setMeetKey((k) => k + 1)} />
+        <DigestCard key={`dg-${detail.id}`} message={detail} />
 
         <AttachmentShelf messageId={detail.id} attachments={detail.attachments} notify={notify} />
 

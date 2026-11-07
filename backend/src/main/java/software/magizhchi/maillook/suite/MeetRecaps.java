@@ -254,8 +254,22 @@ public class MeetRecaps {
             m.put("missedEmails", emails(report.path("missed"), accountEmail));
             m.put("recapBody", recapBody(name, start, rs.getInt("minutes"), report));
             m.put("catchUpBody", catchUpBody(name, start, report));
+            m.put("couldBeEmail", couldBeEmail(report, rs.getInt("minutes")));
             return m;
         }, accountId, threadKey);
+    }
+
+    /**
+     * "This meeting could have been an email": it had captions, and all it came to is a summary of two
+     * sentences or less, with nothing decided and nothing for anyone to do.
+     */
+    static boolean couldBeEmail(JsonNode report, int minutes) {
+        if (!report.path("hasTranscript").asBoolean(false) || minutes < 5) return false;
+        if (report.path("decisions").size() > 0 || report.path("actions").size() > 0) return false;
+        String s = report.path("summary").asText("").trim();
+        if (s.isEmpty()) return false;
+        int sentences = s.split("(?<=[.!?])\\s+").length;
+        return sentences <= 2 && s.length() <= 280;
     }
 
     static String recapBody(String name, Instant start, int minutes, JsonNode report) {

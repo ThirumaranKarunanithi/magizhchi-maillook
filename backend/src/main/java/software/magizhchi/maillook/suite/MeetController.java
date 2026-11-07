@@ -50,7 +50,13 @@ public class MeetController {
 
     private static final Logger log = LoggerFactory.getLogger(MeetController.class);
 
-    public record StartRequest(String name, List<String> emails, String startAt, Integer minutes) {}
+    /** {@code fromMailbox}: the invite goes out as the person's own reply (with a calendar file), so Meet sends none. */
+    public record StartRequest(String name, List<String> emails, String startAt, Integer minutes, Boolean fromMailbox) {
+        public StartRequest(String name, List<String> emails, String startAt, Integer minutes) {
+            this(name, emails, startAt, minutes, null);
+        }
+    }
+    public record EventRequest(String name, List<String> emails, String startAt, Integer minutes, Integer seats) {}
     public record RescheduleRequest(String roomId, String newTime) {}
     public record AddRequest(String roomId, String email) {}
 
@@ -60,6 +66,13 @@ public class MeetController {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("EEE d MMM, h:mm a", Locale.ENGLISH);
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("Asia/Kolkata");
+    private static final Pattern ANY_EMAIL = Pattern.compile("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
+    private static final Pattern EVENT_WORDS = Pattern.compile(
+            "(?i)\\b(placement|recruitment|campus|hiring)\\s+drive|\\b(webinar|orientation|seminar|workshop|walk-?in|induction|info(rmation)? session|pre-?placement talk|briefing)\\b");
+    static final int EVENT_LIMIT = 500;
+    /** "This thread should be a call": this many messages between at least CALL_PEOPLE people. */
+    static final int CALL_REPLIES = 6;
+    static final int CALL_PEOPLE = 3;
 
     private final MeetClient meet;
     private final MailActions actions;
@@ -109,10 +122,10 @@ public class MeetController {
         JsonNode cards = meet.call(userId, "GET", "/api/v1/cards", null, "list your rooms");
         List<Map<String, Object>> out = new ArrayList<>();
         if (cards == null || !cards.isArray()) return out;
+        String me = meet.meetUserId(userId);
         for (JsonNode c : cards) {
-            String role = c.path("myRole").asText("");
-            if (!(role.equals("SUPER_ADMIN") || role.equals("ADMIN")) || c.path("ephemeral").asBoolean(false)) continue;
-            out.add(room(c));
+            if (!MeetClient.canRun(c, me) || c.path("ephemeral").asBoolean(false)) continue;
+            out.add(room(c, me));
         }
         return out;
     }
@@ -129,6 +142,7 @@ public class MeetController {
         out.put("rooms", found);
         out.put("meetings", recaps.forThread(msg.accountId(), msg.threadKey(), msg.accountEmail()));
         if (!meet.configured()) return out;
+        out.put("callHint", callHint(msg));
 
         Set<String> ids = new LinkedHashSet<>();
         jdbc.queryForList("SELECT card_id FROM meet_links WHERE account_id = ? AND thread_key = ? ORDER BY created_at DESC",
@@ -142,7 +156,7 @@ public class MeetController {
             try {
                 MeetClient.Reply reply = meet.as(userId, "GET", "/api/v1/cards/" + cardId, null);
                 if (reply.ok() && reply.json() != null) {
-                    r = room(reply.json());
+                    r = room(reply.json(), meet.meetUserId(userId));
                 } else {
                     // Not a member yet (or the room is gone): the link still works for joining.
                     r = new LinkedHashMap<>();
@@ -182,21 +196,88 @@ public class MeetController {
     public Map<String, Object> start(@RequestAttribute long userId, @PathVariable long id, @RequestBody StartRequest req) {
         MessageRepo.Row msg = actions.owned(userId, id);
         if (req == null) throw ApiException.bad("Say who to meet.");
-        List<String> emails = new ArrayList<>();
-        for (String e : req.emails() == null ? List.<String>of() : req.emails()) {
-            String x = e == null ? "" : e.trim().toLowerCase(Locale.ROOT);
-            if (x.isEmpty() || x.equalsIgnoreCase(msg.accountEmail()) || emails.contains(x)) continue;
-            if (!EMAIL.matcher(x).matches()) throw ApiException.bad("\"" + e + "\" isn't an email address.");
-            emails.add(x);
-        }
-        if (emails.isEmpty()) throw ApiException.bad("Add at least one person to meet.");
-        if (emails.size() > 50) throw ApiException.bad("That's a lot of people: invite up to 50 from here.");
+        List<String> emails = emails(req.emails(), msg, 50, "That's a lot of people: invite up to 50 from here.");
         String name = blank(req.name()) ? defaultName(msg) : req.name().trim();
-        if (name.length() > 120) name = name.substring(0, 120);
         Instant startAt = blank(req.startAt()) ? null : instant(req.startAt());
         int minutes = req.minutes() == null ? 30 : req.minutes();
+        return book(userId, msg, name, emails, startAt, minutes, null, null, Boolean.TRUE.equals(req.fromMailbox()));
+    }
+
+    // ── placement drive (an event room in one tap) ────────────────
+
+    /**
+     * The AI's reading of this thread as an event to host (placement drive, webinar...): title, time,
+     * length, seats and the applicants it names. Only asked when the thread uses event words.
+     */
+    @GetMapping("/messages/{id}/meet/event")
+    public Map<String, Object> eventSuggestion(@RequestAttribute long userId, @PathVariable long id) {
+        MessageRepo.Row msg = actions.owned(userId, id);
+        Map<String, Object> none = Map.of("isEvent", false);
+        if (!meet.configured() || !ai.enabled(userId)) return none;
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        if (thread.isEmpty()) thread = List.of(msg);
+        StringBuilder all = new StringBuilder();
+        for (MessageRepo.Row r : thread) all.append(nz(r.subject())).append('\n').append(nz(r.bodyText())).append('\n');
+        if (!EVENT_WORDS.matcher(all).find()) return none;
+        Set<String> found = new LinkedHashSet<>();
+        Matcher em = ANY_EMAIL.matcher(all);
+        while (em.find() && found.size() < EVENT_LIMIT) {
+            String e = em.group().toLowerCase(Locale.ROOT).replaceAll("\\.+$", "");
+            if (!e.equalsIgnoreCase(msg.accountEmail())) found.add(e);
+        }
+        JsonNode a;
+        try {
+            a = ai.eventDetails(msg, found.isEmpty() ? "(none)" : String.join("\n", found));
+        } catch (ApiException e) {
+            return none;
+        }
+        if (!a.path("isEvent").asBoolean(false)) return none;
+        List<String> applicants = new ArrayList<>();
+        a.path("applicants").forEach(x -> {
+            String e = x.asText("").trim().toLowerCase(Locale.ROOT);
+            if (found.contains(e) && !applicants.contains(e)) applicants.add(e);   // never an address the AI made up
+        });
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("isEvent", true);
+        out.put("title", blank(a.path("title").asText("")) ? defaultName(msg) : a.path("title").asText().trim());
+        out.put("startAt", eventStart(a.path("start").asText(""), a.path("zone").asText("")));
+        int minutes = a.path("minutes").asInt(0);
+        out.put("minutes", minutes >= 5 && minutes <= 8 * 60 ? minutes : 60);
+        int seats = a.path("seats").asInt(0);
+        out.put("seats", seats > 0 ? seats : null);
+        out.put("applicants", applicants);
+        out.put("limit", EVENT_LIMIT);
+        return out;
+    }
+
+    /**
+     * One tap: an auditorium room (a few on stage, everyone else watching) sized to the seats, booked for
+     * the time, with every applicant invited by Meet (a personal mailbox can't send hundreds of invites).
+     */
+    @PostMapping("/messages/{id}/meet/event")
+    public Map<String, Object> startEvent(@RequestAttribute long userId, @PathVariable long id, @RequestBody EventRequest req) {
+        MessageRepo.Row msg = actions.owned(userId, id);
+        if (req == null) throw ApiException.bad("Say who's taking part.");
+        List<String> emails = emails(req.emails(), msg, EVENT_LIMIT, "Invite up to " + EVENT_LIMIT + " people from here; add the rest in Magizhchi Meet.");
+        if (blank(req.startAt())) throw ApiException.bad("Pick when the event starts.");
+        int seats = req.seats() == null ? emails.size() : req.seats();
+        if (seats < 1 || seats > 10000) throw ApiException.bad("Seats must be between 1 and 10,000.");
+        String name = blank(req.name()) ? defaultName(msg) : req.name().trim();
+        int minutes = req.minutes() == null ? 60 : req.minutes();
+        Map<String, Object> out = book(userId, msg, name, emails, instant(req.startAt()), minutes, "AUDITORIUM", seats, false);
+        out.put("seats", seats);
+        out.put("message", out.get("message") + " " + seats + " seats.");
+        return out;
+    }
+
+    /** Room, then time, then people; remembered against the thread. */
+    private Map<String, Object> book(long userId, MessageRepo.Row msg, String name, List<String> emails, Instant startAt,
+                                     int minutes, String type, Integer capacity, boolean fromMailbox) {
+        if (name.length() > 120) name = name.substring(0, 120);
         if (minutes < 5 || minutes > 8 * 60) throw ApiException.bad("Length must be between 5 minutes and 8 hours.");
         if (startAt != null && startAt.isBefore(Instant.now().minus(Duration.ofMinutes(5)))) throw ApiException.bad("That time has already passed.");
+        // With fromMailbox the person's own reply is the invite, so Meet is asked not to email anyone.
+        boolean meetEmails = !fromMailbox;
 
         // Order matters: room, then time, then people, so each person gets ONE email from Meet,
         // and it already carries the calendar file for the time.
@@ -204,6 +285,8 @@ public class MeetController {
         create.put("name", name);
         create.put("secure", false);                // guests join from any browser
         create.put("ephemeral", startAt == null);   // an instant call tidies itself away
+        if (type != null) create.put("type", type);
+        if (capacity != null) create.put("capacity", capacity);
         JsonNode card = meet.call(userId, "POST", "/api/v1/cards", create, "create the room");
         String cardId = card == null ? "" : card.path("id").asText("");
         if (cardId.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi Meet made the room but sent no id back.");
@@ -211,12 +294,17 @@ public class MeetController {
             Map<String, Object> sched = new LinkedHashMap<>();
             sched.put("openAt", startAt.toString());
             sched.put("lockAt", startAt.plus(Duration.ofMinutes(minutes)).toString());
+            if (!meetEmails) sched.put("sendEmail", false);
             meet.call(userId, "PUT", "/api/v1/cards/" + cardId + "/schedule", sched, "set the room's time");
         }
         List<String> invited = new ArrayList<>();
         List<String> failed = new ArrayList<>();
         for (String e : emails) {
-            MeetClient.Reply r = meet.as(userId, "POST", "/api/v1/cards/" + cardId + "/members", Map.of("email", e, "role", "MEMBER"));
+            Map<String, Object> member = new LinkedHashMap<>();
+            member.put("email", e);
+            member.put("role", "MEMBER");
+            if (!meetEmails) member.put("sendEmail", false);
+            MeetClient.Reply r = meet.as(userId, "POST", "/api/v1/cards/" + cardId + "/members", member);
             if (r.ok()) invited.add(e);
             else {
                 failed.add(e);
@@ -224,8 +312,9 @@ public class MeetController {
             }
         }
         try {
-            jdbc.update("INSERT INTO meet_links (account_id, thread_key, card_id, card_name, starts_at) VALUES (?, ?, ?, ?, ?)",
-                    msg.accountId(), msg.threadKey(), cardId, name, startAt == null ? null : OffsetDateTime.ofInstant(startAt, ZoneOffset.UTC));
+            jdbc.update("INSERT INTO meet_links (account_id, thread_key, card_id, card_name, starts_at, ends_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    msg.accountId(), msg.threadKey(), cardId, name, startAt == null ? null : OffsetDateTime.ofInstant(startAt, ZoneOffset.UTC),
+                    startAt == null ? null : OffsetDateTime.ofInstant(startAt.plus(Duration.ofMinutes(minutes)), ZoneOffset.UTC));
         } catch (DuplicateKeyException ignored) {
         }
         // A booked time settles any times offered earlier in this thread.
@@ -239,14 +328,93 @@ public class MeetController {
         out.put("startAt", startAt == null ? null : startAt.toString());
         out.put("invited", invited);
         out.put("failed", failed);
+        out.put("fromMailbox", fromMailbox);
+        // The reply carries the calendar file itself when it is the invite.
+        out.put("inviteCardId", fromMailbox && startAt != null ? cardId : null);
         out.put("replyBody", startAt == null
                 ? "I've started a Magizhchi Meet call for us. Join here:\n" + link + "\n"
                 : "Let's meet on " + DATE_TIME.format(startAt.atZone(DEFAULT_ZONE)) + " (" + minutes + " min) on Magizhchi Meet.\nJoin here: " + link
-                  + "\n\nYou'll also get a calendar invite from Magizhchi Meet.\n");
+                  + (fromMailbox ? "\n\nThe calendar invite is attached.\n" : "\n\nYou'll also get a calendar invite from Magizhchi Meet.\n"));
         out.put("message", (startAt == null ? "Room is open. " : "Meeting set for " + DATE_TIME.format(startAt.atZone(DEFAULT_ZONE)) + ". ")
-                + (invited.size() == 1 ? "1 person invited" : invited.size() + " people invited")
-                + (failed.isEmpty() ? "." : "; couldn't invite " + String.join(", ", failed) + "."));
+                + (fromMailbox ? (invited.size() == 1 ? "1 person added" : invited.size() + " people added") + "; send the reply to invite them"
+                               : invited.size() == 1 ? "1 person invited" : invited.size() + " people invited")
+                + (failed.isEmpty() ? "." : "; couldn't add " + String.join(", ", failed) + "."));
         return out;
+    }
+
+    private static List<String> emails(List<String> given, MessageRepo.Row msg, int limit, String tooMany) {
+        List<String> emails = new ArrayList<>();
+        for (String e : given == null ? List.<String>of() : given) {
+            String x = e == null ? "" : e.trim().toLowerCase(Locale.ROOT);
+            if (x.isEmpty() || x.equalsIgnoreCase(msg.accountEmail()) || emails.contains(x)) continue;
+            if (!EMAIL.matcher(x).matches()) throw ApiException.bad("\"" + e + "\" isn't an email address.");
+            emails.add(x);
+        }
+        if (emails.isEmpty()) throw ApiException.bad("Add at least one person to meet.");
+        if (emails.size() > limit) throw ApiException.bad(tooMany);
+        return emails;
+    }
+
+    /** "2026-11-12T10:00" in the mail's zone (India when it names none) → an instant, or null. */
+    static String eventStart(String local, String zone) {
+        if (blank(local)) return null;
+        try {
+            ZoneId z;
+            try {
+                z = blank(zone) ? DEFAULT_ZONE : ZoneId.of(zone.trim());
+            } catch (Exception e) {
+                z = DEFAULT_ZONE;
+            }
+            String t = local.trim();
+            Instant at = java.time.LocalDateTime.parse(t.length() > 16 ? t.substring(0, 16) : t).atZone(z).toInstant();
+            return at.isAfter(Instant.now()) ? at.toString() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ── nudges ────────────────────────────────────────────────────
+
+    /**
+     * "This thread should be a call": a recent thread of CALL_REPLIES+ mails between CALL_PEOPLE+
+     * people that has no Meet room yet. Gives who to call.
+     */
+    private Map<String, Object> callHint(MessageRepo.Row msg) {
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        if (thread.size() < CALL_REPLIES) return null;
+        MessageRepo.Row last = thread.get(thread.size() - 1);
+        if (last.receivedAt() == null || last.receivedAt().toInstant().isBefore(Instant.now().minus(Duration.ofDays(7)))) return null;
+        Integer rooms = jdbc.queryForObject("SELECT COUNT(*) FROM meet_links WHERE account_id = ? AND thread_key = ?", Integer.class,
+                msg.accountId(), msg.threadKey());
+        if (rooms != null && rooms > 0) return null;
+        Map<String, String> people = new LinkedHashMap<>();   // email → first name
+        for (MessageRepo.Row r : thread) {
+            if (r.fromEmail() == null) continue;
+            String e = r.fromEmail().toLowerCase(Locale.ROOT);
+            people.putIfAbsent(e, e.equalsIgnoreCase(msg.accountEmail()) ? "You" : blank(r.fromName()) ? e : firstName(r.fromName()));
+        }
+        if (people.size() < CALL_PEOPLE) return null;
+        Set<String> others = new LinkedHashSet<>(people.keySet());
+        others.remove(msg.accountEmail().toLowerCase(Locale.ROOT));
+        for (MessageRepo.Row r : thread) {   // people only copied in are part of the conversation too
+            for (String e : r.to() == null ? List.<String>of() : r.to()) addAddress(others, e, msg.accountEmail());
+            for (String e : r.cc() == null ? List.<String>of() : r.cc()) addAddress(others, e, msg.accountEmail());
+        }
+        Map<String, Object> h = new LinkedHashMap<>();
+        h.put("replies", thread.size());
+        h.put("people", people.size());
+        h.put("names", people.values().stream().filter(n -> !n.equals("You")).limit(4).toList());
+        h.put("emails", new ArrayList<>(others).subList(0, Math.min(others.size(), 50)));
+        return h;
+    }
+
+    private static void addAddress(Set<String> into, String raw, String own) {
+        if (raw == null) return;
+        Matcher m = ANY_EMAIL.matcher(raw);
+        if (m.find()) {
+            String e = m.group().toLowerCase(Locale.ROOT);
+            if (!e.equalsIgnoreCase(own)) into.add(e);
+        }
     }
 
     // ── classroom actions ─────────────────────────────────────────
@@ -309,7 +477,7 @@ public class MeetController {
         if (req == null || blank(req.roomId()) || !UUID_RE.matcher(req.roomId().trim()).matches()) throw ApiException.bad("Pick the class room to move.");
         if (blank(req.newTime()) || !HHMM.matcher(req.newTime().trim()).matches()) throw ApiException.bad("Pick the new start time.");
         String cardId = req.roomId().trim();
-        JsonNode card = meet.call(userId, "GET", "/api/v1/cards/" + cardId, null, "read the room");
+        JsonNode card = meet.requireRun(userId, cardId, "change its class time");
         String repeat = card.path("scheduleRepeat").asText("");
         if (repeat.isBlank() || card.path("openTime").asText("").isBlank()) {
             throw new ApiException(HttpStatus.CONFLICT, "\"" + card.path("name").asText("This room") + "\" doesn't meet at a regular time, so there's nothing to move.");
@@ -353,7 +521,7 @@ public class MeetController {
         String email = blank(req.email()) ? msg.fromEmail() : req.email().trim().toLowerCase(Locale.ROOT);
         if (email == null || !EMAIL.matcher(email).matches()) throw ApiException.bad("That isn't an email address.");
         String cardId = req.roomId().trim();
-        JsonNode card = meet.call(userId, "GET", "/api/v1/cards/" + cardId, null, "read the room");
+        JsonNode card = meet.requireRun(userId, cardId, "add people to it");
         JsonNode added = meet.call(userId, "POST", "/api/v1/cards/" + cardId + "/members", Map.of("email", email, "role", "MEMBER"), "add them to the room");
         String name = card.path("name").asText("the class");
         String link = meet.roomLink(cardId);
@@ -369,10 +537,11 @@ public class MeetController {
 
     // ── helpers ───────────────────────────────────────────────────
 
-    private Map<String, Object> room(JsonNode c) {
+    private Map<String, Object> room(JsonNode c, String me) {
         Map<String, Object> m = new LinkedHashMap<>();
         String id = c.path("id").asText();
         m.put("id", id);
+        m.put("canManage", MeetClient.canRun(c, me));
         m.put("name", c.path("name").asText(""));
         m.put("type", c.path("type").asText(null));
         m.put("link", meet.roomLink(id));

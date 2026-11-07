@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { get, post } from '../api.js'
-import { minutesToStart, nextClass, scheduleLine, useMeet } from '../meet.js'
+import { inviteChip, inviteFromMailbox, minutesToStart, nextClass, scheduleLine, useMeet } from '../meet.js'
 import { useMail } from '../state.jsx'
 import { safeHttpUrl } from '../util.js'
 import { IconVideo } from './Icons.jsx'
+import { CallHint } from './AcademyCards.jsx'
 
 function useTick(ms) {
   const [now, setNow] = useState(() => new Date())
@@ -26,10 +27,11 @@ function soonText(m, live) {
  * Join card: the Magizhchi Meet rooms this thread links to (rooms started from it, or a Meet link
  * in the mail). Turns into a "starting soon" bar from ten minutes before the room opens.
  */
-export function JoinCard({ message, refreshKey }) {
+export function JoinCard({ message, refreshKey, onStarted }) {
   const meet = useMeet()
   const [rooms, setRooms] = useState([])
   const [meetings, setMeetings] = useState([])
+  const [callHint, setCallHint] = useState(null)
   const [briefFor, setBriefFor] = useState(null)
   const now = useTick(30000)
   const messageId = message.id
@@ -42,19 +44,22 @@ export function JoinCard({ message, refreshKey }) {
         if (cancelled) return
         setRooms(r?.rooms || [])
         setMeetings(r?.meetings || [])
+        setCallHint(r?.callHint || null)
       })
       .catch(() => {
         if (cancelled) return
         setRooms([])
         setMeetings([])
+        setCallHint(null)
       })
     return () => { cancelled = true }
   }, [messageId, refreshKey, meet?.configured])
 
-  if (!meet?.configured || (rooms.length === 0 && meetings.length === 0)) return null
+  if (!meet?.configured || (rooms.length === 0 && meetings.length === 0 && !callHint)) return null
 
   return (
     <div className="space-y-2">
+      {meet?.connected && <CallHint hint={callHint} message={message} onStarted={onStarted} />}
       {meetings.map((m, i) => <MeetingHeld key={m.id} meeting={m} message={message} defaultOpen={i === 0} />)}
       {rooms.map((r) => {
         const link = safeHttpUrl(r.link)
@@ -184,7 +189,10 @@ function Briefing({ message, room }) {
           )}
         </div>
       )}
-      {open.length > 0 && (
+      {open.length > 0 && !room.canManage && (
+        <p className="text-xs text-slate-500">Only the building owner or an admin of this room can post the agenda.</p>
+      )}
+      {open.length > 0 && room.canManage && (
         <div className="flex flex-wrap items-center gap-2">
           <button className="btn-secondary !py-1.5 text-sm" onClick={postAgenda} disabled={posting || posted}>
             {posting && <span className="spinner" />} {posted ? 'Agenda posted' : 'Post agenda to the room'}
@@ -224,11 +232,12 @@ export function FindTimeCard({ message, onBooked }) {
     try {
       const res = await post(`/api/messages/${message.id}/meet`, {
         name: t.topic || message.subject || 'Meeting', emails: [t.personEmail], startAt: slot.start, minutes: t.minutes,
+        fromMailbox: inviteFromMailbox(),
       })
       notify(res.message || 'Booked in Magizhchi Meet', res.failed?.length ? 'error' : 'success')
       setGone(true)
       onBooked?.()
-      openComposer({ mode: 'reply', message, draftBody: res.replyBody })
+      openComposer({ mode: 'reply', message, draftBody: res.replyBody, invite: inviteChip(res, t.minutes) })
     } catch (e) {
       notify(e.message, 'error')
     } finally {
@@ -320,6 +329,12 @@ function MeetingHeld({ meeting: m, message, defaultOpen }) {
             {m.attended?.length || 0} came{missed.length ? ` · ${listNames(firstNames(missed))} missed it` : ''}
             {m.tasksAdded ? ` · ${m.tasksAdded} task${m.tasksAdded === 1 ? '' : 's'} on your PA board` : ''}
           </p>
+          {m.couldBeEmail && (
+            <p className="mt-1 inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200"
+              title="Nothing was decided and nobody got a task. Next time an update by mail may do.">
+              This meeting could have been an email
+            </p>
+          )}
         </div>
         {hasNotes && (
           <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

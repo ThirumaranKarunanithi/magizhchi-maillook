@@ -144,6 +144,16 @@ class MeetFlowTest {
                 .content("{\"roomId\":\"" + BATCH + "\",\"newTime\":\"25:00\"}"), token, 400);
         assertThat(schedules).hasSize(before);
 
+        // A room they only joined is not theirs to run: MailLook refuses before Meet is even asked.
+        int calls = schedules.size();
+        JsonNode refused = call(post("/api/messages/" + priyaMail + "/meet/reschedule").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"roomId\":\"" + JOINED + "\",\"newTime\":\"16:00\"}"), token, 403);
+        assertThat(refused.path("error").asText()).contains("Only the building owner or an admin of \"Design review\"");
+        call(post("/api/messages/" + priyaMail + "/meet/add").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"roomId\":\"" + JOINED + "\"}"), token, 403);
+        assertThat(schedules).hasSize(calls);
+        assertThat(members.stream().map(m -> m.path("email").asText())).doesNotContain("priya@example.com");
+
         // Meet now, at a set time: room → time → people, guests can use a browser, own mailbox left out.
         String at = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES).toString();
         JsonNode started = call(post("/api/messages/" + priyaMail + "/meet").contentType(MediaType.APPLICATION_JSON)

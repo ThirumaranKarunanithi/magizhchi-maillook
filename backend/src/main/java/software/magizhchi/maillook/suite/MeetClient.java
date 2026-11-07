@@ -43,7 +43,7 @@ public class MeetClient {
         }
     }
 
-    private record Session(String token, long until) {}
+    private record Session(String token, long until, String meetUserId) {}
 
     private final String api;
     private final String web;
@@ -86,12 +86,39 @@ public class MeetClient {
         return r;
     }
 
+    /** This person's own id in Meet (signs in if needed), or null when Meet didn't say. */
+    public String meetUserId(long userId) {
+        return session(userId).meetUserId();
+    }
+
+    /**
+     * The one rule for every Meet action MailLook takes on an existing room: only the owner of the
+     * building the room stands in (rooms stand in their maker's building) or one of the room's admins.
+     */
+    public static boolean canRun(JsonNode card, String meetUserId) {
+        if (card == null) return false;
+        String role = card.path("myRole").asText("");
+        if (role.equals("SUPER_ADMIN") || role.equals("ADMIN")) return true;
+        String owner = card.path("ownerUserId").asText("");
+        return meetUserId != null && !owner.isBlank() && owner.equalsIgnoreCase(meetUserId);
+    }
+
+    /** Reads the room and refuses unless this person may run it (see {@link #canRun}). */
+    public JsonNode requireRun(long userId, String cardId, String what) {
+        JsonNode card = call(userId, "GET", "/api/v1/cards/" + cardId, null, "read the room");
+        if (!canRun(card, meetUserId(userId))) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "Only the building owner or an admin of \"" + card.path("name").asText("this room")
+                    + "\" can " + what + ".");
+        }
+        return card;
+    }
+
     /** Like {@link #as} but turns anything other than 2xx into a message the person can act on. */
     public JsonNode call(long userId, String method, String path, Object body, String what) {
         Reply r = as(userId, method, path, body);
         if (r.ok()) return r.json();
         if (r.code() == 0) throw new ApiException(HttpStatus.BAD_GATEWAY, "Can't reach Magizhchi Meet right now, so it couldn't " + what + ". Try again in a minute.");
-        if (r.code() == 403) throw new ApiException(HttpStatus.FORBIDDEN, "Magizhchi Meet says you can't " + what + " in that room. Only the room's admins can.");
+        if (r.code() == 403) throw new ApiException(HttpStatus.FORBIDDEN, "Magizhchi Meet says you can't " + what + " in that room. Only the building owner or the room's admins can.");
         if (r.code() == 404) throw new ApiException(HttpStatus.NOT_FOUND, "That Magizhchi Meet room no longer exists.");
         String said = r.message();
         throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi Meet couldn't " + what + " (" + r.code() + ")" + (said == null ? "." : ": " + said));
@@ -122,7 +149,8 @@ public class MeetClient {
         String token = r.json() == null ? "" : r.json().path("token").asText("");
         if (token.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi Meet signed you in but sent no session back.");
         // Meet's sessions last months; renew every six hours anyway so a revoked one doesn't linger.
-        Session fresh = new Session(token, System.currentTimeMillis() + 6 * 3600_000L);
+        String meId = r.json().path("user").path("id").asText("");
+        Session fresh = new Session(token, System.currentTimeMillis() + 6 * 3600_000L, meId.isBlank() ? null : meId);
         sessions.put(userId, fresh);
         return fresh;
     }

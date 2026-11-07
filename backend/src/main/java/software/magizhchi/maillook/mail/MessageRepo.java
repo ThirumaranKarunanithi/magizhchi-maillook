@@ -219,6 +219,13 @@ public class MessageRepo {
                 "WHERE m.account_id = ? AND m.thread_key = ? ORDER BY m.received_at ASC, m.id ASC", mapper(true), accountId, threadKey);
     }
 
+    /** A mailbox's inbox mail since a time, newest first, bodies included (for finding report series). */
+    public List<Row> recent(long accountId, OffsetDateTime since, int limit) {
+        return jdbc.query("SELECT " + COLS + ", m.body_text, m.body_html FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE m.account_id = ? AND m.folder = 'INBOX' AND m.received_at >= ? ORDER BY m.received_at DESC, m.id DESC LIMIT ?",
+                mapper(true), accountId, since, limit);
+    }
+
     public List<Row> list(long userId, String folder, String lane, Long accountId, String q,
                           OffsetDateTime cursorAt, Long cursorId, int limit) {
         StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = ?");

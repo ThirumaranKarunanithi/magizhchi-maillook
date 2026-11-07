@@ -126,3 +126,30 @@ export function scheduleLine(room) {
   }
   return null
 }
+
+const MAILBOX_KEY = 'mlook_invite_from_mailbox'
+
+/** Whether booked meetings are invited from the person's own mailbox (on unless they turned it off). */
+export function inviteFromMailbox() {
+  try {
+    return localStorage.getItem(MAILBOX_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+export function setInviteFromMailbox(on) {
+  try {
+    localStorage.setItem(MAILBOX_KEY, on ? 'on' : 'off')
+  } catch {
+    // private window: the choice lasts until the page closes
+  }
+}
+
+/** The composer's calendar-invite chip for a room MailLook just booked, or null. */
+export function inviteChip(res, minutes) {
+  if (!res?.inviteCardId || !res.startAt) return null
+  const d = new Date(res.startAt)
+  const when = `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}${minutes ? ` · ${minutes} min` : ''}`
+  return { cardId: res.inviteCardId, name: res.name, when }
+}

@@ -18,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import software.magizhchi.maillook.account.Account;
 import software.magizhchi.maillook.account.AccountRepo;
 import software.magizhchi.maillook.common.ApiException;
+import software.magizhchi.maillook.suite.MeetInvites;
 
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -46,10 +47,12 @@ public class MailActions {
     private final AccountRepo accounts;
     private final MessageRepo messages;
     private final ImapClient imap;
+    private final MeetInvites invites;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
 
-    public MailActions(AccountRepo accounts, MessageRepo messages, ImapClient imap) {
+    public MailActions(AccountRepo accounts, MessageRepo messages, ImapClient imap, MeetInvites invites) {
+        this.invites = invites;
         this.accounts = accounts;
         this.messages = messages;
         this.imap = imap;
@@ -192,8 +195,14 @@ public class MailActions {
 
     // ── send ──────────────────────────────────────────────────────
 
+    /** {@code inviteCardId}: a Meet room booked from this mailbox; the mail then carries its calendar invite. */
     public record Outgoing(long accountId, List<String> to, List<String> cc, List<String> bcc,
-                           String subject, String text, Long replyToMessageId) {}
+                           String subject, String text, Long replyToMessageId, String inviteCardId) {
+        public Outgoing(long accountId, List<String> to, List<String> cc, List<String> bcc,
+                        String subject, String text, Long replyToMessageId) {
+            this(accountId, to, cc, bcc, subject, text, replyToMessageId, null);
+        }
+    }
 
     public MessageRepo.Row send(long userId, Outgoing o, List<MultipartFile> files) {
         Account a = accounts.find(o.accountId()).filter(x -> x.userId() == userId)
@@ -202,11 +211,13 @@ public class MailActions {
             throw ApiException.bad("Add at least one recipient.");
         }
         MessageRepo.Row original = o.replyToMessageId() == null ? null : owned(userId, o.replyToMessageId());
+        MeetInvites.Booking booking = o.inviteCardId() == null || o.inviteCardId().isBlank() ? null
+                : invites.booking(a.id(), o.inviteCardId()).orElseThrow(() -> ApiException.bad("That meeting wasn't booked from this mailbox, so its invite can't go with this mail."));
         try {
             var session = imap.smtpSession(a);
             MimeMessage msg = new MimeMessage(session);
             boolean multipart = files != null && files.stream().anyMatch(f -> !f.isEmpty());
-            MimeMessageHelper h = new MimeMessageHelper(msg, multipart, "UTF-8");
+            MimeMessageHelper h = new MimeMessageHelper(msg, multipart && booking == null, "UTF-8");
             h.setFrom(new InternetAddress(a.email(), a.displayName() == null ? a.email() : a.displayName(), "UTF-8"));
             h.setTo(addrs(o.to()));
             if (o.cc() != null && !o.cc().isEmpty()) h.setCc(addrs(o.cc()));
@@ -214,7 +225,11 @@ public class MailActions {
             h.setSubject(o.subject() == null ? "" : o.subject());
             h.setText(o.text() == null ? "" : o.text(), false);
             h.setSentDate(new Date());
-            if (multipart) {
+            if (booking != null) {
+                List<String> people = new ArrayList<>(MeetInvites.addresses(nn(o.to())));
+                people.addAll(MeetInvites.addresses(nn(o.cc())));
+                msg.setContent(withInvite(o.text(), invites.ics(booking, a.email(), a.displayName(), people), files));
+            } else if (multipart) {
                 for (MultipartFile f : files) {
                     if (f.isEmpty()) continue;
                     h.addAttachment(f.getOriginalFilename() == null ? "attachment" : f.getOriginalFilename(), f::getInputStream,
@@ -247,6 +262,41 @@ public class MailActions {
         } catch (Exception e) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "Couldn't send: " + e.getMessage());
         }
+    }
+
+    /**
+     * The shape calendar apps look for: the text and the invite as alternatives (Gmail and Outlook show
+     * Yes / No / Maybe), the same invite as an invite.ics file, then any files the person attached.
+     */
+    static jakarta.mail.internet.MimeMultipart withInvite(String text, String ics, List<MultipartFile> files) throws Exception {
+        byte[] cal = ics.getBytes(StandardCharsets.UTF_8);
+        var alt = new jakarta.mail.internet.MimeMultipart("alternative");
+        var plain = new jakarta.mail.internet.MimeBodyPart();
+        plain.setText(text == null ? "" : text, "UTF-8");
+        alt.addBodyPart(plain);
+        var inline = new jakarta.mail.internet.MimeBodyPart();
+        inline.setDataHandler(new jakarta.activation.DataHandler(
+                new jakarta.mail.util.ByteArrayDataSource(cal, "text/calendar; charset=UTF-8; method=REQUEST")));
+        alt.addBodyPart(inline);
+        var mixed = new jakarta.mail.internet.MimeMultipart("mixed");
+        var body = new jakarta.mail.internet.MimeBodyPart();
+        body.setContent(alt);
+        mixed.addBodyPart(body);
+        var file = new jakarta.mail.internet.MimeBodyPart();
+        file.setDataHandler(new jakarta.activation.DataHandler(new jakarta.mail.util.ByteArrayDataSource(cal, "application/ics")));
+        file.setFileName("invite.ics");
+        file.setDisposition(Part.ATTACHMENT);
+        mixed.addBodyPart(file);
+        for (MultipartFile f : files == null ? List.<MultipartFile>of() : files) {
+            if (f.isEmpty()) continue;
+            var p = new jakarta.mail.internet.MimeBodyPart();
+            p.setDataHandler(new jakarta.activation.DataHandler(new jakarta.mail.util.ByteArrayDataSource(f.getBytes(),
+                    f.getContentType() == null ? "application/octet-stream" : f.getContentType())));
+            p.setFileName(f.getOriginalFilename() == null ? "attachment" : f.getOriginalFilename());
+            p.setDisposition(Part.ATTACHMENT);
+            mixed.addBodyPart(p);
+        }
+        return mixed;
     }
 
     /** Most IMAP servers (Hostinger included) don't keep a copy of SMTP mail, so we put one in Sent. Gmail does it itself. */

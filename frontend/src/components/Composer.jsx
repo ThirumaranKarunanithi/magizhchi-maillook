@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { postForm } from '../api.js'
 import { useMail } from '../state.jsx'
 import { bodyAsText, EMAIL_RE, formatSize, fullDate, splitAddresses } from '../util.js'
-import { IconPaperclip, IconSend, IconX } from './Icons.jsx'
+import { IconCalendar, IconPaperclip, IconSend, IconX } from './Icons.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 
 function uniq(list, exclude = new Set()) {
@@ -30,10 +30,17 @@ function quote(m) {
 }
 
 /** Works out From/To/Cc/Subject/body for new, reply, reply all and forward. */
-function initialDraft({ mode, message: m, draftBody, to: toOverride }, accounts, selectedAccountId) {
+function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: subjectOverride, invite }, accounts, selectedAccountId) {
   const own = new Set(accounts.map((a) => a.email.toLowerCase()))
   const fallbackFrom = selectedAccountId ?? accounts[0]?.id ?? ''
-  if (!m || mode === 'new') return { accountId: fallbackFrom, to: [], cc: [], subject: '', text: '', replyToMessageId: null }
+  if (!m || mode === 'new') {
+    // A new mail can still start from one (the weekly digest): same mailbox, chosen people, ready text.
+    const from = m && accounts.some((a) => a.id === m.accountId) ? m.accountId : fallbackFrom
+    return {
+      accountId: from, to: uniq(toOverride || [], own), cc: [], subject: subjectOverride || '', text: draftBody || '',
+      replyToMessageId: null, invite: null,
+    }
+  }
 
   const accountId = accounts.some((a) => a.id === m.accountId) ? m.accountId : fallbackFrom
   const fromMe = own.has((m.fromEmail || '').toLowerCase())
@@ -51,6 +58,7 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride }, accounts,
       subject: prefixed(m.subject, 'Fwd:', /^\s*(fwd?|fw)\s*:/i),
       text: `\n\n${header}\n\n${bodyAsText(m)}`,
       replyToMessageId: null,
+      invite: null,
     }
   }
   let to = fromMe ? m.to || [] : [m.fromEmail]
@@ -69,9 +77,11 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride }, accounts,
   }
   return {
     accountId, to, cc,
-    subject: prefixed(m.subject, 'Re:', /^\s*re\s*:/i),
+    subject: subjectOverride || prefixed(m.subject, 'Re:', /^\s*re\s*:/i),
     text: `${draftBody ? `${draftBody}\n` : ''}\n\n${quote(m)}`,
     replyToMessageId: m.id,
+    // A Meet room booked from this thread: the reply is its invite and carries the calendar file.
+    invite: invite || null,
   }
 }
 
@@ -140,6 +150,7 @@ export default function Composer() {
   const [ask, setAsk] = useState(null) // 'discard' | 'nosubject' while a question is on screen
   const [showCc, setShowCc] = useState(init.cc.length > 0)
   const [subject, setSubject] = useState(init.subject)
+  const [invite, setInvite] = useState(init.invite)
   const [text, setText] = useState(init.text)
   const [files, setFiles] = useState([])
   const [sending, setSending] = useState(false)
@@ -193,6 +204,7 @@ export default function Composer() {
       to: toList, cc: ccList, bcc: bccList,
       subject, text,
       ...(init.replyToMessageId ? { replyToMessageId: init.replyToMessageId } : {}),
+      ...(invite ? { inviteCardId: invite.cardId } : {}),
     }
     const form = new FormData()
     form.append('payload', new Blob([JSON.stringify(payload)], { type: 'application/json' }))
@@ -264,6 +276,16 @@ export default function Composer() {
 
         <textarea ref={bodyRef} className="scroll-thin min-h-0 flex-1 resize-none bg-white px-4 py-3 text-sm leading-relaxed outline-none"
           value={text} onChange={(e) => setText(e.target.value)} aria-label="Message" placeholder="Write something kind…" />
+
+        {invite && (
+          <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-2">
+            <span className="chip !bg-peacock-50 !text-peacock-800" title="Sent from your mailbox, so answers come back to this thread">
+              <IconCalendar size={12} /> Calendar invite: {invite.name}{invite.when ? ` · ${invite.when}` : ''}
+              <button type="button" onClick={() => setInvite(null)} aria-label="Don't attach the calendar invite"><IconX size={11} /></button>
+            </span>
+            <span className="hidden text-[11px] text-slate-500 sm:inline">Yes / No answers come back to this thread.</span>
+          </div>
+        )}
 
         {files.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-t border-slate-100 px-4 py-2">

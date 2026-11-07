@@ -172,6 +172,10 @@ class MeetPlannerTest {
         assertThat(posted.path("message").asText()).contains("posted");
         call(post("/api/messages/" + pick + "/meet/agenda").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"roomId\":\"not-a-room\",\"items\":[\"x\"]}"), token, 400);
+        // Someone else's room, where they only sit as a member: refused, nothing posted.
+        call(post("/api/messages/" + pick + "/meet/agenda").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"roomId\":\"99999999-2222-3333-4444-555555555555\",\"items\":[\"x\"]}"), token, 403);
+        assertThat(chatPosts).hasSize(1);
     }
 
     // ── stand-ins ────────────────────────────────────────────────
@@ -191,12 +195,19 @@ class MeetPlannerTest {
         String path = ex.getRequestURI().getPath();
         String method = ex.getRequestMethod();
         String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        if (path.equals("/api/v1/auth/sso")) { reply(ex, 200, "{\"token\":\"meet-session\"}"); return; }
+        if (path.equals("/api/v1/auth/sso")) { reply(ex, 200, "{\"token\":\"meet-session\",\"user\":{\"id\":\"u1\"}}"); return; }
         if (!"Bearer meet-session".equals(ex.getRequestHeaders().getFirst("Authorization"))) { reply(ex, 401, "{}"); return; }
         if (method.equals("POST") && path.equals("/api/v1/cards")) {
             String id = String.format("%08d-2222-3333-4444-555555555555", roomsMade.size() + 1);
             roomsMade.add(id);
             reply(ex, 200, "{\"id\":\"" + id + "\"}");
+            return;
+        }
+        // Rooms they made stand in their own building: theirs to run even with no seat in the room.
+        if (method.equals("GET") && path.matches("/api/v1/cards/[0-9a-f-]{36}")) {
+            String id = path.substring("/api/v1/cards/".length());
+            reply(ex, 200, roomsMade.contains(id) ? "{\"id\":\"" + id + "\",\"name\":\"Placement\",\"myRole\":null,\"ownerUserId\":\"u1\"}"
+                    : "{\"id\":\"" + id + "\",\"name\":\"Someone else's class\",\"myRole\":\"MEMBER\",\"ownerUserId\":\"u2\"}");
             return;
         }
         if (path.endsWith("/schedule")) { reply(ex, 200, ""); return; }

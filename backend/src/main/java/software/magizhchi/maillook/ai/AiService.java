@@ -235,6 +235,44 @@ public class AiService {
                 """, "Meeting: " + room + "\nAttended: " + people + "\n\nTranscript:\n" + cut(transcript, 20000), 0.2, 1500);
     }
 
+    /**
+     * The weekly Scrum digest: what each person did, does next and is stuck on, from their emailed
+     * reports and the standup transcripts of the same week.
+     */
+    public JsonNode scrumDigest(long userId, String team, String material) {
+        return llm(userId, """
+                You write a team's weekly Scrum digest for its lead ("You") from the team's emailed status reports
+                and the transcripts of the week's standup meetings. Use only what the material says; never invent work.
+                Merge what one person said in several reports and standups into one entry.
+                Reply as JSON: {"summary": two plain sentences on how the week went,
+                "people": [{"name": the person's name as written, "done": ["short item", ...],
+                "next": ["short item", ...], "blockers": ["short item", ...]}],
+                "risks": ["anything that puts the sprint goal at risk, short", ...]}.
+                At most 6 items per list. Empty lists when there are none. Write in the language the reports use.
+                """, "Team: " + team + "\n\n" + cut(material, 40000), 0.2, 2500);
+    }
+
+    /**
+     * Reads a thread as an event to host on Meet (a placement drive, webinar, orientation...):
+     * its title, time, length and seats, and which of the given addresses are the people taking part.
+     */
+    public JsonNode eventDetails(MessageRepo.Row msg, String candidates) {
+        var cached = messages.aiCache(msg.id(), "event");
+        if (cached.isPresent()) return parse(cached.get());
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        JsonNode out = llm(msg.userId(), """
+                You decide whether this email thread organises one event that the mailbox owner ("You") should host as an
+                online session for many people: a placement or recruitment drive, a webinar, an orientation, an exam briefing,
+                a workshop. An ordinary meeting between a few people is NOT an event.
+                Reply as JSON: {"isEvent": true|false, "title": short title, "start": "YYYY-MM-DDTHH:MM" local time or null,
+                "zone": IANA time zone if the mail says one or null, "minutes": length in minutes or null,
+                "seats": number of places if the mail says one or null,
+                "applicants": [the addresses, copied exactly from the candidate list, of the people taking part]}.
+                """, threadText(msg, thread) + "\n\nCandidate addresses found in the thread:\n" + candidates, 0.1, 1500);
+        messages.putAiCache(msg.id(), "event", out.toString());
+        return out;
+    }
+
     private static String threadText(MessageRepo.Row msg, List<MessageRepo.Row> thread) {
         List<MessageRepo.Row> t = thread.isEmpty() ? List.of(msg) : thread;
         if (t.size() > 8) t = t.subList(t.size() - 8, t.size());
