@@ -8,6 +8,7 @@ import Badge3D from './Badge3D.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import { useInstall } from '../install.js'
+import { ANDROID_APK_URL, onAndroidBrowser } from './GetAppsCard.jsx'
 import {
   IconAlert, IconArchive, IconBook, IconCalendar, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo,
   IconInstall, IconLogout, IconNews, IconPaperclip, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
@@ -18,6 +19,15 @@ function InstallButton() {
   const inst = useInstall()
   const { notify } = useMail()
   const [howto, setHowto] = useState(false)
+  // On an Android phone's browser, the real app (with alerts that ring while it's closed) beats a home-screen shortcut.
+  if (onAndroidBrowser) {
+    return (
+      <a className="nav-item" href={ANDROID_APK_URL} download>
+        <IconInstall size={17} className="text-peacock-600" />
+        <span>Get the Android app</span>
+      </a>
+    )
+  }
   if (inst.installed || (!inst.canPrompt && !inst.ios)) return null
   return (
     <>
