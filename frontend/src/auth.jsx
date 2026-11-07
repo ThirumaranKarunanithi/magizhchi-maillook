@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { get, getToken, post, setToken, UNAUTHORIZED_EVENT } from './api.js'
+import { forgetPhone } from './native.js'
 
 const AuthCtx = createContext(null)
 
@@ -35,7 +36,8 @@ export function AuthProvider({ children }) {
     return res
   }, [])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    await forgetPhone() // the phone app stops getting this person's alerts
     setToken(null)
     setTokenState(null)
     setUser(null)

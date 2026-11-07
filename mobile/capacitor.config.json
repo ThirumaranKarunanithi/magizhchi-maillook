@@ -1,0 +1,29 @@
+{
+  "appId": "software.magizhchi.maillook",
+  "appName": "Magizhchi MailLook",
+  "webDir": "www",
+  "server": {
+    "url": "https://maillook.magizhchi.software",
+    "cleartext": false,
+    "allowNavigation": [
+      "maillook.magizhchi.software",
+      "maillookback.magizhchi.software",
+      "accounts.magizhchi.software"
+    ],
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "appendUserAgent": "MagizhchiMailLookApp",
+    "backgroundColor": "#fbf8f2"
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
+    }
+  }
+}

@@ -35,15 +35,17 @@ public class PushService {
     public record Subscription(long id, String endpoint, String p256dh, String auth) {}
 
     private final JdbcTemplate jdbc;
+    private final FcmService fcm;
     private final String publicKey;
     private final nl.martijndwars.webpush.PushService push;
     private final ExecutorService pool = Executors.newFixedThreadPool(2);
 
-    public PushService(JdbcTemplate jdbc,
+    public PushService(JdbcTemplate jdbc, FcmService fcm,
                        @Value("${maillook.push.vapid-public-key:${VAPID_PUBLIC_KEY:}}") String publicKey,
                        @Value("${maillook.push.vapid-private-key:${VAPID_PRIVATE_KEY:}}") String privateKey,
                        @Value("${maillook.push.vapid-subject:${VAPID_SUBJECT:mailto:maillook@magizhchi.software}}") String subject) {
         this.jdbc = jdbc;
+        this.fcm = fcm;
         this.publicKey = publicKey == null ? "" : publicKey.trim();
         nl.martijndwars.webpush.PushService svc = null;
         if (!this.publicKey.isEmpty() && privateKey != null && !privateKey.isBlank()) {
@@ -127,6 +129,7 @@ public class PushService {
      */
     public void send(long userId, String title, String body, String url, String tag) {
         record(userId, title, body, url, tag);
+        sendToPhones(userId, title, body, url, tag);
         if (push == null) return;
         List<Subscription> subs = jdbc.query("SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
                 (rs, i) -> new Subscription(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)), userId);
@@ -146,6 +149,44 @@ public class PushService {
                     else if (code >= 400) log.warn("Push returned {}", code);
                 } catch (Exception e) {
                     log.debug("Push failed: {}", e.toString());
+                }
+            }
+        });
+    }
+
+    // ── the phone app (Firebase Cloud Messaging) ─────────────────────────────
+
+    public boolean phonesConfigured() {
+        return fcm.configured();
+    }
+
+    /** Remembers this phone for this person (the same phone moves to whoever signs in last). */
+    public void addPhone(long userId, String token, String platform) {
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC);
+        int n = jdbc.update("UPDATE push_devices SET user_id = ?, platform = ?, last_seen_at = ? WHERE token = ?", userId, platform, now, token);
+        if (n == 0) jdbc.update("INSERT INTO push_devices (user_id, token, platform) VALUES (?, ?, ?)", userId, token, platform);
+    }
+
+    public void removePhone(long userId, String token) {
+        jdbc.update("DELETE FROM push_devices WHERE user_id = ? AND token = ?", userId, token);
+    }
+
+    public int phones(long userId) {
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM push_devices WHERE user_id = ?", Integer.class, userId);
+        return n == null ? 0 : n;
+    }
+
+    private void sendToPhones(long userId, String title, String body, String url, String tag) {
+        if (!fcm.configured()) return;
+        List<String> tokens = jdbc.queryForList("SELECT token FROM push_devices WHERE user_id = ?", String.class, userId);
+        if (tokens.isEmpty()) return;
+        String kind = kindOf(tag);
+        String t = title == null ? "Magizhchi MailLook" : clip(title, 120);
+        String b = body == null ? "" : clip(body, 240);
+        pool.submit(() -> {
+            for (String token : tokens) {
+                if (fcm.send(token, kind, t, b, url, tag) == FcmService.Result.DEAD) {
+                    jdbc.update("DELETE FROM push_devices WHERE token = ?", token);
                 }
             }
         });

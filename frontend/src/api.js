@@ -101,6 +101,9 @@ function filenameFrom(disposition) {
   return plain ? plain[1].trim() : null
 }
 
+/** Inside the Android app (mobile/), where a browser download does nothing. */
+const inApp = () => typeof window !== 'undefined' && !!window.Capacitor?.isNativePlatform?.()
+
 /** Downloads a protected file: a plain link can't carry the token, so fetch it and save the blob. */
 export async function downloadFile(path, fallbackName = 'attachment') {
   const res = await request(path)
@@ -110,6 +113,10 @@ export async function downloadFile(path, fallbackName = 'attachment') {
   }
   const blob = await res.blob()
   const name = fallbackName || filenameFrom(res.headers.get('Content-Disposition')) || 'attachment'
+  if (inApp()) {
+    const { nativeFile } = await import('./native.js')
+    return nativeFile(blob, name)
+  }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -125,6 +132,16 @@ export async function downloadFile(path, fallbackName = 'attachment') {
  * blockers allow it; the file is fetched with the sign-in token and then shown there.
  */
 export async function openFile(path, contentType) {
+  if (inApp()) {
+    // The phone app: the file opens in the phone's own viewer (PDF, photos, Office…).
+    const res = await request(path)
+    if (!res.ok) {
+      const data = await readJson(res)
+      throw new ApiError(res.status, (data && data.error) || `Could not open the file (${res.status})`, data)
+    }
+    const { nativeFile } = await import('./native.js')
+    return nativeFile(await res.blob(), filenameFrom(res.headers.get('Content-Disposition')) || 'file', { open: true, contentType })
+  }
   const tab = window.open('', '_blank')
   try {
     const res = await request(path)

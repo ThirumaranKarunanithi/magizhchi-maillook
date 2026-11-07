@@ -37,7 +37,27 @@ public class PushController {
         m.put("mode", push.mode(userId));
         m.put("devices", push.devices(userId));
         m.put("briefingHour", push.briefingHour(userId));
+        // The phone app (Firebase Cloud Messaging).
+        m.put("phonesConfigured", push.phonesConfigured());
+        m.put("phones", push.phones(userId));
         return m;
+    }
+
+    public record PhoneRequest(String token, String platform) {}
+
+    /** The MailLook phone app signs this phone up for alerts (it does so at every start). */
+    @PostMapping("/phone")
+    public Map<String, Object> phone(@RequestAttribute long userId, @RequestBody PhoneRequest req) {
+        if (blank(req.token()) || req.token().length() > 500) throw ApiException.bad("This phone's alert details look wrong.");
+        String platform = "ios".equalsIgnoreCase(req.platform()) ? "ios" : "android";
+        push.addPhone(userId, req.token().trim(), platform);
+        return settings(userId);
+    }
+
+    @PostMapping("/phone/remove")
+    public Map<String, Object> removePhone(@RequestAttribute long userId, @RequestBody PhoneRequest req) {
+        if (!blank(req.token())) push.removePhone(userId, req.token().trim());
+        return settings(userId);
     }
 
     @PutMapping
@@ -81,7 +101,7 @@ public class PushController {
 
     @PostMapping("/test")
     public ResponseEntity<Void> test(@RequestAttribute long userId) {
-        if (!push.configured()) throw ApiException.bad("Alerts aren't set up on this server yet.");
+        if (!push.configured() && !push.phonesConfigured()) throw ApiException.bad("Alerts aren't set up on this server yet.");
         push.send(userId, "Alerts are on ✓", "This is how new mail that needs you will look.", "/?view=needs_me", "maillook-test");
         return ResponseEntity.accepted().build();
     }

@@ -14,6 +14,7 @@ It includes a Happiness score, AI thread summaries, AI reply drafts in your own 
 | `frontend/` | React 18 + Vite + Tailwind web app |
 | `docs/API.md` | The REST contract between them |
 | `desktop/` | Windows app (Electron): the web app in its own window, tray, alerts, taskbar count, mailto links. See `desktop/README.md` |
+| `mobile/` | Android app (Capacitor): the web app with phone alerts (Firebase), attachments in the phone's apps, mail links. See `mobile/README.md` |
 | `mobile app/` | Later phase |
 
 ## Run it locally

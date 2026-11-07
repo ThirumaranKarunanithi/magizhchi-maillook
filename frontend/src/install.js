@@ -28,6 +28,8 @@ if (typeof window !== 'undefined') {
 
 function standalone() {
   try {
+    // The Android app counts as installed.
+    if (window.Capacitor?.isNativePlatform?.()) return true
     return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
   } catch {
     return false

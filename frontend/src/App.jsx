@@ -15,6 +15,7 @@ import Scheduled from './pages/Scheduled.jsx'
 import Files from './pages/Files.jsx'
 import { DesktopBridge } from './desktop.js'
 import AlertsPrompt from './components/AlertsPrompt.jsx'
+import { NativeBridge } from './native.js'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -46,6 +47,7 @@ function Shell() {
       <Toast />
       <DesktopBridge />
       <AlertsPrompt />
+      <NativeBridge />
     </div>
   )
 }

@@ -296,6 +296,15 @@ class ProductivityTest {
         assertThat(all.path("items").get(0).path("title").asText()).isNotBlank();
         assertThat(all.path("last").asLong()).isEqualTo(last);
         assertThat(call(get("/api/alerts").param("after", String.valueOf(last)), token, 200).path("items").size()).isZero();
+
+        // ── The phone app: its Firebase token is remembered, once, and can be removed ──
+        String phone = "{\"token\":\"fcm-token-123\",\"platform\":\"android\"}";
+        JsonNode ph = call(post("/api/push/phone").contentType(MediaType.APPLICATION_JSON).content(phone), token, 200);
+        assertThat(ph.path("phones").asInt()).isEqualTo(1);
+        assertThat(ph.path("phonesConfigured").asBoolean()).isFalse();
+        assertThat(call(post("/api/push/phone").contentType(MediaType.APPLICATION_JSON).content(phone), token, 200).path("phones").asInt()).isEqualTo(1);
+        call(post("/api/push/phone").contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"\"}"), token, 400);
+        assertThat(call(post("/api/push/phone/remove").contentType(MediaType.APPLICATION_JSON).content(phone), token, 200).path("phones").asInt()).isZero();
     }
 
     // ── a stand-in Magizhchi Box and Magizhchi PA ─────────────────

@@ -6,8 +6,10 @@ import { AuthProvider } from './auth.jsx'
 import './index.css'
 import { installTilt } from './tilt.js'
 import './install.js'
+import { installNative } from './native.js'
 
 installTilt()
+installNative()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
