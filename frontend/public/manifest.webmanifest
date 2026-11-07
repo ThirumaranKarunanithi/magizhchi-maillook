@@ -7,8 +7,16 @@
   "display": "standalone",
   "background_color": "#fbf8f2",
   "theme_color": "#0e7c86",
+  "id": "/",
+  "lang": "en-IN",
+  "categories": ["productivity", "business"],
   "icons": [
     { "src": "/brand/maillook-mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ],
+  "shortcuts": [
+    { "name": "Needs me", "url": "/?view=needs_me" },
+    { "name": "Today", "url": "/today" },
+    { "name": "Files", "url": "/files" }
   ]
 }

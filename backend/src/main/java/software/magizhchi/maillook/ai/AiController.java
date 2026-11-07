@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Writing with AI (a whole mail from a sentence, or the draft rewritten: shorter, friendlier, more formal,
@@ -55,6 +56,31 @@ public class AiController {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                     "AI comes from Magizhchi PA. Sign in with Magizhchi ID and make sure PA's AI is switched on.");
         }
+    }
+
+    /** One-tap replies under a mail from a person (none for mail you sent, newsletters or no-reply senders). */
+    @GetMapping("/quick-replies")
+    public Map<String, Object> quickReplies(@RequestAttribute long userId, @RequestParam long messageId) {
+        MessageRepo.Row m = actions.owned(userId, messageId);
+        boolean fromRobot = m.fromEmail() == null || m.fromEmail().matches("(?i).*(no-?reply|donotreply|do-not-reply|mailer-daemon|notifications?@|bounce).*");
+        boolean ownMail = accounts.forUser(userId).stream().anyMatch(a -> a.email().equalsIgnoreCase(m.fromEmail()));
+        if (!"INBOX".equals(m.folder()) || fromRobot || ownMail || m.listUnsubscribe() != null) {
+            return Map.of("replies", List.of());
+        }
+        return Map.of("replies", ai.quickReplies(m).path("replies"));
+    }
+
+    public record TranslateRequest(Long messageId, String to) {}
+
+    /** The mail in English or Tamil ("en" / "ta"), for reading; the original stays as it is. */
+    @PostMapping("/translate")
+    public JsonNode translate(@RequestAttribute long userId, @RequestBody TranslateRequest req) {
+        if (req.messageId() == null) throw ApiException.bad("Which mail?");
+        String to = req.to() == null ? "en" : req.to();
+        if (!Set.of("en", "ta").contains(to)) throw ApiException.bad("Mail can be translated into English or Tamil.");
+        MessageRepo.Row m = messages.byIds(Set.of(req.messageId())).stream().findFirst()
+                .filter(r -> r.userId() == userId).orElseThrow(() -> ApiException.notFound("Message"));
+        return ai.translate(m, to);
     }
 
     @PostMapping("/write")

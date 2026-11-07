@@ -11,6 +11,8 @@ import Subscriptions from './pages/Subscriptions.jsx'
 import Calendar from './pages/Calendar.jsx'
 import Contacts from './pages/Contacts.jsx'
 import Today from './pages/Today.jsx'
+import Scheduled from './pages/Scheduled.jsx'
+import Files from './pages/Files.jsx'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -64,6 +66,8 @@ export default function App() {
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/contacts" element={<Contacts />} />
         <Route path="/today" element={<Today />} />
+        <Route path="/scheduled" element={<Scheduled />} />
+        <Route path="/files" element={<Files />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

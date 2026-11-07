@@ -17,6 +17,7 @@ import FollowUpCard from './FollowUpCard.jsx'
 import PersonCard from './PersonCard.jsx'
 import InviteCard from './InviteCard.jsx'
 import WaitingCard from './WaitingCard.jsx'
+import { QuickReplies, Translate } from './MailExtras.jsx'
 import { whenLabel } from '../when.js'
 import { AccountDot } from './Sidebar.jsx'
 import {
@@ -277,13 +278,14 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
                     <span>{shortTime(detail.receivedAt)}</span>
                   </div>
                 )}
-                <Body detail={detail} />
+                <Translate detail={detail}><Body detail={detail} /></Translate>
               </article>
             ) : (
               <ThreadItem key={t.id} summary={t} notify={notify} />
             ),
           )}
         </div>
+        <QuickReplies key={`qr-${detail.id}`} detail={detail} />
       </div>
     </div>
   )

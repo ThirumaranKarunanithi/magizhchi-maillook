@@ -19,12 +19,12 @@ const KINDS = [
 ]
 const OTHER = { label: 'File', hue: ['#b9cbcb', '#4f6d71', '#14292e'] }
 
-function kindOf(a) {
+export function kindOf(a) {
   return KINDS.find((k) => k.test.test(a.name || '') || k.type.test(a.contentType || '')) || OTHER
 }
 
 /** A lit page with a folded corner, in the file type's colour, with its label on it. */
-function FileTile({ kind }) {
+export function FileTile({ kind }) {
   const [hi, mid, lo] = kind.hue
   const id = `ft${kind.label}`
   return (

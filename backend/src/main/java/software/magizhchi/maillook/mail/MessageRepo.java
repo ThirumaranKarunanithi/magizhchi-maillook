@@ -347,6 +347,48 @@ public class MessageRepo {
     }
 
     /** The raw calendar invite sent inside this mail, if any. */
+    /** Inbox mail in one lane (not snoozed), newest first: what "Archive all" takes. */
+    public List<Long> laneIds(long userId, Long accountId, String lane, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT m.id FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.lane = ? AND m.snoozed_until IS NULL");
+        List<Object> args = new ArrayList<>(List.of(userId, lane));
+        if (accountId != null) {
+            sql.append(" AND m.account_id = ?");
+            args.add(accountId);
+        }
+        sql.append(" ORDER BY m.received_at DESC, m.id DESC LIMIT ?");
+        args.add(limit);
+        return jdbc.queryForList(sql.toString(), Long.class, args.toArray());
+    }
+
+    /**
+     * Mail with attachments in every folder but Trash and Spam, newest first (the Files view).
+     * {@code q} narrows to files whose name (or the mail's subject or sender) contains it.
+     */
+    public List<Row> withFiles(long userId, Long accountId, String q, OffsetDateTime cursorAt, Long cursorId, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                "WHERE a.user_id = ? AND m.attachments IS NOT NULL AND m.attachments <> '[]' AND m.folder NOT IN ('TRASH', 'SPAM')");
+        List<Object> args = new ArrayList<>(List.of(userId));
+        if (accountId != null) {
+            sql.append(" AND m.account_id = ?");
+            args.add(accountId);
+        }
+        if (q != null && !q.isBlank()) {
+            String like = "%" + q.trim().toLowerCase(Locale.ROOT).replace("%", "").replace("_", "") + "%";
+            sql.append(" AND (LOWER(m.attachments) LIKE ? OR LOWER(COALESCE(m.subject, '')) LIKE ? OR LOWER(COALESCE(m.from_name, '')) LIKE ? OR LOWER(m.from_email) LIKE ?)");
+            args.addAll(List.of(like, like, like, like));
+        }
+        if (cursorAt != null && cursorId != null) {
+            sql.append(" AND (m.received_at < ? OR (m.received_at = ? AND m.id < ?))");
+            args.add(cursorAt);
+            args.add(cursorAt);
+            args.add(cursorId);
+        }
+        sql.append(" ORDER BY m.received_at DESC, m.id DESC LIMIT ?");
+        args.add(limit);
+        return jdbc.query(sql.toString(), mapper(false), args.toArray());
+    }
+
     public Optional<String> calendar(long id) {
         return jdbc.queryForList("SELECT calendar_ics FROM messages WHERE id = ? AND calendar_ics IS NOT NULL", String.class, id)
                 .stream().findFirst();

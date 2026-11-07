@@ -5,6 +5,7 @@ import App from './App.jsx'
 import { AuthProvider } from './auth.jsx'
 import './index.css'
 import { installTilt } from './tilt.js'
+import './install.js'
 
 installTilt()
 

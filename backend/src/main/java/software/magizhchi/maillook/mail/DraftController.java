@@ -1,6 +1,13 @@
 package software.magizhchi.maillook.mail;
 
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
+import java.nio.charset.StandardCharsets;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,8 +44,10 @@ public class DraftController {
     private final DraftRepo drafts;
     private final AccountRepo accounts;
     private final MailActions actions;
+    private final MailFiles files;
 
-    public DraftController(DraftRepo drafts, AccountRepo accounts, MailActions actions) {
+    public DraftController(DraftRepo drafts, AccountRepo accounts, MailActions actions, MailFiles files) {
+        this.files = files;
         this.drafts = drafts;
         this.accounts = accounts;
         this.actions = actions;
@@ -46,12 +55,48 @@ public class DraftController {
 
     @GetMapping("/drafts")
     public List<Map<String, Object>> list(@RequestAttribute long userId) {
-        return drafts.forUser(userId, MAX_DRAFTS).stream().map(DraftRepo.Draft::view).toList();
+        return drafts.forUser(userId, MAX_DRAFTS).stream().map(this::withFiles).toList();
     }
 
     @GetMapping("/drafts/{id}")
     public Map<String, Object> get(@RequestAttribute long userId, @PathVariable long id) {
-        return drafts.find(userId, id).orElseThrow(() -> ApiException.notFound("Draft")).view();
+        return withFiles(drafts.find(userId, id).orElseThrow(() -> ApiException.notFound("Draft")));
+    }
+
+    private Map<String, Object> withFiles(DraftRepo.Draft d) {
+        Map<String, Object> v = d.view();
+        v.put("files", files.forDraft(d.id()));
+        return v;
+    }
+
+    /** Attachments are kept with the draft, so closing the composer (or the tab) doesn't lose them. */
+    @PostMapping(value = "/drafts/{id}/files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public List<Map<String, Object>> addFiles(@RequestAttribute long userId, @PathVariable long id,
+                                              @RequestPart("files") List<MultipartFile> uploads) {
+        drafts.find(userId, id).orElseThrow(() -> ApiException.notFound("Draft"));
+        return files.addToDraft(userId, id, MailFiles.of(uploads));
+    }
+
+    @DeleteMapping("/drafts/{id}/files/{fileId}")
+    public List<Map<String, Object>> removeFile(@RequestAttribute long userId, @PathVariable long id, @PathVariable long fileId) {
+        drafts.find(userId, id).orElseThrow(() -> ApiException.notFound("Draft"));
+        files.removeFromDraft(userId, id, fileId);
+        return files.forDraft(id);
+    }
+
+    @GetMapping("/drafts/files/{fileId}")
+    public ResponseEntity<byte[]> file(@RequestAttribute long userId, @PathVariable long fileId) {
+        MailActions.Download d = files.download(userId, fileId);
+        MediaType type;
+        try {
+            type = MediaType.parseMediaType(d.contentType() == null ? "application/octet-stream" : d.contentType());
+        } catch (Exception e) {
+            type = MediaType.APPLICATION_OCTET_STREAM;
+        }
+        return ResponseEntity.ok().contentType(type)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(d.name(), StandardCharsets.UTF_8).build().toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .body(d.bytes());
     }
 
     /** Saves a draft: a new one without an id, or the same one again with its id. */

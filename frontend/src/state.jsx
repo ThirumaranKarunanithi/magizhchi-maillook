@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { get, post } from './api.js'
+import { clearBackup, readBackup } from './backup.js'
 
 // App-wide mail state shared by the sidebar, pages and the composer.
 const MailCtx = createContext(null)
@@ -94,15 +95,57 @@ export function MailProvider({ children }) {
     if (accountId != null && accountsLoaded && !accounts.some((a) => a.id === accountId)) setAccountId(null)
   }, [accounts, accountsLoaded, accountId])
 
-  const notify = useCallback((text, kind = 'info') => {
+  /** A short message at the bottom. opts: { action: { label, run }, ms, countdown (end time, ms) }. */
+  const notify = useCallback((text, kind = 'info', opts = {}) => {
     clearTimeout(toastTimer.current)
-    setToast({ text, kind, at: Date.now() })
-    toastTimer.current = setTimeout(() => setToast(null), 4000)
+    setToast({ text, kind, at: Date.now(), action: opts.action || null, countdown: opts.countdown || null })
+    toastTimer.current = setTimeout(() => setToast(null), opts.ms || (opts.action ? 8000 : 4000))
+  }, [])
+  /** Takes a sent mail back (in its undo window, or a scheduled one) and opens it again to edit. */
+  const undoSend = useCallback(async (id, { reopen = true } = {}) => {
+    try {
+      const d = await post(`/api/outbox/${id}/undo`)
+      refreshDrafts()
+      refreshCounts()
+      if (reopen) setComposer({ mode: d.mode || 'new', draft: d, key: Date.now() })
+      return d
+    } catch (e) {
+      notify(e.message, 'error')
+      return null
+    }
+  }, [refreshDrafts, refreshCounts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dismissToast = useCallback(() => {
+    clearTimeout(toastTimer.current)
+    setToast(null)
   }, [])
 
   const openComposer = useCallback((opts = { mode: 'new' }) => setComposer({ ...opts, key: Date.now() }), [])
   const closeComposer = useCallback(() => setComposer(null), [])
   const bumpMail = useCallback(() => setMailEpoch((n) => n + 1), [])
+
+  // Words typed but maybe never saved (the tab closed or the connection dropped): offer them back once.
+  useEffect(() => {
+    const b = readBackup()
+    if (!b || b.saved) return undefined
+    const t = setTimeout(() => {
+      notify('A mail you were writing wasn\u2019t saved.', 'info', {
+        ms: 20000,
+        action: {
+          label: 'Open it',
+          run: () => {
+            clearBackup()
+            setComposer({
+              mode: b.mode || 'new', key: Date.now(),
+              draft: { id: b.draftId || null, accountId: b.accountId, mode: b.mode, replyToMessageId: b.replyToMessageId || null,
+                to: b.to || [], cc: b.cc || [], bcc: b.bcc || [], subject: b.subject || '', body: b.body || '', files: [] },
+            })
+          },
+        },
+      })
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [notify])
 
   const value = {
     accounts, setAccounts, accountsLoaded, refreshAccounts,
@@ -115,7 +158,7 @@ export function MailProvider({ children }) {
     folders, refreshFolders, openFolder,
     menuOpen, setMenuOpen,
     mailEpoch, bumpMail,
-    toast, notify,
+    toast, notify, dismissToast, undoSend,
   }
   return <MailCtx.Provider value={value}>{children}</MailCtx.Provider>
 }

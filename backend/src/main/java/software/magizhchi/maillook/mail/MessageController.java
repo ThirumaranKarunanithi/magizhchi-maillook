@@ -57,12 +57,16 @@ public class MessageController {
     private final NoteRepo notes;
     private final software.magizhchi.maillook.contacts.PeopleService people;
     private final Waiting waiting;
+    private final Outbox outbox;
+    private final MailFiles mailFiles;
 
     public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box,
                              software.magizhchi.maillook.suite.MeetSoon meetSoon, FolderCursors cursors, DraftRepo drafts,
                              FollowUps followUps, NoteRepo notes, software.magizhchi.maillook.contacts.PeopleService people,
-                             Waiting waiting) {
+                             Waiting waiting, Outbox outbox, MailFiles mailFiles) {
         this.waiting = waiting;
+        this.outbox = outbox;
+        this.mailFiles = mailFiles;
         this.people = people;
         this.followUps = followUps;
         this.notes = notes;
@@ -219,6 +223,7 @@ public class MessageController {
         out.put("lanes", laneOut);
         out.put("accounts", acc);
         out.put("happiness", happiness);
+        out.put("scheduled", outbox.count(userId));
         return out;
     }
 
@@ -374,23 +379,41 @@ public class MessageController {
                                     @RequestPart("payload") String payload,
                                     @RequestPart(value = "files", required = false) List<MultipartFile> files) {
         MailActions.Outgoing o;
+        JsonNode tree;
         try {
             o = mapper.readValue(payload, MailActions.Outgoing.class);
+            tree = mapper.readTree(payload);
         } catch (Exception e) {
             throw ApiException.bad("The message couldn't be read.");
         }
-        MessageRepo.Row sent = actions.send(userId, o, files == null ? List.of() : files);
+        List<MailActions.OutFile> uploads = new java.util.ArrayList<>(MailFiles.of(files));
+
+        // Undo send and Send later: the mail waits in the outbox and the server sends it when it's due.
+        if (tree.hasNonNull("sendAt") || tree.has("delaySeconds")) {
+            Instant at;
+            if (tree.hasNonNull("sendAt")) {
+                try {
+                    at = OffsetDateTime.parse(tree.path("sendAt").asText()).toInstant();
+                } catch (Exception e) {
+                    throw ApiException.bad("That send time couldn't be read.");
+                }
+            } else {
+                at = Instant.now().plusSeconds(Math.max(0, Math.min(Outbox.MAX_DELAY_SECONDS, tree.path("delaySeconds").asInt(0))));
+            }
+            Map<String, Object> v = new LinkedHashMap<>(outbox.view(outbox.queue(userId, (com.fasterxml.jackson.databind.node.ObjectNode) tree, o, uploads, at)));
+            v.put("queued", true);
+            return v;
+        }
+
+        // Files kept with the draft go too.
+        JsonNode draftId = tree.path("draftId");
+        if (draftId.canConvertToLong() && drafts.find(userId, draftId.asLong()).isPresent()) uploads.addAll(mailFiles.loadDraft(draftId.asLong()));
+        MessageRepo.Row sent = actions.deliver(userId, o, uploads);
         people.forget(userId);              // who they write to just changed
         // The draft it came from is done with.
-        JsonNode tree = null;
-        try {
-            tree = mapper.readTree(payload);
-            JsonNode draftId = tree.path("draftId");
-            if (draftId.canConvertToLong()) drafts.delete(userId, draftId.asLong());
-        } catch (Exception ignored) {
-        }
+        if (draftId.canConvertToLong()) drafts.delete(userId, draftId.asLong());
         // "Remind me if nobody replies by …"
-        String remindAt = tree == null ? null : tree.path("remindAt").asText(null);
+        String remindAt = tree.path("remindAt").asText(null);
         if (sent != null && remindAt != null && !remindAt.isBlank()) {
             try {
                 followUps.set(userId, sent.id(), NoteController.future(remindAt, "reminder"));

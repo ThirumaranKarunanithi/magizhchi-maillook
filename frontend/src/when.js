@@ -41,6 +41,18 @@ export function snoozeChoices(now = new Date()) {
   return out
 }
 
+/** "Send later" choices: tomorrow morning and afternoon, and Monday morning (when tomorrow isn't Monday). */
+export function sendLaterChoices(now = new Date()) {
+  const out = [
+    { key: 'tm', label: 'Tomorrow morning', at: at(now, 1, 8) },
+    { key: 'ta', label: 'Tomorrow afternoon', at: at(now, 1, 13) },
+  ]
+  const dow = now.getDay()
+  const toMonday = ((8 - dow) % 7) || 7
+  if (toMonday > 1) out.push({ key: 'mon', label: 'Monday morning', at: at(now, toMonday, 8) })
+  return out
+}
+
 /** "Remind me if nobody replies" choices, counted from sending. */
 export const FOLLOW_UP = [
   { key: '', label: 'No reminder' },

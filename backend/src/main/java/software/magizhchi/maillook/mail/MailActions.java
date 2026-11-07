@@ -145,6 +145,78 @@ public class MailActions {
         if ("INBOX".equals(code) && r.lane() == null) messages.setLane(r.id(), LaneClassifier.FYI, "heuristic");
     }
 
+    /**
+     * Moves many mails at once (Archive all of "Can wait", and its undo): one connection per mailbox and
+     * folder instead of one per mail. Returns the ids that moved; one mailbox failing doesn't stop the others.
+     */
+    public List<Long> moveMany(long userId, List<Long> ids, String code) {
+        Map<String, List<MessageRepo.Row>> groups = new LinkedHashMap<>();
+        for (MessageRepo.Row r : messages.byIds(new java.util.LinkedHashSet<>(ids))) {
+            if (r.userId() != userId || code.equals(r.folder())) continue;
+            groups.computeIfAbsent(r.accountId() + "|" + r.folder(), k -> new ArrayList<>()).add(r);
+        }
+        List<Long> moved = new ArrayList<>();
+        for (List<MessageRepo.Row> rows : groups.values()) {
+            MessageRepo.Row first = rows.get(0);
+            Account a = account(first);
+            List<MessageRepo.Row> onServer = rows.stream().filter(r -> r.uid() != null).toList();
+            for (MessageRepo.Row r : rows) {
+                if (r.uid() == null) {
+                    messages.moved(r.id(), code, null);
+                    moved.add(r.id());
+                }
+            }
+            if (onServer.isEmpty()) continue;
+            Store store = null;
+            IMAPFolder src = null;
+            try {
+                store = imap.connect(a);
+                src = serverFolder(store, a, first.folder());
+                IMAPFolder dst = destination(store, a, code);
+                if (src == null || dst == null) continue;
+                src.open(Folder.READ_WRITE);
+                List<Message> found = new ArrayList<>();
+                List<MessageRepo.Row> foundRows = new ArrayList<>();
+                for (MessageRepo.Row r : onServer) {
+                    Message m = src.getMessageByUID(r.uid());
+                    if (m != null) {
+                        found.add(m);
+                        foundRows.add(r);
+                    } else {
+                        messages.moved(r.id(), code, null);   // already gone from that folder on the server
+                        moved.add(r.id());
+                    }
+                }
+                if (found.isEmpty()) continue;
+                Message[] arr = found.toArray(new Message[0]);
+                AppendUID[] res;
+                try {
+                    res = src.moveUIDMessages(arr, dst);
+                } catch (MessagingException noMove) {
+                    res = src.copyUIDMessages(arr, dst);
+                    for (Message m : arr) m.setFlag(Flags.Flag.DELETED, true);
+                    src.expunge(arr);
+                }
+                for (int i = 0; i < foundRows.size(); i++) {
+                    Long uid = res != null && i < res.length && res[i] != null ? res[i].uid : null;
+                    messages.moved(foundRows.get(i).id(), code, uid);
+                    moved.add(foundRows.get(i).id());
+                }
+            } catch (MessagingException e) {
+                // This mailbox is unreachable just now; its mail stays where it was.
+            } finally {
+                ImapClient.closeQuietly(src, false);
+                ImapClient.closeQuietly(store);
+            }
+        }
+        if ("INBOX".equals(code)) {
+            for (MessageRepo.Row r : messages.byIds(new java.util.LinkedHashSet<>(moved))) {
+                if (r.lane() == null) messages.setLane(r.id(), LaneClassifier.FYI, "heuristic");
+            }
+        }
+        return moved;
+    }
+
     private void move(MessageRepo.Row r, String code) {
         if (code.equals(r.folder())) return;
         Account a = account(r);
@@ -190,6 +262,9 @@ public class MailActions {
 
     public record Download(String name, String contentType, byte[] bytes) {}
 
+    /** A file going out with a mail: uploaded with it, or kept with its draft or in the outbox. */
+    public record OutFile(String name, String contentType, byte[] bytes) {}
+
     public Download attachment(long userId, long id, int index) {
         MessageRepo.Row r = owned(userId, id);
         if (r.uid() == null) throw ApiException.notFound("Attachment");
@@ -232,6 +307,19 @@ public class MailActions {
     }
 
     public MessageRepo.Row send(long userId, Outgoing o, List<MultipartFile> files) {
+        return deliver(userId, o, MailFiles.of(files));
+    }
+
+    /** Checks a mail can go (their mailbox, someone to send to) without sending it. */
+    public void check(long userId, Outgoing o) {
+        accounts.find(o.accountId()).filter(x -> x.userId() == userId).orElseThrow(() -> ApiException.notFound("Account"));
+        if ((o.to() == null || o.to().isEmpty()) && (o.cc() == null || o.cc().isEmpty()) && (o.bcc() == null || o.bcc().isEmpty())) {
+            throw ApiException.bad("Add at least one recipient.");
+        }
+        if (o.replyToMessageId() != null) owned(userId, o.replyToMessageId());
+    }
+
+    public MessageRepo.Row deliver(long userId, Outgoing o, List<OutFile> files) {
         Account a = accounts.find(o.accountId()).filter(x -> x.userId() == userId)
                 .orElseThrow(() -> ApiException.notFound("Account"));
         if ((o.to() == null || o.to().isEmpty()) && (o.cc() == null || o.cc().isEmpty()) && (o.bcc() == null || o.bcc().isEmpty())) {
@@ -243,7 +331,7 @@ public class MailActions {
         try {
             var session = imap.smtpSession(a);
             MimeMessage msg = new MimeMessage(session);
-            boolean multipart = files != null && files.stream().anyMatch(f -> !f.isEmpty());
+            boolean multipart = files != null && !files.isEmpty();
             MimeMessageHelper h = new MimeMessageHelper(msg, multipart && booking == null, "UTF-8");
             h.setFrom(new InternetAddress(a.email(), a.displayName() == null ? a.email() : a.displayName(), "UTF-8"));
             h.setTo(addrs(o.to()));
@@ -257,10 +345,9 @@ public class MailActions {
                 people.addAll(MeetInvites.addresses(nn(o.cc())));
                 msg.setContent(withInvite(o.text(), invites.ics(booking, a.email(), a.displayName(), people), files));
             } else if (multipart) {
-                for (MultipartFile f : files) {
-                    if (f.isEmpty()) continue;
-                    h.addAttachment(f.getOriginalFilename() == null ? "attachment" : f.getOriginalFilename(), f::getInputStream,
-                            f.getContentType() == null ? "application/octet-stream" : f.getContentType());
+                for (OutFile f : files) {
+                    h.addAttachment(f.name(), new org.springframework.core.io.ByteArrayResource(f.bytes()),
+                            f.contentType() == null ? "application/octet-stream" : f.contentType());
                 }
             }
             if (original != null && original.messageId() != null) {
@@ -334,7 +421,7 @@ public class MailActions {
      * The shape calendar apps look for: the text and the invite as alternatives (Gmail and Outlook show
      * Yes / No / Maybe), the same invite as an invite.ics file, then any files the person attached.
      */
-    static jakarta.mail.internet.MimeMultipart withInvite(String text, String ics, List<MultipartFile> files) throws Exception {
+    static jakarta.mail.internet.MimeMultipart withInvite(String text, String ics, List<OutFile> files) throws Exception {
         byte[] cal = ics.getBytes(StandardCharsets.UTF_8);
         var alt = new jakarta.mail.internet.MimeMultipart("alternative");
         var plain = new jakarta.mail.internet.MimeBodyPart();
@@ -353,12 +440,11 @@ public class MailActions {
         file.setFileName("invite.ics");
         file.setDisposition(Part.ATTACHMENT);
         mixed.addBodyPart(file);
-        for (MultipartFile f : files == null ? List.<MultipartFile>of() : files) {
-            if (f.isEmpty()) continue;
+        for (OutFile f : files == null ? List.<OutFile>of() : files) {
             var p = new jakarta.mail.internet.MimeBodyPart();
-            p.setDataHandler(new jakarta.activation.DataHandler(new jakarta.mail.util.ByteArrayDataSource(f.getBytes(),
-                    f.getContentType() == null ? "application/octet-stream" : f.getContentType())));
-            p.setFileName(f.getOriginalFilename() == null ? "attachment" : f.getOriginalFilename());
+            p.setDataHandler(new jakarta.activation.DataHandler(new jakarta.mail.util.ByteArrayDataSource(f.bytes(),
+                    f.contentType() == null ? "application/octet-stream" : f.contentType())));
+            p.setFileName(f.name());
             p.setDisposition(Part.ATTACHMENT);
             mixed.addBodyPart(p);
         }
@@ -487,16 +573,15 @@ public class MailActions {
         return l == null ? List.of() : l;
     }
 
-    private static List<Map<String, Object>> attachmentMeta(List<MultipartFile> files) {
+    private static List<Map<String, Object>> attachmentMeta(List<OutFile> files) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (files == null) return out;
-        for (MultipartFile f : files) {
-            if (f.isEmpty()) continue;
+        for (OutFile f : files) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("index", out.size());
-            m.put("name", f.getOriginalFilename());
-            m.put("size", f.getSize());
-            m.put("contentType", f.getContentType());
+            m.put("name", f.name());
+            m.put("size", (long) f.bytes().length);
+            m.put("contentType", f.contentType());
             out.add(m);
         }
         return out;

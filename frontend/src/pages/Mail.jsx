@@ -6,9 +6,10 @@ import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
 import MessageList from '../components/MessageList.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
 import AskCard from '../components/AskCard.jsx'
+import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import { folderLabel } from '../components/MoveMenu.jsx'
 import { whenLabel } from '../when.js'
-import { IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconSparkle, IconTrash, IconX } from '../components/Icons.jsx'
+import { IconArchive, IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconSparkle, IconTrash, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
 
@@ -120,7 +121,8 @@ export default function Mail() {
   const folderCode = params.get('view') === 'folder' && params.get('f')?.startsWith('F:') ? params.get('f') : null
   const view = folderCode ? 'folder' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
   const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode } : VIEWS[view]
-  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled } = useMail()
+  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled, counts, bumpMail } = useMail()
+  const [sweep, setSweep] = useState(null) // null | 'ask' | 'busy': "Archive all" of a lane
   const [asked, setAsked] = useState(null) // { q, loading } | { q, error } | { q, result }
   const askSeq = useRef(0)
 
@@ -262,6 +264,44 @@ export default function Mail() {
     }
   }
 
+  // Archive all of "Can wait" (or "For my info") in one go, with Undo.
+  const sweepable = !folderCode && (cfg.lane === 'can_wait' || cfg.lane === 'fyi')
+  const laneTotal = (() => {
+    if (!sweepable) return 0
+    if (accountId == null) return counts?.lanes?.[cfg.lane]?.total ?? 0
+    return null // per-mailbox totals aren't counted; the dialog says "everything"
+  })()
+  async function archiveLane() {
+    setSweep('busy')
+    try {
+      const res = await post('/api/messages/bulk/archive-lane', { lane: cfg.lane, accountId: accountId ?? null })
+      setSweep(null)
+      setItems([])
+      bumpMail()
+      refreshCounts()
+      const msg = res.failed > 0 ? `Archived ${res.moved}. ${res.failed} couldn\u2019t be moved just now.` : `Archived ${res.moved} ✓`
+      notify(msg, res.failed > 0 ? 'error' : 'success', res.ids?.length ? {
+        ms: 12000,
+        action: {
+          label: 'Undo',
+          run: async () => {
+            try {
+              await post('/api/messages/bulk/move', { ids: res.ids, folder: 'INBOX' })
+              bumpMail()
+              refreshCounts()
+              notify(`Back in ${cfg.title} ✓`, 'success')
+            } catch (e) {
+              notify(e.message, 'error')
+            }
+          },
+        },
+      } : {})
+    } catch (e) {
+      setSweep(null)
+      notify(e.message, 'error')
+    }
+  }
+
   async function refresh() {
     setSyncing(true)
     try {
@@ -392,6 +432,18 @@ export default function Mail() {
                 ) : 'All accounts'}
               </p>
             </div>
+            {sweepable && items.length > 0 && (
+              <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setSweep('ask')} disabled={sweep != null} title={`Archive everything in ${cfg.title}`}>
+                {sweep === 'busy' ? <span className="spinner !h-3 !w-3" /> : <IconArchive size={14} />} Archive all
+              </button>
+            )}
+            {sweep === 'ask' && (
+              <ConfirmDialog title={`Archive all of ${cfg.title}?`} confirmLabel={laneTotal ? `Archive ${laneTotal}` : 'Archive all'}
+                onCancel={() => setSweep(null)} onConfirm={archiveLane}>
+                {laneTotal ? `All ${laneTotal} mails` : 'Every mail'} in {cfg.title}{accountId != null ? ' for this mailbox' : ''} move{laneTotal === 1 ? 's' : ''} to Archive. Snoozed mail stays put.
+                You can undo it right after, and archived mail is always in Archive and search.
+              </ConfirmDialog>
+            )}
             <button className="icon-btn" onClick={refresh} disabled={syncing} title="Check for new mail">
               <IconRefresh size={17} className={syncing ? 'animate-spin' : ''} />
             </button>

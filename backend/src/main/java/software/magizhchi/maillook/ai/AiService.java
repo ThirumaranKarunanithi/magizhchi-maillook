@@ -334,6 +334,47 @@ public class AiService {
                 """.formatted(how), "Draft:\n" + cut(text, 12000), "polish".equals(style) ? 0.1 : 0.5, 2500);
     }
 
+    // ── one-tap replies and translation ───────────────────────────
+
+    /**
+     * Three very short ready answers to the latest mail ("Yes, works for me", "Thanks, got it"), in the
+     * language it was written in, in the owner's voice. Cached per mail. Returns {"replies": [{"label", "body"}]}.
+     */
+    public JsonNode quickReplies(MessageRepo.Row msg) {
+        var cached = messages.aiCache(msg.id(), "quick");
+        if (cached.isPresent()) return parse(cached.get());
+        List<MessageRepo.Row> thread = messages.thread(msg.accountId(), msg.threadKey());
+        JsonNode out = llm(msg.userId(), """
+                You suggest three one-tap replies the mailbox owner ("You") could send to the latest message in the thread.
+                Each is one or two short sentences (under 25 words), complete and ready to send, with no greeting line
+                and no sign-off. Make them genuinely different (for example: yes / a question / not now), and fit what
+                the mail actually asks. Don't promise anything specific the thread doesn't support.
+                If the mail needs no reply (a newsletter, receipt, automatic notice), reply {"replies": []}.
+                Write in the language of the latest message.
+                Reply as JSON: {"replies": [{"label": "2-4 word button text", "body": "the reply"}]}
+                """, threadText(msg, thread), 0.5, 700);
+        messages.putAiCache(msg.id(), "quick", out.toString());
+        return out;
+    }
+
+    /** The mail in English or Tamil. Cached per mail and language. Returns {"subject", "body", "from"}. */
+    public JsonNode translate(MessageRepo.Row msg, String to) {
+        String kind = "tr_" + to;
+        var cached = messages.aiCache(msg.id(), kind);
+        if (cached.isPresent()) return parse(cached.get());
+        String body = msg.bodyText() != null && !msg.bodyText().isBlank() ? msg.bodyText()
+                : msg.bodyHtml() == null ? "" : MessageParser.htmlToText(msg.bodyHtml());
+        String lang = "ta".equals(to) ? "natural Tamil (Tamil script)" : "natural, simple English";
+        JsonNode out = llm(msg.userId(), """
+                You translate an email into %s for the person who received it.
+                Keep names, numbers, dates, prices, links, email addresses and phone numbers exactly as they are.
+                Keep the paragraphs and lists. Translate quoted earlier mail too, if any. Add nothing and leave nothing out.
+                Reply as JSON: {"subject": "the subject, translated", "body": "the email, translated, plain text", "from": "the language it was in, in English, e.g. Tamil"}
+                """.formatted(lang), "Subject: " + nz(msg.subject()) + "\n\n" + cut(body, 14000), 0.2, 4000);
+        messages.putAiCache(msg.id(), kind, out.toString());
+        return out;
+    }
+
     // ── asking your mail ──────────────────────────────────────────
 
     /**

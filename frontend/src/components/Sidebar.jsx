@@ -6,10 +6,41 @@ import HappinessGauge from './HappinessGauge.jsx'
 import Logo from './Logo.jsx'
 import Badge3D from './Badge3D.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
+import ConfirmDialog from './ConfirmDialog.jsx'
+import { useInstall } from '../install.js'
 import {
   IconAlert, IconArchive, IconBook, IconCalendar, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo,
-  IconLogout, IconNews, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
+  IconInstall, IconLogout, IconNews, IconPaperclip, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
 } from './Icons.jsx'
+
+/** "Install MailLook" on the home screen or desktop: the browser's own prompt, or Safari's steps on iPhone. */
+function InstallButton() {
+  const inst = useInstall()
+  const { notify } = useMail()
+  const [howto, setHowto] = useState(false)
+  if (inst.installed || (!inst.canPrompt && !inst.ios)) return null
+  return (
+    <>
+      <button className="nav-item" onClick={async () => {
+        if (inst.canPrompt) {
+          if (await inst.install()) notify('MailLook is installed ✓ Open it from your home screen or app list.', 'success')
+        } else setHowto(true)
+      }}>
+        <IconInstall size={17} className="text-peacock-600" />
+        <span>Install the app</span>
+      </button>
+      {howto && (
+        <ConfirmDialog title="Add MailLook to your home screen" confirmLabel="Got it" onConfirm={() => setHowto(false)} onCancel={() => setHowto(false)}>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>In Safari, tap the <b>Share</b> button (the square with an arrow).</li>
+            <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+            <li>Tap <b>Add</b>. MailLook opens full screen from its icon, and alerts work there.</li>
+          </ol>
+        </ConfirmDialog>
+      )}
+    </>
+  )
+}
 
 const LANE_ITEMS = [
   { view: 'needs_me', label: 'Needs me', Icon: IconHand, hue: 'marigold' },
@@ -20,6 +51,7 @@ const LANE_ITEMS = [
 const FOLDER_ITEMS = [
   { view: 'all', label: 'All mail', Icon: IconInbox },
   { view: 'drafts', label: 'Drafts', Icon: IconDraft },
+  { path: '/scheduled', label: 'Scheduled', Icon: IconClock },
   { view: 'snoozed', label: 'Snoozed', Icon: IconSnooze },
   { view: 'waiting', label: 'Waiting on others', Icon: IconClock },
   { view: 'sent', label: 'Sent', Icon: IconSend },
@@ -200,7 +232,16 @@ export default function Sidebar({ onNavigate }) {
       </div>
 
       <div>
-        {FOLDER_ITEMS.map(({ view, label, Icon }) => (
+        {FOLDER_ITEMS.map(({ view, path, label, Icon }) => path ? (
+          // Scheduled shows only while something waits there (or it's open).
+          (counts?.scheduled > 0 || location.pathname === path) && (
+            <button key={path} className={`nav-item ${location.pathname === path ? 'active' : ''}`} onClick={() => go(path)}>
+              <Icon size={17} className="text-slate-500" />
+              <span>{label}</span>
+              {counts?.scheduled > 0 && <span className="ml-auto text-xs text-slate-500 num">{counts.scheduled}</span>}
+            </button>
+          )
+        ) : (
           <button key={view} className={`nav-item ${onMail && currentView === view ? 'active' : ''}`} onClick={() => go(`/?view=${view}`)}>
             <Icon size={17} className="text-slate-500" />
             <span>{label}</span>
@@ -208,6 +249,10 @@ export default function Sidebar({ onNavigate }) {
             {view === 'waiting' && counts?.happiness?.waitingOnOthers > 0 && <span className="ml-auto text-xs text-slate-500 num">{counts.happiness.waitingOnOthers}</span>}
           </button>
         ))}
+        <button className={`nav-item ${location.pathname === '/files' ? 'active' : ''}`} onClick={() => go('/files')}>
+          <IconPaperclip size={17} className="text-slate-500" />
+          <span>Files</span>
+        </button>
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>
           <IconNews size={17} className="text-slate-500" />
           <span>Subscriptions</span>
@@ -252,6 +297,7 @@ export default function Sidebar({ onNavigate }) {
           <IconSettings size={17} className="text-slate-500" />
           <span>Manage accounts</span>
         </button>
+        <InstallButton />
       </div>
 
       {pa && (
