@@ -44,3 +44,7 @@ export const IconCloudUp = (p) => <Svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-8.
 export const IconCloudCheck = (p) => <Svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10a4 4 0 0 1-.5 7.97" /><path d="m9 15 2.2 2.2L15.5 13" /></Svg>
 export const IconVideo = (p) => <Svg {...p}><rect x="2" y="6" width="14" height="12" rx="2" /><path d="m16 10 6-3.5v11L16 14" /></Svg>
 export const IconCalendar = (p) => <Svg {...p}><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></Svg>
+export const IconFolder = (p) => <Svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></Svg>
+export const IconSpam = (p) => <Svg {...p}><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z" /><path d="M12 8v5" /><path d="M12 16.5v.01" /></Svg>
+export const IconDraft = (p) => <Svg {...p}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /><path d="M8 17l1-3 5-5 2 2-5 5Z" /></Svg>
+export const IconMove = (p) => <Svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /><path d="M10 13h6" /><path d="m13.5 10.5 2.5 2.5-2.5 2.5" /></Svg>

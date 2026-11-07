@@ -226,7 +226,7 @@ public class MessageRepo {
                 mapper(true), accountId, since, limit);
     }
 
-    public List<Row> list(long userId, String folder, String lane, Long accountId, String q,
+    public List<Row> list(long userId, String folder, String lane, Long accountId, MailSearch search,
                           OffsetDateTime cursorAt, Long cursorId, int limit) {
         StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = ?");
         List<Object> args = new ArrayList<>(List.of(userId, folder));
@@ -238,14 +238,7 @@ public class MessageRepo {
             sql.append(" AND m.account_id = ?");
             args.add(accountId);
         }
-        if (q != null && !q.isBlank()) {
-            String like = "%" + q.trim().toLowerCase(Locale.ROOT).replace("%", "").replace("_", "") + "%";
-            sql.append(" AND (LOWER(m.subject) LIKE ? OR LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ? OR LOWER(m.body_text) LIKE ?)");
-            args.add(like);
-            args.add(like);
-            args.add(like);
-            args.add(like);
-        }
+        if (search != null) search.appendTo(sql, args);
         if (cursorAt != null && cursorId != null) {
             sql.append(" AND (m.received_at < ? OR (m.received_at = ? AND m.id < ?))");
             args.add(cursorAt);

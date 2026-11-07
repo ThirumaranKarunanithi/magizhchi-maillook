@@ -23,7 +23,7 @@ public class AccountController {
 
     public record DetectRequest(String email) {}
     public record BulkRequest(List<AccountService.NewAccount> accounts) {}
-    public record PatchRequest(String displayName, String color, String password) {}
+    public record PatchRequest(String displayName, String color, String password, String signature) {}
 
     private final AccountService service;
     private final ProviderDetector detector;
@@ -72,7 +72,10 @@ public class AccountController {
 
     @PatchMapping("/accounts/{id}")
     public Map<String, Object> patch(@RequestAttribute long userId, @PathVariable long id, @RequestBody PatchRequest req) {
-        return AccountService.view(service.update(userId, id, req.displayName(), req.color(), req.password()), 0);
+        if (req.signature() != null) service.setSignature(userId, id, req.signature());
+        Map<String, Object> view = AccountService.view(service.update(userId, id, req.displayName(), req.color(), req.password()), 0);
+        view.put("signature", service.signature(id));
+        return view;
     }
 
     @DeleteMapping("/accounts/{id}")

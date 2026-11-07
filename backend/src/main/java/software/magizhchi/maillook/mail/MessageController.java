@@ -38,7 +38,11 @@ public class MessageController {
     public record FlagRequest(Boolean flagged) {}
     public record LaneRequest(String lane, Boolean rememberSender) {}
 
-    private static final Set<String> FOLDERS = Set.of("INBOX", "SENT", "ARCHIVE", "TRASH");
+    public record MoveRequest(String folder) {}
+
+    private static final Set<String> FOLDERS = Set.of("INBOX", "SENT", "ARCHIVE", "TRASH", "SPAM");
+    /** Where mail can be moved to (not Sent: that is only for mail you sent). */
+    private static final Set<String> MOVE_TO = Set.of("INBOX", "ARCHIVE", "TRASH", "SPAM");
 
     private final MessageRepo messages;
     private final MailActions actions;
@@ -47,10 +51,14 @@ public class MessageController {
     private final BoxClient box;
 
     private final software.magizhchi.maillook.suite.MeetSoon meetSoon;
+    private final FolderCursors cursors;
+    private final DraftRepo drafts;
 
     public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box,
-                             software.magizhchi.maillook.suite.MeetSoon meetSoon) {
+                             software.magizhchi.maillook.suite.MeetSoon meetSoon, FolderCursors cursors, DraftRepo drafts) {
         this.meetSoon = meetSoon;
+        this.cursors = cursors;
+        this.drafts = drafts;
         this.box = box;
         this.messages = messages;
         this.actions = actions;
@@ -65,9 +73,18 @@ public class MessageController {
                                     @RequestParam(defaultValue = "INBOX") String folder,
                                     @RequestParam(required = false) String q,
                                     @RequestParam(required = false) String cursor,
-                                    @RequestParam(defaultValue = "50") int limit) {
-        String f = folder.toUpperCase();
-        if (!FOLDERS.contains(f)) throw ApiException.bad("Unknown folder.");
+                                    @RequestParam(defaultValue = "50") int limit,
+                                    @RequestParam(required = false) String from,
+                                    @RequestParam(required = false) Boolean hasAttachment,
+                                    @RequestParam(required = false) Boolean unread,
+                                    @RequestParam(required = false) Boolean flagged,
+                                    @RequestParam(required = false) String after,
+                                    @RequestParam(required = false) String before,
+                                    @RequestParam(required = false) String tz) {
+        String f = folderCode(userId, folder);
+        Instant now = Instant.now();
+        MailSearch search = MailSearch.parse(q, zone(tz), now)
+                .with(from, hasAttachment, unread, flagged, instant(after), instant(before));
         String l = "all".equals(lane) ? null : lane;
         if (l != null && !LaneClassifier.isLane(l)) throw ApiException.bad("Unknown lane.");
         OffsetDateTime cAt = null;
@@ -82,7 +99,7 @@ public class MessageController {
             }
         }
         int n = Math.max(1, Math.min(100, limit));
-        List<MessageRepo.Row> rows = messages.list(userId, f, l, accountId, q, cAt, cId, n);
+        List<MessageRepo.Row> rows = messages.list(userId, f, l, accountId, search, cAt, cId, n);
         String next = null;
         if (rows.size() == n) {
             MessageRepo.Row last = rows.get(rows.size() - 1);
@@ -92,7 +109,7 @@ public class MessageController {
         // A meeting about to start puts its mail first in Needs me (first page only, not while searching).
         List<Map<String, Object>> items = new java.util.ArrayList<>();
         java.util.Set<Long> pinned = new java.util.HashSet<>();
-        if (cAt == null && (q == null || q.isBlank()) && "INBOX".equals(f) && (l == null || LaneClassifier.NEEDS_ME.equals(l))) {
+        if (cAt == null && search.isEmpty() && "INBOX".equals(f) && (l == null || LaneClassifier.NEEDS_ME.equals(l))) {
             for (var p : meetSoon.soon(userId, accountId, Instant.now())) {
                 if (!pinned.add(p.row().id())) continue;
                 Map<String, Object> m = p.row().summary();
@@ -104,6 +121,34 @@ public class MessageController {
         out.put("items", items);
         out.put("nextCursor", next);
         return out;
+    }
+
+    /** INBOX, SENT, ARCHIVE, TRASH, SPAM, or "F:" + a folder one of their mailboxes has opened. */
+    private String folderCode(long userId, String folder) {
+        if (folder != null && folder.startsWith("F:")) {
+            if (!cursors.known(userId, folder)) throw ApiException.notFound("Folder");
+            return folder;
+        }
+        String f = folder == null ? "INBOX" : folder.toUpperCase(java.util.Locale.ROOT);
+        if (!FOLDERS.contains(f)) throw ApiException.bad("Unknown folder.");
+        return f;
+    }
+
+    static java.time.ZoneId zone(String tz) {
+        try {
+            return tz == null || tz.isBlank() ? ZoneOffset.UTC : java.time.ZoneId.of(tz);
+        } catch (java.time.DateTimeException e) {
+            return ZoneOffset.UTC;
+        }
+    }
+
+    private static Instant instant(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            return Instant.parse(s);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw ApiException.bad("Dates look like 2026-11-07T00:00:00Z.");
+        }
     }
 
     @GetMapping("/counts")
@@ -217,6 +262,19 @@ public class MessageController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/messages/{id}/move")
+    public ResponseEntity<Void> move(@RequestAttribute long userId, @PathVariable long id, @RequestBody MoveRequest req) {
+        String to = req.folder() == null ? "" : req.folder().trim();
+        if (to.startsWith("F:")) {
+            if (to.length() < 3 || to.length() > 290) throw ApiException.bad("Unknown folder.");
+        } else {
+            to = to.toUpperCase(java.util.Locale.ROOT);
+            if (!MOVE_TO.contains(to)) throw ApiException.bad("Mail can be moved to Inbox, Archive, Trash, Spam or one of your folders.");
+        }
+        actions.moveTo(userId, id, to);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/messages/{id}/lane")
     public ResponseEntity<Void> lane(@RequestAttribute long userId, @PathVariable long id, @RequestBody LaneRequest req) {
         if (!LaneClassifier.isLane(req.lane())) throw ApiException.bad("Unknown lane.");
@@ -269,6 +327,12 @@ public class MessageController {
             throw ApiException.bad("The message couldn't be read.");
         }
         MessageRepo.Row sent = actions.send(userId, o, files == null ? List.of() : files);
+        // The draft it came from is done with.
+        try {
+            JsonNode draftId = mapper.readTree(payload).path("draftId");
+            if (draftId.canConvertToLong()) drafts.delete(userId, draftId.asLong());
+        } catch (Exception ignored) {
+        }
         return sent == null ? Map.of("status", "sent") : sent.summary();
     }
 }

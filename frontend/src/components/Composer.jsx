@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { postForm } from '../api.js'
+import { del, postForm, put } from '../api.js'
 import { useMail } from '../state.jsx'
-import { bodyAsText, EMAIL_RE, formatSize, fullDate, splitAddresses } from '../util.js'
-import { IconCalendar, IconPaperclip, IconSend, IconX } from './Icons.jsx'
+import { bodyAsText, EMAIL_RE, formatSize, fullDate, signatureBlock, splitAddresses } from '../util.js'
+import { IconCalendar, IconPaperclip, IconSend, IconTrash, IconX } from './Icons.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 
 function uniq(list, exclude = new Set()) {
@@ -18,6 +18,22 @@ function uniq(list, exclude = new Set()) {
   return out
 }
 
+/** The chips plus whatever is still half-typed in the field. */
+function allOf(chips, typed) {
+  return uniq([...chips, ...splitAddresses(typed)])
+}
+
+/**
+ * Swaps the signature when From changes: the old mailbox's block becomes the new one's. With no old
+ * block, the new one goes above the quote (anchor) or at the end; a signature they edited is left alone.
+ */
+function swapSignature(text, oldBlock, newBlock, anchor) {
+  if (oldBlock && text.includes(oldBlock)) return text.replace(oldBlock, () => newBlock)
+  if (!newBlock || oldBlock) return text
+  const at = anchor ? text.indexOf(anchor) : -1
+  return at >= 0 ? text.slice(0, at) + newBlock + text.slice(at) : text + newBlock
+}
+
 function prefixed(subject, prefix, re) {
   const s = subject || ''
   return re.test(s) ? s : `${prefix} ${s}`.trim()
@@ -29,16 +45,28 @@ function quote(m) {
   return `On ${fullDate(m.receivedAt)}, ${who} wrote:\n${text.split('\n').map((l) => `> ${l}`).join('\n')}`
 }
 
-/** Works out From/To/Cc/Subject/body for new, reply, reply all and forward. */
-function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: subjectOverride, invite }, accounts, selectedAccountId) {
+/** Works out From/To/Cc/Subject/body for new, reply, reply all and forward, or a saved draft. */
+function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: subjectOverride, invite, draft }, accounts, selectedAccountId) {
   const own = new Set(accounts.map((a) => a.email.toLowerCase()))
   const fallbackFrom = selectedAccountId ?? accounts[0]?.id ?? ''
+  const sig = (id) => signatureBlock(accounts.find((a) => a.id === id)?.signature)
+  if (draft) {
+    // Back from Drafts exactly as it was left (its signature is already in the text).
+    return {
+      accountId: accounts.some((a) => a.id === draft.accountId) ? draft.accountId : fallbackFrom,
+      to: draft.to || [], cc: draft.cc || [], bcc: draft.bcc || [], subject: draft.subject || '', text: draft.body || '',
+      replyToMessageId: draft.replyToMessageId || null,
+      invite: draft.inviteCardId ? { cardId: draft.inviteCardId, name: 'your Meet room' } : null,
+      draftId: draft.id, anchor: null,
+    }
+  }
   if (!m || mode === 'new') {
     // A new mail can still start from one (the weekly digest): same mailbox, chosen people, ready text.
     const from = m && accounts.some((a) => a.id === m.accountId) ? m.accountId : fallbackFrom
     return {
-      accountId: from, to: uniq(toOverride || [], own), cc: [], subject: subjectOverride || '', text: draftBody || '',
-      replyToMessageId: null, invite: null,
+      accountId: from, to: uniq(toOverride || [], own), cc: [], bcc: [], subject: subjectOverride || '',
+      text: `${draftBody || ''}${sig(from)}`,
+      replyToMessageId: null, invite: null, draftId: null, anchor: null,
     }
   }
 
@@ -54,11 +82,11 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: su
       ...(m.cc?.length ? [`Cc: ${m.cc.join(', ')}`] : []),
     ].join('\n')
     return {
-      accountId, to: [], cc: [],
+      accountId, to: [], cc: [], bcc: [],
       subject: prefixed(m.subject, 'Fwd:', /^\s*(fwd?|fw)\s*:/i),
-      text: `\n\n${header}\n\n${bodyAsText(m)}`,
+      text: `${sig(accountId)}\n\n${header}\n\n${bodyAsText(m)}`,
       replyToMessageId: null,
-      invite: null,
+      invite: null, draftId: null, anchor: `\n\n${header}`,
     }
   }
   let to = fromMe ? m.to || [] : [m.fromEmail]
@@ -76,10 +104,12 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, subject: su
     cc = []
   }
   return {
-    accountId, to, cc,
+    accountId, to, cc, bcc: [],
     subject: subjectOverride || prefixed(m.subject, 'Re:', /^\s*re\s*:/i),
-    text: `${draftBody ? `${draftBody}\n` : ''}\n\n${quote(m)}`,
+    // Signature above the quote, where it belongs in a reply.
+    text: `${draftBody ? `${draftBody}\n` : ''}${sig(accountId)}\n\n${quote(m)}`,
     replyToMessageId: m.id,
+    draftId: null, anchor: `\n\n${quote(m)}`,
     // A Meet room booked from this thread: the reply is its invite and carries the calendar file.
     invite: invite || null,
   }
@@ -137,18 +167,18 @@ function RecipientField({ label, chips, setChips, text, setText, autoFocus, chil
 }
 
 export default function Composer() {
-  const { composer, closeComposer, accounts, accountId: selectedAccountId, notify, bumpMail, refreshCounts } = useMail()
+  const { composer, closeComposer, accounts, accountId: selectedAccountId, notify, bumpMail, refreshCounts, refreshDrafts } = useMail()
   const init = useMemo(() => initialDraft(composer, accounts, selectedAccountId), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [fromId, setFromId] = useState(init.accountId)
   const [to, setTo] = useState(init.to)
   const [cc, setCc] = useState(init.cc)
-  const [bcc, setBcc] = useState([])
+  const [bcc, setBcc] = useState(init.bcc)
   const [toText, setToText] = useState('')
   const [ccText, setCcText] = useState('')
   const [bccText, setBccText] = useState('')
-  const [ask, setAsk] = useState(null) // 'discard' | 'nosubject' while a question is on screen
-  const [showCc, setShowCc] = useState(init.cc.length > 0)
+  const [ask, setAsk] = useState(null) // 'discard' | 'unsaved' | 'nosubject' while a question is on screen
+  const [showCc, setShowCc] = useState(init.cc.length > 0 || init.bcc.length > 0)
   const [subject, setSubject] = useState(init.subject)
   const [invite, setInvite] = useState(init.invite)
   const [text, setText] = useState(init.text)
@@ -157,6 +187,12 @@ export default function Composer() {
   const [error, setError] = useState('')
   const fileInput = useRef(null)
   const bodyRef = useRef(null)
+  // Drafts: saved a moment after each change and on close. One save at a time, in order.
+  const draftId = useRef(init.draftId)
+  const lastSaved = useRef(null)
+  const saveChain = useRef(Promise.resolve(true))
+  const stopSaving = useRef(false)
+  const [saveState, setSaveState] = useState(init.draftId ? { at: composer.draft?.updatedAt } : null) // { busy } | { at } | { error }
 
   // accounts may arrive after the composer opened
   useEffect(() => {
@@ -173,11 +209,71 @@ export default function Composer() {
   }, [composer.mode])
 
   // only what the user typed or changed counts: an untouched reply (prefilled To, subject and quote) closes without a question
-  const dirty = to.join() !== init.to.join() || cc.join() !== init.cc.join() || bcc.length || toText || ccText || bccText || subject !== init.subject || text !== init.text || files.length
+  const dirty = to.join() !== init.to.join() || cc.join() !== init.cc.join() || bcc.join() !== init.bcc.join() || toText || ccText || bccText
+    || subject !== init.subject || text !== init.text || files.length
 
-  function close() {
-    if (sending) return
-    if (dirty) return setAsk('discard')
+  function changeFrom(id) {
+    const block = (x) => signatureBlock(accounts.find((a) => a.id === Number(x))?.signature)
+    setText((t) => swapSignature(t, block(fromId), block(id), init.anchor))
+    setFromId(id)
+  }
+
+  /** Saves to Drafts; resolves true when what's on screen is saved. */
+  function saveDraft() {
+    const body = {
+      accountId: fromId ? Number(fromId) : null,
+      mode: composer.mode || 'new',
+      replyToMessageId: init.replyToMessageId || null,
+      to: allOf(to, toText), cc: allOf(cc, ccText), bcc: allOf(bcc, bccText),
+      subject, body: text, inviteCardId: invite?.cardId || null,
+    }
+    const key = JSON.stringify(body)
+    saveChain.current = saveChain.current.then(async () => {
+      if (stopSaving.current) return true
+      if (key === lastSaved.current && draftId.current) return true
+      setSaveState({ busy: true })
+      try {
+        const res = await put('/api/drafts', { ...body, id: draftId.current })
+        draftId.current = res.id
+        lastSaved.current = key
+        setSaveState({ at: res.savedAt })
+        return true
+      } catch (e) {
+        setSaveState({ error: e.message })
+        return false
+      }
+    })
+    return saveChain.current
+  }
+
+  useEffect(() => {
+    if (!dirty || sending) return undefined
+    const t = setTimeout(saveDraft, 1500)
+    return () => clearTimeout(t)
+  }, [fromId, to, cc, bcc, toText, ccText, bccText, subject, text, invite]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Closing keeps the mail in Drafts instead of asking to throw it away.
+  async function close() {
+    if (sending || ask) return
+    if (!dirty) return closeComposer()
+    const ok = await saveDraft()
+    if (!ok) return setAsk('unsaved')
+    notify(files.length ? 'Saved to Drafts. Attachments aren\u2019t kept in drafts; add them again before sending.' : 'Saved to Drafts', 'info')
+    refreshDrafts()
+    closeComposer()
+  }
+
+  async function discard() {
+    stopSaving.current = true
+    await saveChain.current
+    if (draftId.current) {
+      try {
+        await del(`/api/drafts/${draftId.current}`)
+      } catch {
+        /* it may already be gone */
+      }
+    }
+    refreshDrafts()
     closeComposer()
   }
 
@@ -189,10 +285,9 @@ export default function Composer() {
 
   async function send(sendWithoutSubject = false) {
     setError('')
-    const all = (chips, typed) => uniq([...chips, ...splitAddresses(typed)])
-    const toList = all(to, toText)
-    const ccList = all(cc, ccText)
-    const bccList = all(bcc, bccText)
+    const toList = allOf(to, toText)
+    const ccList = allOf(cc, ccText)
+    const bccList = allOf(bcc, bccText)
     const bad = [...toList, ...ccList, ...bccList].filter((a) => !EMAIL_RE.test(a))
     if (!fromId) return setError('Add a mailbox under Manage accounts before sending.')
     if (!toList.length && !ccList.length && !bccList.length) return setError('Who is this going to? Add at least one recipient.')
@@ -211,13 +306,20 @@ export default function Composer() {
     for (const f of files) form.append('files', f, f.name)
 
     setSending(true)
+    // No autosave may land after the send (it would bring the draft back).
+    stopSaving.current = true
+    await saveChain.current
+    if (draftId.current) payload.draftId = draftId.current
+    form.set('payload', new Blob([JSON.stringify(payload)], { type: 'application/json' }))
     try {
       await postForm('/api/send', form)
       notify('Sent ✓', 'success')
       closeComposer()
       bumpMail()
       refreshCounts()
+      refreshDrafts()
     } catch (e) {
+      stopSaving.current = false
       setError(e.message)
       setSending(false)
     }
@@ -225,12 +327,15 @@ export default function Composer() {
 
   const askNode = ask && (
     <ConfirmDialog
-      title={ask === 'discard' ? 'Discard this draft?' : 'Send without a subject?'}
-      confirmLabel={ask === 'discard' ? 'Discard' : 'Send anyway'}
-      danger={ask === 'discard'}
+      title={{ discard: 'Discard this draft?', unsaved: 'Close without saving?' }[ask] || 'Send without a subject?'}
+      confirmLabel={{ discard: 'Discard', unsaved: 'Close and lose it' }[ask] || 'Send anyway'}
+      danger={ask !== 'nosubject'}
       onCancel={() => setAsk(null)}
-      onConfirm={() => { const a = ask; setAsk(null); if (a === 'discard') closeComposer(); else send(true) }}>
-      {ask === 'discard' ? 'What you wrote will be lost.' : 'People are more likely to open mail that says what it is about.'}
+      onConfirm={() => { const a = ask; setAsk(null); if (a === 'nosubject') send(true); else discard() }}>
+      {{
+        discard: draftId.current ? 'It will be deleted from Drafts.' : 'What you wrote will be lost.',
+        unsaved: `We couldn't save it to Drafts (${saveState?.error || 'no connection'}). Keep the window open and try again in a moment, or close and lose what you wrote.`,
+      }[ask] || 'People are more likely to open mail that says what it is about.'}
     </ConfirmDialog>
   )
 
@@ -249,7 +354,7 @@ export default function Composer() {
 
         <div className="flex items-center gap-2 border-b border-slate-200/80 px-4 py-1.5">
           <span className="w-10 shrink-0 text-xs font-semibold text-slate-500">From</span>
-          <select className="min-w-0 flex-1 bg-transparent py-1 text-sm outline-none" value={fromId ?? ''} onChange={(e) => setFromId(Number(e.target.value))} aria-label="From">
+          <select className="min-w-0 flex-1 bg-transparent py-1 text-sm outline-none" value={fromId ?? ''} onChange={(e) => changeFrom(Number(e.target.value))} aria-label="From">
             {!accounts.length && <option value="">No accounts yet</option>}
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>{a.displayName && a.displayName !== a.email ? `${a.displayName} <${a.email}>` : a.email}</option>
@@ -310,7 +415,17 @@ export default function Composer() {
           </button>
           <input ref={fileInput} type="file" multiple className="hidden"
             onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
-          <span className="ml-auto hidden text-[11px] text-slate-400 sm:inline">Ctrl + Enter to send</span>
+          <span className="ml-auto truncate text-[11px] text-slate-500" role="status" aria-live="polite">
+            {saveState?.busy && 'Saving…'}
+            {saveState?.at && `Saved to Drafts ${new Date(saveState.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+            {saveState?.error && <span className="text-red-700" title={saveState.error}>Couldn't save the draft</span>}
+            {!saveState && <span className="hidden sm:inline">Ctrl + Enter to send</span>}
+          </span>
+          {(dirty || draftId.current) && (
+            <button className="icon-btn hover:!text-red-700" onClick={() => setAsk('discard')} disabled={sending} title="Discard draft" aria-label="Discard draft">
+              <IconTrash size={16} />
+            </button>
+          )}
         </div>
       </div>
       {askNode}

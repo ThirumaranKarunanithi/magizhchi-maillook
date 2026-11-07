@@ -14,6 +14,15 @@ export const VIEWS = {
   all: { title: 'All mail', lane: 'all', folder: 'INBOX' },
   sent: { title: 'Sent', lane: 'all', folder: 'SENT' },
   archive: { title: 'Archive', lane: 'all', folder: 'ARCHIVE' },
+  spam: { title: 'Spam', lane: 'all', folder: 'SPAM' },
+  trash: { title: 'Trash', lane: 'all', folder: 'TRASH' },
+  drafts: { title: 'Drafts', drafts: true },
+}
+
+/** The signature block MailLook puts under new mail: the usual "-- " line, then the text. */
+export function signatureBlock(signature) {
+  const s = (signature || '').trim()
+  return s ? `\n\n-- \n${s}` : ''
 }
 
 const DAY = 24 * 60 * 60 * 1000

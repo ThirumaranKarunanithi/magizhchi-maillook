@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { useMail } from '../state.jsx'
@@ -6,7 +7,8 @@ import Logo from './Logo.jsx'
 import Badge3D from './Badge3D.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
 import {
-  IconAlert, IconArchive, IconClock, IconCompose, IconHand, IconInbox, IconInfo, IconLogout, IconNews, IconSend, IconSettings,
+  IconAlert, IconArchive, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo, IconLogout, IconNews,
+  IconRefresh, IconSend, IconSettings, IconSpam, IconTrash,
 } from './Icons.jsx'
 
 const LANE_ITEMS = [
@@ -17,9 +19,107 @@ const LANE_ITEMS = [
 
 const FOLDER_ITEMS = [
   { view: 'all', label: 'All mail', Icon: IconInbox },
+  { view: 'drafts', label: 'Drafts', Icon: IconDraft },
   { view: 'sent', label: 'Sent', Icon: IconSend },
   { view: 'archive', label: 'Archive', Icon: IconArchive },
+  { view: 'spam', label: 'Spam', Icon: IconSpam },
+  { view: 'trash', label: 'Trash', Icon: IconTrash },
 ]
+
+const OWN_OPEN_KEY = 'mlook_own_folders_open'
+
+function readOpen() {
+  try {
+    return localStorage.getItem(OWN_OPEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** The mailbox's own folders (Gmail labels too). Listing asks the mail server, so it waits until opened. */
+function OwnFolders({ go, currentFolder }) {
+  const { folders, refreshFolders, openFolder, accounts, accountId, notify } = useMail()
+  const [open, setOpen] = useState(readOpen)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  function load(refresh = false) {
+    setBusy(true)
+    setError('')
+    refreshFolders(refresh).catch((e) => setError(e.message)).finally(() => setBusy(false))
+  }
+
+  useEffect(() => {
+    if (open && folders == null && !busy) load()
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggle() {
+    const next = !open
+    setOpen(next)
+    try {
+      localStorage.setItem(OWN_OPEN_KEY, next ? '1' : '0')
+    } catch {
+      /* fine */
+    }
+  }
+
+  async function pick(acc, f) {
+    const url = `/?view=folder&f=${encodeURIComponent(f.code)}&name=${encodeURIComponent(f.name)}`
+    if (f.opened) return go(url)
+    try {
+      await openFolder(acc.accountId, f.path)
+      notify(`Fetching ${f.name}… the newest mail shows up in a few seconds.`)
+      go(url)
+    } catch (e) {
+      notify(e.message, 'error')
+    }
+  }
+
+  const shown = (folders || []).filter((a) => accountId == null || a.accountId === accountId)
+  const many = shown.length > 1
+
+  return (
+    <div>
+      <div className="flex items-center">
+        <button className="flex flex-1 items-center gap-1 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:text-brand-ink"
+          onClick={toggle} aria-expanded={open}>
+          <IconChevron open={open} size={13} /> Your folders
+        </button>
+        {open && (
+          <button className="icon-btn !p-1" onClick={() => load(true)} disabled={busy} title="Look for new folders">
+            <IconRefresh size={13} className={busy ? 'animate-spin' : ''} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div>
+          {busy && folders == null && <p className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-500"><span className="spinner" /> Asking your mail server…</p>}
+          {error && <p className="px-2.5 py-1 text-xs text-red-700">{error}</p>}
+          {folders != null && !shown.some((a) => a.folders.length || a.error) && (
+            <p className="px-2.5 py-1 text-xs text-slate-500">{accounts.length ? 'No folders of your own yet. Folders you make in other mail apps show up here.' : 'Add a mailbox first.'}</p>
+          )}
+          {shown.map((acc) => {
+            const color = accounts.find((a) => a.id === acc.accountId)?.color
+            return (
+              <div key={acc.accountId}>
+                {many && (acc.folders.length > 0 || acc.error) && (
+                  <div className="mt-1 flex items-center gap-1.5 truncate px-2.5 text-[11px] text-slate-500"><AccountDot color={color} size={7} />{acc.email}</div>
+                )}
+                {acc.error && <p className="px-2.5 py-1 text-[11px] text-red-700">{acc.error}</p>}
+                {acc.folders.map((f) => (
+                  <button key={f.code} className={`nav-item !py-1.5 ${currentFolder === f.code ? 'active' : ''}`} onClick={() => pick(acc, f)} title={f.path}>
+                    <IconFolder size={16} className="text-slate-500" />
+                    <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function Count({ unread, total }) {
   if (!unread && !total) return null
@@ -46,7 +146,7 @@ export default function Sidebar({ onNavigate }) {
   const location = useLocation()
   const [params] = useSearchParams()
   const { user, logout } = useAuth()
-  const { accounts, counts, accountId, setAccountId, openComposer, pa } = useMail()
+  const { accounts, counts, accountId, setAccountId, openComposer, pa, drafts } = useMail()
 
   const onMail = location.pathname === '/'
   const currentView = params.get('view') || 'needs_me'
@@ -63,6 +163,8 @@ export default function Sidebar({ onNavigate }) {
   }
 
   const lanes = counts?.lanes || {}
+  const draftCount = (drafts || []).filter((d) => accountId == null || d.accountId === accountId).length
+  const currentFolder = currentView === 'folder' ? params.get('f') : null
 
   return (
     <nav className="scroll-thin flex h-full flex-col gap-4 overflow-y-auto px-3 py-4" aria-label="Mailboxes">
@@ -95,6 +197,7 @@ export default function Sidebar({ onNavigate }) {
           <button key={view} className={`nav-item ${onMail && currentView === view ? 'active' : ''}`} onClick={() => go(`/?view=${view}`)}>
             <Icon size={17} className="text-slate-500" />
             <span>{label}</span>
+            {view === 'drafts' && draftCount > 0 && <span className="ml-auto text-xs text-slate-500 num">{draftCount}</span>}
           </button>
         ))}
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>
@@ -102,6 +205,8 @@ export default function Sidebar({ onNavigate }) {
           <span>Subscriptions</span>
         </button>
       </div>
+
+      <OwnFolders go={go} currentFolder={onMail ? currentFolder : null} />
 
       <div>
         <div className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Accounts</div>

@@ -169,7 +169,27 @@ public class AccountService {
 
     public List<Map<String, Object>> list(long userId) {
         Map<Long, Long> unread = messages.unreadByAccount(userId);
-        return repo.forUser(userId).stream().map(a -> view(a, unread.getOrDefault(a.id(), 0L))).toList();
+        Map<Long, String> signatures = repo.signatures(userId);
+        return repo.forUser(userId).stream().map(a -> {
+            Map<String, Object> m = view(a, unread.getOrDefault(a.id(), 0L));
+            m.put("signature", signatures.get(a.id()));
+            return m;
+        }).toList();
+    }
+
+    public String signature(long id) {
+        return repo.signature(id);
+    }
+
+    static final int SIGNATURE_LIMIT = 2000;
+
+    /** Sets the signature for one mailbox; blank clears it. */
+    public void setSignature(long userId, long id, String signature) {
+        owned(userId, id);
+        String s = signature == null ? "" : signature.replace("\r\n", "\n").strip();
+        if (s.startsWith("-- \n")) s = s.substring(4).strip();            // they typed the separator; we add it
+        if (s.length() > SIGNATURE_LIMIT) throw ApiException.bad("Keep the signature under " + SIGNATURE_LIMIT + " characters.");
+        repo.setSignature(id, s.isEmpty() ? null : s);
     }
 
     public static Map<String, Object> view(Account a, long unread) {

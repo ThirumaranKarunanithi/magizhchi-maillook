@@ -48,11 +48,13 @@ public class MailActions {
     private final MessageRepo messages;
     private final ImapClient imap;
     private final MeetInvites invites;
+    private final FolderCursors cursors;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
 
-    public MailActions(AccountRepo accounts, MessageRepo messages, ImapClient imap, MeetInvites invites) {
+    public MailActions(AccountRepo accounts, MessageRepo messages, ImapClient imap, MeetInvites invites, FolderCursors cursors) {
         this.invites = invites;
+        this.cursors = cursors;
         this.accounts = accounts;
         this.messages = messages;
         this.imap = imap;
@@ -73,7 +75,20 @@ public class MailActions {
             case "SENT" -> imap.folder(store, a, ImapClient.Role.SENT, false);
             case "ARCHIVE" -> imap.folder(store, a, ImapClient.Role.ARCHIVE, false);
             case "TRASH" -> imap.folder(store, a, ImapClient.Role.TRASH, false);
-            default -> null;
+            case "SPAM" -> imap.folder(store, a, ImapClient.Role.SPAM, false);
+            default -> code.startsWith("F:") ? (IMAPFolder) store.getFolder(code.substring(2)) : null;
+        };
+    }
+
+    /** Where a move lands: Archive and Trash are made when the mailbox has none; the others must exist. */
+    private IMAPFolder destination(Store store, Account a, String code) throws MessagingException {
+        return switch (code) {
+            case "ARCHIVE" -> imap.folder(store, a, ImapClient.Role.ARCHIVE, true);
+            case "TRASH" -> imap.folder(store, a, ImapClient.Role.TRASH, true);
+            default -> {
+                IMAPFolder f = serverFolder(store, a, code);
+                yield f != null && f.exists() ? f : null;
+            }
         };
     }
 
@@ -114,14 +129,23 @@ public class MailActions {
     // ── moves ─────────────────────────────────────────────────────
 
     public void archive(long userId, long id) {
-        move(owned(userId, id), ImapClient.Role.ARCHIVE, "ARCHIVE");
+        move(owned(userId, id), "ARCHIVE");
     }
 
     public void trash(long userId, long id) {
-        move(owned(userId, id), ImapClient.Role.TRASH, "TRASH");
+        move(owned(userId, id), "TRASH");
     }
 
-    private void move(MessageRepo.Row r, ImapClient.Role role, String code) {
+    /** Moves mail to Inbox, Archive, Trash, Spam or one of the mailbox's own folders ("F:" + its name). */
+    public void moveTo(long userId, long id, String code) {
+        MessageRepo.Row r = owned(userId, id);
+        move(r, code);
+        if (code.startsWith("F:")) cursors.open(r.accountId(), code, code.substring(2));   // keep it in sync from now on
+        // Back in the Inbox from Spam or Trash: give it a lane; the AI pass looks at it again.
+        if ("INBOX".equals(code) && r.lane() == null) messages.setLane(r.id(), LaneClassifier.FYI, "heuristic");
+    }
+
+    private void move(MessageRepo.Row r, String code) {
         if (code.equals(r.folder())) return;
         Account a = account(r);
         if (r.uid() == null) {
@@ -133,8 +157,11 @@ public class MailActions {
         try {
             store = imap.connect(a);
             src = serverFolder(store, a, r.folder());
-            IMAPFolder dst = imap.folder(store, a, role, true);
-            if (src == null || dst == null) throw new ApiException(HttpStatus.CONFLICT, "This mailbox has no " + code.toLowerCase(Locale.ROOT) + " folder.");
+            IMAPFolder dst = destination(store, a, code);
+            if (src == null || dst == null) {
+                String what = code.startsWith("F:") ? "folder called " + code.substring(2) : code.toLowerCase(Locale.ROOT) + " folder";
+                throw new ApiException(HttpStatus.CONFLICT, "This mailbox has no " + what + ".");
+            }
             src.open(Folder.READ_WRITE);
             Message m = src.getMessageByUID(r.uid());
             Long newUid = null;

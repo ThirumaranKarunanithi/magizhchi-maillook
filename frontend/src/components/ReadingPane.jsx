@@ -5,6 +5,7 @@ import { formatSize, fullDate, LANE_LABEL, safeHttpUrl, senderName, shortTime } 
 import AiCard from './AiCard.jsx'
 import AttachmentShelf from './AttachmentShelf.jsx'
 import LaneMenu from './LaneMenu.jsx'
+import MoveMenu from './MoveMenu.jsx'
 import PaMenu from './PaMenu.jsx'
 import MeetMenu from './MeetMenu.jsx'
 import { ClassroomCard, FindTimeCard, JoinCard } from './MeetCards.jsx'
@@ -12,7 +13,7 @@ import { DigestCard, EventCard } from './AcademyCards.jsx'
 import MailFrame from './MailFrame.jsx'
 import { AccountDot } from './Sidebar.jsx'
 import {
-  IconArchive, IconBack, IconFlag, IconForward, IconReply, IconReplyAll, IconTrash, IconUnsub,
+  IconArchive, IconBack, IconFlag, IconForward, IconInbox, IconReply, IconReplyAll, IconTrash, IconUnsub,
 } from './Icons.jsx'
 
 const SOURCE_LABEL = { meet: 'after your meeting', ai: 'sorted by AI', user: 'you moved it', rule: 'your sender rule', heuristic: 'sorted automatically' }
@@ -67,7 +68,7 @@ function ThreadItem({ summary, notify }) {
   )
 }
 
-export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onTrash, onMoveLane }) {
+export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onTrash, onMoveLane, onMove }) {
   const { openComposer, notify } = useMail()
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -167,6 +168,12 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
           <IconForward size={17} /><span className="hidden sm:inline">Forward</span>
         </button>
         <span className="mx-1 h-5 w-px bg-slate-200" />
+        {(detail.folder === 'SPAM' || detail.folder === 'TRASH') && (
+          <button className="btn-secondary !py-1" onClick={() => onMove(detail.id, 'INBOX', 'Inbox')}
+            title={detail.folder === 'SPAM' ? 'Not spam: move it to the Inbox' : 'Put it back in the Inbox'}>
+            <IconInbox size={16} />{detail.folder === 'SPAM' ? 'Not spam' : 'Restore'}
+          </button>
+        )}
         <button className="btn-ghost" onClick={() => onArchive(detail.id)} title="Done: archive it">
           <IconArchive size={17} /><span className="hidden xl:inline">Done</span>
         </button>
@@ -176,7 +183,8 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
         <button className={`btn-ghost ${detail.flagged ? '!text-red-600' : ''}`} onClick={toggleFlag} title={detail.flagged ? 'Unflag' : 'Flag'}>
           <IconFlag filled={detail.flagged} size={17} /><span className="hidden xl:inline">{detail.flagged ? 'Flagged' : 'Flag'}</span>
         </button>
-        <LaneMenu currentLane={detail.lane} onMove={moveLane} sender={detail.fromEmail} />
+        {detail.folder === 'INBOX' && <LaneMenu currentLane={detail.lane} onMove={moveLane} sender={detail.fromEmail} />}
+        {onMove && detail.folder !== 'SENT' && <MoveMenu message={detail} onMove={onMove} />}
         <PaMenu message={detail} />
         <MeetMenu message={detail} onStarted={() => setMeetKey((k) => k + 1)} />
         {detail.canUnsubscribe && (

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { get, post, qs } from '../api.js'
+import { del, get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
-import { LANE_LABEL, VIEWS } from '../util.js'
+import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
 import MessageList from '../components/MessageList.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
-import { IconCompose, IconMenu, IconRefresh, IconSearch, IconX } from '../components/Icons.jsx'
+import { folderLabel } from '../components/MoveMenu.jsx'
+import { IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconTrash, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
 
@@ -16,15 +17,83 @@ const EMPTY = {
   all: { emoji: '🌸', title: 'Inbox zero. Magizhchi!', text: 'Every message is handled. That is what happy looks like.' },
   sent: { emoji: '✉️', title: 'Nothing sent yet', text: 'Mail you send from Magizhchi MailLook shows up here.' },
   archive: { emoji: '📦', title: 'The archive is empty', text: 'Press Done on a message and it rests here.' },
+  spam: { emoji: '🛡️', title: 'No spam', text: 'Your mail server catches junk and puts it here. Nothing caught lately.' },
+  trash: { emoji: '🧺', title: 'Trash is empty', text: 'Mail you trash waits here. Restore puts it back in the Inbox.' },
+  folder: { emoji: '📁', title: 'Nothing in this folder', text: 'Mail you move here, or that your other mail apps file here, shows up after the next sync.' },
+  drafts: { emoji: '📝', title: 'No drafts', text: 'Close the composer before sending and what you wrote waits here.' },
 }
 
-function EmptyState({ view, q, accountChosen }) {
-  if (q) {
+const SINCE = [
+  { key: '', label: 'Any time' },
+  { key: 'week', label: 'Past week', days: 7 },
+  { key: 'month', label: 'Past month', days: 30 },
+  { key: 'year', label: 'Past year', days: 365 },
+]
+const NO_FILTERS = { unread: false, flagged: false, hasAttachment: false, since: '', from: '' }
+const TZ = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch {
+    return ''
+  }
+})()
+
+function sinceIso(key) {
+  const s = SINCE.find((x) => x.key === key)
+  return s?.days ? new Date(Date.now() - s.days * 86400000).toISOString() : ''
+}
+
+function Toggle({ on, onClick, children, title }) {
+  return (
+    <button type="button" aria-pressed={on} onClick={onClick} title={title}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold transition-colors ${on
+        ? 'border-peacock-300 bg-peacock-50 text-peacock-800'
+        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:text-brand-ink'}`}>
+      {on && <IconCheck size={11} strokeWidth={2.6} />}
+      {children}
+    </button>
+  )
+}
+
+function DraftList({ drafts, accounts, onOpen, onDiscard }) {
+  if (!drafts.length) return null
+  return (
+    <ul>
+      {drafts.map((d) => {
+        const a = accounts.find((x) => x.id === d.accountId)
+        const snippet = (d.body || '').replace(/\n-- \n[\s\S]*$/, '').replace(/\s+/g, ' ').trim()
+        return (
+          <li key={d.id} className="msg-row group relative border-b border-slate-200/70 bg-white">
+            <button type="button" className="block w-full py-2.5 pl-4 pr-12 text-left hover:bg-slate-50" onClick={() => onOpen(d)}>
+              <span className="absolute inset-y-0 left-0 w-1" style={{ background: a?.color || '#94a3b8' }} />
+              <span className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-red-700">Draft</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
+                  {d.to?.length ? `To: ${d.to.join(', ')}` : '(no recipients yet)'}
+                </span>
+                <span className="shrink-0 text-xs text-slate-500 num">{shortTime(d.updatedAt)}</span>
+              </span>
+              <span className="block truncate text-[13px] text-brand-ink">{d.subject || '(no subject)'}</span>
+              <span className="block truncate text-xs text-slate-500">{snippet || 'Nothing written yet'}</span>
+            </button>
+            <button type="button" className="icon-btn absolute right-2 top-1/2 -translate-y-1/2 hover:!text-red-700" title="Discard draft"
+              aria-label={`Discard draft ${d.subject || ''}`} onClick={() => onDiscard(d)}>
+              <IconTrash size={16} />
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function EmptyState({ view, q, accountChosen, filtered }) {
+  if (q || filtered) {
     return (
       <div className="px-6 py-14 text-center">
         <div className="text-3xl">🔍</div>
-        <p className="mt-2 font-semibold">No mail matches “{q}”</p>
-        <p className="mt-1 text-sm text-slate-500">Try a name, a word from the subject, or fewer words.</p>
+        <p className="mt-2 font-semibold">{q ? <>No mail matches “{q}”</> : 'No mail matches these filters'}</p>
+        <p className="mt-1 text-sm text-slate-500">Try a name, a word from the subject, or fewer filters.</p>
       </div>
     )
   }
@@ -41,12 +110,18 @@ function EmptyState({ view, q, accountChosen }) {
 
 export default function Mail() {
   const [params] = useSearchParams()
-  const view = VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
-  const cfg = VIEWS[view]
-  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer } = useMail()
+  const folderCode = params.get('view') === 'folder' && params.get('f')?.startsWith('F:') ? params.get('f') : null
+  const view = folderCode ? 'folder' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
+  const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode } : VIEWS[view]
+  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts } = useMail()
 
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
+  const [filters, setFilters] = useState(NO_FILTERS)
+  const [fromInput, setFromInput] = useState('')
+  const [fromOpen, setFromOpen] = useState(false)
+  const filtered = filters.unread || filters.flagged || filters.hasAttachment || !!filters.since || !!filters.from
+  const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const [items, setItems] = useState([])
   const [nextCursor, setNextCursor] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -63,15 +138,29 @@ export default function Mail() {
     return () => clearTimeout(t)
   }, [qInput])
 
+  useEffect(() => {
+    const t = setTimeout(() => setFilter('from', fromInput.trim()), 350)
+    return () => clearTimeout(t)
+  }, [fromInput])
+
   useEffect(() => () => clearTimeout(syncTimer.current), [])
 
   const baseQuery = useCallback(
-    (extra = {}) => qs({ lane: cfg.lane, folder: cfg.folder, accountId: accountId ?? '', q, limit: PAGE, ...extra }),
-    [cfg.lane, cfg.folder, accountId, q],
+    (extra = {}) => qs({
+      lane: cfg.lane, folder: cfg.folder, accountId: accountId ?? '', q, limit: PAGE,
+      unread: filters.unread || '', flagged: filters.flagged || '', hasAttachment: filters.hasAttachment || '',
+      from: filters.from, after: sinceIso(filters.since), tz: TZ, ...extra,
+    }),
+    [cfg.lane, cfg.folder, accountId, q, filters],
   )
 
   const load = useCallback(
     async ({ silent = false } = {}) => {
+      if (cfg.drafts) {
+        setLoading(false)
+        setError('')
+        return
+      }
       const seq = ++reqSeq.current
       if (!silent) setLoading(true)
       setError('')
@@ -88,17 +177,33 @@ export default function Mail() {
         if (seq === reqSeq.current) setLoading(false)
       }
     },
-    [baseQuery],
+    [baseQuery, cfg.drafts],
   )
 
   useEffect(() => {
     load()
   }, [load, mailEpoch])
 
+  useEffect(() => {
+    if (cfg.drafts) refreshDrafts()
+  }, [cfg.drafts, refreshDrafts, mailEpoch])
+
+  async function discardDraft(d) {
+    try {
+      await del(`/api/drafts/${d.id}`)
+      notify('Draft discarded', 'info')
+    } catch (e) {
+      notify(e.message, 'error')
+    }
+    refreshDrafts()
+  }
+
+  const shownDrafts = accountId == null ? drafts : drafts.filter((d) => d.accountId === accountId)
+
   // a new view or account starts with nothing open
   useEffect(() => {
     setSelectedId(null)
-  }, [view, accountId])
+  }, [view, accountId, folderCode])
 
   async function loadMore() {
     if (!nextCursor) return
@@ -192,6 +297,18 @@ export default function Mail() {
     }
   }
 
+  async function onMove(id, folder, label) {
+    removeLocal(id)
+    try {
+      await post(`/api/messages/${id}/move`, { folder })
+      notify(folder === 'INBOX' && (cfg.folder === 'SPAM') ? 'Not spam. Back in the Inbox ✓' : `Moved to ${label}`, 'success')
+      refreshCounts()
+    } catch (e) {
+      notify(e.message, 'error')
+      load({ silent: true })
+    }
+  }
+
   async function onMoveLane(id, lane, rememberSender) {
     try {
       await post(`/api/messages/${id}/lane`, { lane, rememberSender: !!rememberSender })
@@ -229,16 +346,51 @@ export default function Mail() {
           </div>
           <div className="relative mt-2">
             <IconSearch size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input className="input !py-1.5 !pl-8 !pr-8" type="search" placeholder="Search people, subjects, words…"
-              value={qInput} onChange={(e) => setQInput(e.target.value)} aria-label="Search mail" />
+            <input className="input !py-1.5 !pl-8 !pr-8" type="search" placeholder={cfg.drafts ? 'Search works in your mail folders' : 'Search people, subjects, words…'}
+              value={qInput} onChange={(e) => setQInput(e.target.value)} aria-label="Search mail" disabled={!!cfg.drafts}
+              title="Also: from:priya  has:attachment  is:unread  is:flagged  after:2026-11-01  newer_than:7d" />
             {qInput && (
               <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand-ink" onClick={() => setQInput('')} aria-label="Clear search">
                 <IconX size={14} />
               </button>
             )}
           </div>
+          {!cfg.drafts && (
+            <div className="mt-2 flex flex-wrap items-center gap-1" role="group" aria-label="Filters">
+              <Toggle on={filters.unread} onClick={() => setFilter('unread', !filters.unread)}>Unread</Toggle>
+              <Toggle on={filters.flagged} onClick={() => setFilter('flagged', !filters.flagged)}><IconFlag size={11} />Flagged</Toggle>
+              <Toggle on={filters.hasAttachment} onClick={() => setFilter('hasAttachment', !filters.hasAttachment)} title="Has attachments">
+                <IconPaperclip size={11} />Files
+              </Toggle>
+              <Toggle on={!!filters.from || fromOpen} onClick={() => setFromOpen((o) => !o)} title="Only mail from someone">
+                {filters.from ? <span className="max-w-[90px] truncate">From: {filters.from}</span> : 'From…'}
+              </Toggle>
+              <select value={filters.since} onChange={(e) => setFilter('since', e.target.value)} aria-label="When"
+                className={`rounded-full border bg-transparent px-1.5 py-0.5 text-[11px] font-semibold outline-none ${filters.since
+                  ? 'border-peacock-300 bg-peacock-50 text-peacock-800' : 'border-slate-200 text-slate-600'}`}>
+                {SINCE.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+              {filtered && (
+                <button type="button" className="ml-auto text-[11px] font-semibold text-peacock-700 hover:underline"
+                  onClick={() => { setFilters(NO_FILTERS); setFromInput(''); setFromOpen(false) }}>
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+          {!cfg.drafts && fromOpen && (
+            <input className="input mt-1.5 !py-1 text-xs" type="search" placeholder="Name or address, e.g. priya or @vendor.com" autoFocus
+              value={fromInput} onChange={(e) => setFromInput(e.target.value)} aria-label="From"
+              onKeyDown={(e) => e.key === 'Escape' && setFromOpen(false)} />
+          )}
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto max-md:pb-24">
+          {cfg.drafts ? (
+            shownDrafts.length ? (
+              <DraftList drafts={shownDrafts} accounts={accounts}
+                onOpen={(d) => openComposer({ mode: d.mode || 'new', draft: d })} onDiscard={discardDraft} />
+            ) : <EmptyState view="drafts" accountChosen={accountId != null} />
+          ) : (
           <MessageList
             items={items}
             loading={loading}
@@ -253,8 +405,10 @@ export default function Mail() {
             onDone={onArchive}
             onTrash={onTrash}
             onMoveLane={onMoveLane}
-            empty={<EmptyState view={view} q={q} accountChosen={accountId != null} />}
+            onMove={onMove}
+            empty={<EmptyState view={view} q={q} filtered={filtered} accountChosen={accountId != null} />}
           />
+          )}
         </div>
       </section>
 
@@ -278,7 +432,14 @@ export default function Mail() {
             onArchive={onArchive}
             onTrash={onTrash}
             onMoveLane={onMoveLane}
+            onMove={onMove}
           />
+        ) : cfg.drafts ? (
+          <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+            <IconDraft size={44} className="text-slate-400" />
+            <p className="mt-4 text-lg font-bold text-brand-ink">Pick a draft to finish it</p>
+            <p className="mx-auto mt-1 max-w-xs text-sm text-slate-500">Drafts save themselves as you type and are kept in MailLook, so they wait for you on any device.</p>
+          </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
             <img src="/brand/maillook-mark.svg" alt="" width="112" height="112" className="reflect float-slow" style={{ filter: "drop-shadow(0 18px 30px rgba(0,0,0,.55))" }} />

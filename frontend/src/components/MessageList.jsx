@@ -1,5 +1,6 @@
 import { senderName, shortTime } from '../util.js'
 import { IconArchive, IconFlag, IconPaperclip, IconTrash, IconVideo } from './Icons.jsx'
+import MoveMenu from './MoveMenu.jsx'
 import LaneMenu from './LaneMenu.jsx'
 
 /** "Starts in 12 min" for mail whose Magizhchi Meet meeting is close; the server pins these first. */
@@ -10,7 +11,7 @@ function startsBadge(at) {
   return m > 0 ? `Starts in ${m} min` : 'Meeting now'
 }
 
-function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane }) {
+function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onMove }) {
   const unread = !m.seen
   const who = sentView ? `To: ${(m.to || []).join(', ') || '(no recipients)'}` : senderName(m)
   return (
@@ -58,7 +59,8 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane }) {
         <button className="icon-btn" title="Done (archive)" onClick={(e) => { e.stopPropagation(); onDone(m.id) }}>
           <IconArchive size={16} />
         </button>
-        <LaneMenu compact currentLane={m.lane} sender={m.fromEmail} onMove={(lane, remember) => onMoveLane(m.id, lane, remember)} />
+        {m.folder === 'INBOX' && <LaneMenu compact currentLane={m.lane} sender={m.fromEmail} onMove={(lane, remember) => onMoveLane(m.id, lane, remember)} />}
+        {onMove && !sentView && <MoveMenu compact message={m} onMove={onMove} />}
         <button className="icon-btn hover:!text-red-700" title="Move to Trash" onClick={(e) => { e.stopPropagation(); onTrash(m.id) }}>
           <IconTrash size={16} />
         </button>

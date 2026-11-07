@@ -51,13 +51,17 @@ public class SyncService {
     private final int initialInbox;
     private final int initialSent;
     private final ExecutorService pool;
+    private final FolderCursors cursors;
+    /** Trash, Spam, Archive and opened folders: the newest this many on the first pass. */
+    static final int INITIAL_EXTRA = 100;
     private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
-    public SyncService(AccountRepo accounts, MessageRepo messages, ImapClient imap, AiService ai,
+    public SyncService(AccountRepo accounts, MessageRepo messages, ImapClient imap, AiService ai, FolderCursors cursors,
                        @Value("${maillook.sync.initial-inbox}") int initialInbox,
                        @Value("${maillook.sync.initial-sent}") int initialSent,
                        @Value("${maillook.sync.threads}") int threads) {
         this.accounts = accounts;
+        this.cursors = cursors;
         this.messages = messages;
         this.imap = imap;
         this.ai = ai;
@@ -98,12 +102,14 @@ public class SyncService {
             for (Account mine : accounts.forUser(a.userId())) own.add(mine.email().toLowerCase(Locale.ROOT));
             Map<String, String> rules = messages.senderRules(a.userId());
 
-            List<Long> newInbox = syncFolder(store, a, (IMAPFolder) store.getFolder("INBOX"), "INBOX", own, rules);
+            List<Long> newInbox = syncFolder(a, (IMAPFolder) store.getFolder("INBOX"), "INBOX", own, rules,
+                    a.inboxUidValidity(), a.inboxLastUid(), initialInbox, (v, last) -> accounts.setInboxCursor(a.id(), v, last));
             IMAPFolder sent = imap.folder(store, a, ImapClient.Role.SENT, false);
             if (sent != null) {
-                // Re-read the account: the INBOX pass moved its cursor.
-                syncFolder(store, accounts.find(a.id()).orElse(a), sent, "SENT", own, rules);
+                syncFolder(a, sent, "SENT", own, rules, a.sentUidValidity(), a.sentLastUid(), initialSent,
+                        (v, last) -> accounts.setSentCursor(a.id(), v, last));
             }
+            syncExtras(store, a, own, rules);
             accounts.syncDone(a.id());
             // New mail plus anything an earlier AI pass missed (newest first; AI marks what it checked).
             List<Long> unchecked = messages.awaitingAiLane(a.id(), 100);
@@ -119,15 +125,53 @@ public class SyncService {
         }
     }
 
-    private List<Long> syncFolder(Store store, Account a, IMAPFolder folder, String code,
-                                  Set<String> own, Map<String, String> rules) throws Exception {
+    /** Trash, Spam, Archive (not Gmail's All Mail) and the folders someone opened. One failing doesn't stop the rest. */
+    private void syncExtras(Store store, Account a, Set<String> own, Map<String, String> rules) {
+        Map<String, IMAPFolder> targets = new java.util.LinkedHashMap<>();
+        try {
+            IMAPFolder trash = imap.folder(store, a, ImapClient.Role.TRASH, false);
+            if (trash != null) targets.put("TRASH", trash);
+            IMAPFolder spam = imap.folder(store, a, ImapClient.Role.SPAM, false);
+            if (spam != null) targets.put("SPAM", spam);
+            IMAPFolder archive = imap.folder(store, a, ImapClient.Role.ARCHIVE, false);
+            if (archive != null && !ImapClient.isAllMail(archive)) targets.put("ARCHIVE", archive);
+        } catch (MessagingException e) {
+            log.warn("Couldn't list the folders of {}: {}", a.email(), e.toString());
+        }
+        for (FolderCursors.Cursor c : cursors.forAccount(a.id())) {
+            if (c.code().startsWith("F:")) {
+                try {
+                    targets.putIfAbsent(c.code(), (IMAPFolder) store.getFolder(c.serverName()));
+                } catch (MessagingException ignored) {
+                }
+            }
+        }
+        for (Map.Entry<String, IMAPFolder> e : targets.entrySet()) {
+            String code = e.getKey();
+            IMAPFolder folder = e.getValue();
+            try {
+                if (code.startsWith("F:") && !folder.exists()) {
+                    cursors.close(a.id(), code);                       // renamed or deleted in another app
+                    messages.deleteFolder(a.id(), code);
+                    continue;
+                }
+                FolderCursors.Cursor c = cursors.find(a.id(), code).orElse(null);
+                syncFolder(a, folder, code, own, rules, c == null ? null : c.uidValidity(), c == null ? null : c.lastUid(),
+                        INITIAL_EXTRA, (v, last) -> cursors.save(a.id(), code, folder.getFullName(), v, last));
+            } catch (Exception ex) {
+                log.warn("Couldn't sync {} of {}: {}", code, a.email(), ex.toString());
+            }
+        }
+    }
+
+    private List<Long> syncFolder(Account a, IMAPFolder folder, String code, Set<String> own, Map<String, String> rules,
+                                  Long knownValidity, Long lastUid, int initial,
+                                  java.util.function.BiConsumer<Long, Long> saveCursor) throws Exception {
         List<Long> inserted = new ArrayList<>();
         folder.open(Folder.READ_ONLY);
         try {
             boolean inbox = "INBOX".equals(code);
             long uidValidity = folder.getUIDValidity();
-            Long knownValidity = inbox ? a.inboxUidValidity() : a.sentUidValidity();
-            Long lastUid = inbox ? a.inboxLastUid() : a.sentLastUid();
             if (knownValidity == null || knownValidity != uidValidity) {
                 if (knownValidity != null) messages.deleteFolder(a.id(), code);
                 lastUid = null;
@@ -138,7 +182,7 @@ public class SyncService {
             if (count == 0) {
                 batch = new Message[0];
             } else if (lastUid == null) {
-                int n = inbox ? initialInbox : initialSent;
+                int n = initial;
                 batch = folder.getMessages(Math.max(1, count - n + 1), count);
             } else {
                 batch = folder.getMessagesByUID(lastUid + 1, UIDFolder.LASTUID);
@@ -166,10 +210,10 @@ public class SyncService {
                 }
                 maxUid = Math.max(maxUid, uid);
             }
-            if (inbox) accounts.setInboxCursor(a.id(), uidValidity, maxUid == 0 ? null : maxUid);
-            else accounts.setSentCursor(a.id(), uidValidity, maxUid == 0 ? null : maxUid);
+            saveCursor.accept(uidValidity, maxUid == 0 ? null : maxUid);
 
-            if (inbox && count > 0) reconcileFlags(a, folder, count);
+            // Sent mail is always "read" here, so only the other folders take flags from the server.
+            if (!"SENT".equals(code) && count > 0) reconcileFlags(a, folder, code, count);
         } finally {
             ImapClient.closeQuietly(folder, false);
         }
@@ -177,7 +221,7 @@ public class SyncService {
     }
 
     /** Pick up read/flag changes and removals made in other mail apps, for the newest messages. */
-    private void reconcileFlags(Account a, IMAPFolder folder, int count) throws MessagingException {
+    private void reconcileFlags(Account a, IMAPFolder folder, String code, int count) throws MessagingException {
         Message[] window = folder.getMessages(Math.max(1, count - FLAG_WINDOW + 1), count);
         FetchProfile fp = new FetchProfile();
         fp.add(FetchProfile.Item.FLAGS);
@@ -190,7 +234,7 @@ public class SyncService {
             minUid = Math.min(minUid, uid);
             flags.put(uid, new boolean[]{m.isSet(Flags.Flag.SEEN), m.isSet(Flags.Flag.FLAGGED)});
         }
-        if (!flags.isEmpty()) messages.reconcile(a.id(), "INBOX", minUid, flags);
+        if (!flags.isEmpty()) messages.reconcile(a.id(), code, minUid, flags);
     }
 
     MessageRepo.NewMessage toRow(Account a, Message m, Long uid, String code,

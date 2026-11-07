@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { get } from './api.js'
+import { get, post } from './api.js'
 
 // App-wide mail state shared by the sidebar, pages and the composer.
 const MailCtx = createContext(null)
@@ -22,6 +22,8 @@ export function MailProvider({ children }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [mailEpoch, setMailEpoch] = useState(0) // bump to make the list reload
   const [toast, setToast] = useState(null)
+  const [drafts, setDrafts] = useState([]) // unsent mail, newest first
+  const [folders, setFolders] = useState(null) // per mailbox: { accountId, email, folders: [{ code, name, path, opened }], error? }
   const toastTimer = useRef(null)
 
   const refreshAccounts = useCallback(async () => {
@@ -35,6 +37,35 @@ export function MailProvider({ children }) {
     }
   }, [])
 
+  const refreshDrafts = useCallback(async () => {
+    try {
+      const list = await get('/api/drafts')
+      setDrafts(Array.isArray(list) ? list : [])
+    } catch {
+      /* keep what we have */
+    }
+  }, [])
+
+  // Listing folders asks each mail server, so it happens once, when someone opens the folder list.
+  const refreshFolders = useCallback(async (refresh = false) => {
+    try {
+      const list = await get(`/api/folders${refresh ? '?refresh=true' : ''}`)
+      setFolders(Array.isArray(list) ? list : [])
+    } catch (e) {
+      setFolders((prev) => prev || [])
+      throw e
+    }
+  }, [])
+
+  /** Starts syncing one of a mailbox's own folders; returns its code. */
+  const openFolder = useCallback(async (accountId, path) => {
+    const res = await post('/api/folders/open', { accountId, path })
+    setFolders((prev) => (prev || []).map((a) => (a.accountId !== accountId ? a : {
+      ...a, folders: a.folders.map((f) => (f.path === path ? { ...f, opened: true } : f)),
+    })))
+    return res
+  }, [])
+
   const refreshCounts = useCallback(async () => {
     try {
       setCounts(await get('/api/counts'))
@@ -46,6 +77,7 @@ export function MailProvider({ children }) {
   useEffect(() => {
     refreshAccounts()
     refreshCounts()
+    refreshDrafts()
     get('/api/ai/status')
       .then((s) => {
         setAiEnabled(!!s?.enabled)
@@ -55,7 +87,7 @@ export function MailProvider({ children }) {
     get('/api/pa/status').then(setPa).catch(() => setPa({ connected: false }))
     const t = setInterval(refreshCounts, COUNTS_POLL_MS)
     return () => clearInterval(t)
-  }, [refreshAccounts, refreshCounts])
+  }, [refreshAccounts, refreshCounts, refreshDrafts])
 
   // If the selected account goes away, fall back to all accounts.
   useEffect(() => {
@@ -79,6 +111,8 @@ export function MailProvider({ children }) {
     pa,
     accountId, setAccountId,
     composer, openComposer, closeComposer,
+    drafts, refreshDrafts,
+    folders, refreshFolders, openFolder,
     menuOpen, setMenuOpen,
     mailEpoch, bumpMail,
     toast, notify,

@@ -28,7 +28,11 @@ function AccountCard({ account, onChanged, onRemove }) {
   const [pwBusy, setPwBusy] = useState(false)
   const [pwError, setPwError] = useState('')
   const [syncing, setSyncing] = useState(false)
+  const [sigOpen, setSigOpen] = useState(false)
+  const [signature, setSignature] = useState(account.signature || '')
+  const [sigBusy, setSigBusy] = useState(false)
   const status = STATUS[account.status] || STATUS.new
+  const sigChanged = signature.trim() !== (account.signature || '').trim()
   const oauth = account.auth === 'oauth'
 
   async function save(body) {
@@ -72,6 +76,20 @@ function AccountCard({ account, onChanged, onRemove }) {
       setPwError(err.message)
     } finally {
       setPwBusy(false)
+    }
+  }
+
+  async function saveSignature() {
+    setSigBusy(true)
+    try {
+      const updated = await save({ signature })
+      setSignature(updated.signature || '')
+      setSigOpen(false)
+      notify(updated.signature ? 'Signature saved ✓' : 'Signature removed', 'success')
+    } catch (e) {
+      notify(e.message, 'error')
+    } finally {
+      setSigBusy(false)
     }
   }
 
@@ -150,6 +168,37 @@ function AccountCard({ account, onChanged, onRemove }) {
             })}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3 border-t border-slate-100 pt-3">
+        <div className="flex items-center gap-2">
+          <span className="label !mb-0">Signature</span>
+          {!sigOpen && (
+            <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+              {account.signature ? account.signature.split('\n').join(' · ') : 'None yet. It goes under new mail, replies and forwards from this mailbox.'}
+            </span>
+          )}
+          {!sigOpen && (
+            <button className="btn-secondary !py-1 text-xs" onClick={() => { setSignature(account.signature || ''); setSigOpen(true) }}>
+              {account.signature ? 'Edit' : 'Add signature'}
+            </button>
+          )}
+        </div>
+        {sigOpen && (
+          <div className="mt-2">
+            <textarea id={`sig-${account.id}`} className="input min-h-[96px] font-[inherit] text-sm leading-relaxed" rows={4} maxLength={2000} autoFocus
+              aria-label={`Signature for ${account.email}`}
+              placeholder={`${account.displayName || 'Your name'}\nMagizhchi Academy · +91 98xxx xxxxx`}
+              value={signature} onChange={(e) => setSignature(e.target.value)} />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button className="btn-primary !py-1 text-xs" onClick={saveSignature} disabled={sigBusy || !sigChanged}>
+                {sigBusy ? <span className="spinner" /> : <IconCheck size={14} />} Save signature
+              </button>
+              <button className="btn-ghost !py-1 text-xs" onClick={() => { setSigOpen(false); setSignature(account.signature || '') }}>Cancel</button>
+              <span className="ml-auto text-[11px] text-slate-500">Plain text. It changes by itself when you pick another From.</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {pwOpen && (

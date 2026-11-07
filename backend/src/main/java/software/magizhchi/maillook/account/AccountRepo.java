@@ -115,6 +115,24 @@ public class AccountRepo {
         jdbc.update("UPDATE accounts SET sent_uid_validity = ?, sent_last_uid = ? WHERE id = ?", uidValidity, lastUid, id);
     }
 
+    /** The signature added under new mail from this mailbox, or null. */
+    public String signature(long id) {
+        List<String> s = jdbc.queryForList("SELECT signature FROM accounts WHERE id = ?", String.class, id);
+        return s.isEmpty() ? null : s.get(0);
+    }
+
+    public java.util.Map<Long, String> signatures(long userId) {
+        java.util.Map<Long, String> out = new java.util.HashMap<>();
+        jdbc.query("SELECT id, signature FROM accounts WHERE user_id = ?", rs -> {
+            out.put(rs.getLong("id"), rs.getString("signature"));
+        }, userId);
+        return out;
+    }
+
+    public void setSignature(long id, String signature) {
+        jdbc.update("UPDATE accounts SET signature = ? WHERE id = ?", signature, id);
+    }
+
     public void delete(long id) {
         jdbc.update("DELETE FROM accounts WHERE id = ?", id);
     }

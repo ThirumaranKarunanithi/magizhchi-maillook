@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ImapClient {
 
-    public enum Role { SENT, ARCHIVE, TRASH }
+    public enum Role { SENT, ARCHIVE, TRASH, SPAM }
 
     private final SecretBox secrets;
     private final OAuthTokens oauth;
@@ -241,12 +241,9 @@ public class ImapClient {
             case SENT -> "\\sent";
             case ARCHIVE -> "\\archive";
             case TRASH -> "\\trash";
+            case SPAM -> "\\junk";
         };
-        String[] names = switch (role) {
-            case SENT -> new String[]{"sent", "inbox.sent", "sent items", "sent messages", "[gmail]/sent mail", "inbox/sent", "sent mail"};
-            case ARCHIVE -> new String[]{"archive", "inbox.archive", "archives", "inbox/archive", "[gmail]/all mail"};
-            case TRASH -> new String[]{"trash", "inbox.trash", "deleted items", "deleted messages", "[gmail]/trash", "[gmail]/bin", "inbox/trash", "bin"};
-        };
+        String[] names = names(role);
         Folder[] all = store.getDefaultFolder().list("*");
         for (Folder f : all) {
             if (f instanceof IMAPFolder imf) {
@@ -261,6 +258,55 @@ public class ImapClient {
             }
         }
         return null;
+    }
+
+    private static String[] names(Role role) {
+        return switch (role) {
+            case SENT -> new String[]{"sent", "inbox.sent", "sent items", "sent messages", "[gmail]/sent mail", "inbox/sent", "sent mail"};
+            case ARCHIVE -> new String[]{"archive", "inbox.archive", "archives", "inbox/archive", "[gmail]/all mail"};
+            case TRASH -> new String[]{"trash", "inbox.trash", "deleted items", "deleted messages", "[gmail]/trash", "[gmail]/bin", "inbox/trash", "bin"};
+            case SPAM -> new String[]{"spam", "junk", "junk e-mail", "junk email", "bulk mail", "inbox.spam", "inbox.junk", "[gmail]/spam", "inbox/spam", "inbox/junk"};
+        };
+    }
+
+    private static final java.util.Set<String> SPECIAL_ATTRS = java.util.Set.of(
+            "\\noselect", "\\nonexistent", "\\sent", "\\trash", "\\junk", "\\drafts", "\\all", "\\archive", "\\flagged", "\\important");
+    private static final java.util.Set<String> SPECIAL_NAMES = new java.util.HashSet<>(java.util.List.of(
+            "inbox", "drafts", "draft", "inbox.drafts", "inbox/drafts", "[gmail]/drafts", "[gmail]/starred", "[gmail]/important",
+            "[gmail]/all mail", "outbox", "templates", "notes", "inbox.templates"));
+    static {
+        for (Role r : Role.values()) SPECIAL_NAMES.addAll(java.util.List.of(names(r)));
+    }
+
+    /**
+     * The mailbox's own folders (and Gmail's labels, which IMAP shows as folders): everything that holds
+     * mail except Inbox and the special folders MailLook already shows by name.
+     */
+    public java.util.List<String> ownFolders(Store store) throws MessagingException {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (Folder f : store.getDefaultFolder().list("*")) {
+            String name = f.getFullName();
+            if (name.isEmpty() || name.length() > 280 || SPECIAL_NAMES.contains(name.toLowerCase(Locale.ROOT))) continue;
+            boolean special = false;
+            if (f instanceof IMAPFolder imf) {
+                String[] attrs = imf.getAttributes();
+                if (attrs != null) for (String at : attrs) if (SPECIAL_ATTRS.contains(at.toLowerCase(Locale.ROOT))) special = true;
+            }
+            if (!special && (f.getType() & Folder.HOLDS_MESSAGES) != 0) out.add(name);
+        }
+        out.sort(String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    /** Gmail's "archive" is All Mail: every message again, so it isn't synced as a folder of its own. */
+    public static boolean isAllMail(IMAPFolder f) {
+        if (f.getFullName().equalsIgnoreCase("[gmail]/all mail")) return true;
+        try {
+            String[] attrs = f.getAttributes();
+            if (attrs != null) for (String at : attrs) if (at.equalsIgnoreCase("\\all")) return true;
+        } catch (MessagingException ignored) {
+        }
+        return false;
     }
 
     public static void closeQuietly(Store s) {
