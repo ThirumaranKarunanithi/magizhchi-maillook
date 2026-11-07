@@ -81,5 +81,24 @@ export function groupBills(bills, today) {
   return g
 }
 
-/** Total of rupee amounts (other currencies are shown on their own rows, not added). */
-export const totalInr = (list) => list.reduce((s, b) => s + (b.currency === 'INR' && b.amount != null ? Number(b.amount) : 0), 0)
+/** What a bill comes to in rupees: its amount, or today's rupee value of a dollar bill (null if unknown). */
+export const inrOf = (b) => (b.amount == null ? null : !b.currency || b.currency === 'INR' ? Number(b.amount) : b.amountInr != null ? Number(b.amountInr) : null)
+
+/** "≈ ₹1,878" under a bill in another currency, or ''. */
+export const inrNote = (b) => (b.currency && b.currency !== 'INR' && b.amountInr != null ? `≈ ${money(Math.round(Number(b.amountInr)))}` : '')
+
+/** Total in rupees; bills in other currencies count at today's rate. */
+export const totalInr = (list) => list.reduce((s, b) => s + (inrOf(b) ?? 0), 0)
+
+/** A UPI payment link (opens Google Pay, PhonePe, Paytm… on a phone), for rupee bills with a UPI ID. */
+export function upiLink(b) {
+  if (!b.upiId || (b.currency && b.currency !== 'INR')) return null
+  const p = new URLSearchParams({ pa: b.upiId, pn: (b.vendor || '').slice(0, 50), cu: 'INR' })
+  if (b.amount != null) p.set('am', Number(b.amount).toFixed(2))
+  const note = b.invoiceNo ? `Invoice ${b.invoiceNo}` : b.customerRef ? `Account ${b.customerRef}` : b.accountName || ''
+  if (note) p.set('tn', note.slice(0, 50))
+  return `upi://pay?${p.toString().replace(/\+/g, '%20')}`
+}
+
+/** On a phone a UPI link opens the payment apps; on a computer it is shown as a QR code to scan. */
+export const onPhone = () => typeof navigator !== 'undefined' && /Android|iPhone|iPad|MagizhchiMailLookApp/i.test(navigator.userAgent)

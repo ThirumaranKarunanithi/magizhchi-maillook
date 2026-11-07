@@ -36,8 +36,10 @@ public class BillsController {
     private final DataClient data;
     private final MailActions actions;
     private final JdbcTemplate jdbc;
+    private final FxRates fx;
 
-    public BillsController(BillService bills, DataClient data, MailActions actions, JdbcTemplate jdbc) {
+    public BillsController(BillService bills, DataClient data, MailActions actions, JdbcTemplate jdbc, FxRates fx) {
+        this.fx = fx;
         this.bills = bills;
         this.data = data;
         this.actions = actions;
@@ -133,6 +135,7 @@ public class BillsController {
             sets.add("vendor = ?");
             args.add(v);
         }
+        if (body.containsKey("accountName")) { sets.add("account_name = ?"); args.add(trimmed(body.get("accountName"), 100)); }
         if (body.containsKey("invoiceNo")) { sets.add("invoice_no = ?"); args.add(trimmed(body.get("invoiceNo"), 100)); }
         if (body.containsKey("dueDate")) { sets.add("due_date = ?"); args.add(dateOrNull(body.get("dueDate"))); sets.add("remind_before_sent = FALSE"); sets.add("remind_day_sent = FALSE"); }
         if (body.containsKey("invoiceDate")) { sets.add("invoice_date = ?"); args.add(dateOrNull(body.get("invoiceDate"))); }
@@ -222,7 +225,7 @@ public class BillsController {
         return rows.get(0);
     }
 
-    private static Map<String, Object> view(Map<String, Object> r) {
+    private Map<String, Object> view(Map<String, Object> r) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", r.get("id"));
         m.put("messageId", r.get("message_id"));
@@ -234,11 +237,20 @@ public class BillsController {
         m.put("dueDate", day(r.get("due_date")));
         m.put("amount", r.get("amount"));
         m.put("currency", r.get("currency"));
+        // Bills in dollars and the like also say what they come to in rupees today.
+        FxRates.Rate rate = r.get("amount") == null ? null : fx.toInr(Objects.toString(r.get("currency"), "INR"));
+        if (rate != null) {
+            m.put("amountInr", ((BigDecimal) r.get("amount")).multiply(rate.inr()).setScale(2, java.math.RoundingMode.HALF_UP));
+            m.put("fxRate", rate.inr());
+            m.put("fxDate", rate.date());
+        }
         m.put("cgst", r.get("cgst"));
         m.put("sgst", r.get("sgst"));
         m.put("igst", r.get("igst"));
         m.put("customerRef", r.get("customer_ref"));
+        m.put("accountName", r.get("account_name"));
         m.put("payLink", r.get("pay_link"));
+        m.put("upiId", r.get("upi_id"));
         m.put("payeeAccount", r.get("payee_account"));
         m.put("payeeIfsc", r.get("payee_ifsc"));
         m.put("autopay", r.get("autopay"));

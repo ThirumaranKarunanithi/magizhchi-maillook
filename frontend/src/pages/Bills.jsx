@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { get, patch, post, put } from '../api.js'
 import { useMail } from '../state.jsx'
-import { DATA_WEB, TONE_CLASS, dueLabel, dueTone, groupBills, money, totalInr, unsure } from '../bills.js'
-import { BillEditor, BillFacts } from '../components/BillCard.jsx'
+import { DATA_WEB, TONE_CLASS, dueLabel, dueTone, groupBills, inrNote, money, totalInr, unsure, upiLink } from '../bills.js'
+import { safeHttpUrl } from '../util.js'
+import { BillEditor, BillFacts, PayNow } from '../components/BillCard.jsx'
 import { IconAlert, IconCheck, IconChevron, IconMenu, IconReceipt } from '../components/Icons.jsx'
 
 const GROUPS = [
@@ -275,16 +276,21 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-[15px] font-semibold text-brand-ink sm:text-sm">{bill.vendor}</span>
+              {bill.accountName && <span className="shrink-0 truncate text-sm text-slate-500 sm:text-xs">· {bill.accountName}</span>}
               {shaky && <IconAlert size={13} className="shrink-0 text-amber-600" aria-label="Check this bill" />}
             </div>
             <div className="truncate text-sm text-slate-500 sm:text-xs">{bill.invoiceNo ? `Invoice ${bill.invoiceNo}` : bill.mailSubject || ''}</div>
           </div>
           <div className="shrink-0 text-right">
             <div className="text-[15px] font-bold num text-brand-ink sm:text-sm">{money(bill.amount, bill.currency)}</div>
+            {inrNote(bill) && <div className="text-xs font-semibold text-slate-500 num">{inrNote(bill)}</div>}
             <span className={`mt-0.5 inline-block rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ${TONE_CLASS[tone]}`}>{dueLabel(bill, today)}</span>
           </div>
           <IconChevron size={15} className={`shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`} />
         </button>
+        {bill.kind === 'bill' && bill.status === 'due' && !bill.autopay && (safeHttpUrl(bill.payLink) || upiLink(bill)) && !expanded && (
+          <button className="btn-primary shrink-0 !px-2.5 !py-1 text-xs" onClick={() => setExpanded(true)} title="Pay this bill">Pay</button>
+        )}
         {bill.kind === 'bill' && bill.status === 'due' && (
           <button className="btn-secondary shrink-0 !px-2 !py-1 text-xs" onClick={() => setStatus('paid')} disabled={!!busy} title="Mark paid">
             {busy === 'paid' ? <span className="spinner" /> : <IconCheck size={14} />}<span className="max-sm:hidden"> Paid</span>
@@ -298,6 +304,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
             : (
               <>
                 <BillFacts bill={bill} />
+                <div className="mt-2.5"><PayNow bill={bill} compact onPaid={() => setStatus('paid')} busy={!!busy} /></div>
                 {bill.mailFrom && <p className="mt-1.5 truncate text-xs text-slate-500">From the mail “{bill.mailSubject}” · {bill.mailFrom}</p>}
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {bill.messageId && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.messageId}`)}>Open the mail</button>}

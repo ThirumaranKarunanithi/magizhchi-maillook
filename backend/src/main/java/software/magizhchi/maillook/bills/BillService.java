@@ -18,6 +18,8 @@ import java.text.NumberFormat;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Bills from your mail.
@@ -40,6 +42,7 @@ public class BillService {
     static final int MAX_FILES = 3;
     static final long MAX_FILE_BYTES = 8L * 1024 * 1024;
     static final int MAX_TRIES = 3;
+    static final int SAME_BILL_DAYS = 10;
 
     /** How reading one mail went. */
     public enum Outcome { BILL, NOT_BILL, NO_CREDITS, NO_ACCOUNT, FAILED }
@@ -50,10 +53,11 @@ public class BillService {
     private final MailActions actions;
     private final DataClient data;
     private final PushService push;
+    private final FxRates fx;
     private final int freePerMonth;
     private final boolean timer;
 
-    public BillService(JdbcTemplate jdbc, MailActions actions, DataClient data, PushService push,
+    public BillService(JdbcTemplate jdbc, MailActions actions, DataClient data, PushService push, FxRates fx,
                        @Value("${maillook.bills.free-per-month:20}") int freePerMonth,
                        @Value("${maillook.bills.timer:true}") boolean timer) {
         this.timer = timer;
@@ -61,6 +65,7 @@ public class BillService {
         this.actions = actions;
         this.data = data;
         this.push = push;
+        this.fx = fx;
         this.freePerMonth = freePerMonth;
     }
 
@@ -176,6 +181,11 @@ public class BillService {
             work(15);
         } catch (Exception e) {
             log.warn("Bills pass failed: {}", e.toString());
+        }
+        try {
+            mergeDuplicates();
+        } catch (Exception e) {
+            log.warn("Bill merging failed: {}", e.toString());
         }
         try {
             remind(Instant.now());
@@ -303,13 +313,29 @@ public class BillService {
                     rs -> rs.next() ? rs.getLong(1) : null, userId, vendorKey, invoiceNo);
         }
         if (existing == null && "bill".equals(kind) && due != null) {
-            existing = jdbc.query("SELECT id FROM bills WHERE user_id = ? AND vendor_key = ? AND amount = ? AND due_date = ? ORDER BY id LIMIT 1",
-                    rs -> rs.next() ? rs.getLong(1) : null, userId, vendorKey, amount, due);
+            // The same bill told twice, perhaps under another name ("ACT Broadband" in a Google Pay mail,
+            // "ACT Fibernet" from ACT): the same amount, a due date within ten days, the same first word.
+            String first = firstWord(vendorKey);
+            for (Map<String, Object> r : jdbc.queryForList("SELECT id, vendor_key FROM bills WHERE user_id = ? AND kind = 'bill' " +
+                    "AND amount = ? AND due_date BETWEEN ? AND ? ORDER BY id", userId, amount, due.minusDays(SAME_BILL_DAYS), due.plusDays(SAME_BILL_DAYS))) {
+                if (first != null && first.equals(firstWord(str(r.get("vendor_key"))))) {
+                    existing = ((Number) r.get("id")).longValue();
+                    break;
+                }
+            }
         }
+        String payLink = Optional.ofNullable(text(b, "payLink")).orElse(payLinkIn(m.bodyHtml()));
+        String upi = Optional.ofNullable(text(b, "upiId")).orElse(upiIn(m.bodyHtml()));
         if (existing != null) {
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+            // What this mail adds that the first one didn't say; the earlier due date wins.
+            jdbc.update("UPDATE bills SET account_name = COALESCE(account_name, ?), customer_ref = COALESCE(customer_ref, ?), " +
+                            "pay_link = COALESCE(pay_link, ?), upi_id = COALESCE(upi_id, ?), invoice_no = COALESCE(invoice_no, ?), updated_at = ? WHERE id = ?",
+                    clip(text(b, "accountName"), 100), text(b, "customerRef"), clip(payLink, 1000), clip(upi, 100), invoiceNo, now, existing);
+            if (due != null) jdbc.update("UPDATE bills SET due_date = ? WHERE id = ? AND (due_date IS NULL OR due_date > ?)", due, existing, due);
             if (paid && !"credit_note".equals(kind)) {
                 jdbc.update("UPDATE bills SET status = 'paid', paid_at = COALESCE(paid_at, ?), updated_at = ? WHERE id = ?",
-                        OffsetDateTime.now(ZoneOffset.UTC), OffsetDateTime.now(ZoneOffset.UTC), existing);
+                        now, now, existing);
             }
             return existing;
         }
@@ -318,18 +344,105 @@ public class BillService {
         b.path("confidence").fields().forEachRemaining(e -> conf.put(e.getKey(), e.getValue().asDouble()));
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         jdbc.update("INSERT INTO bills (user_id, message_id, kind, vendor, vendor_key, vendor_gstin, invoice_no, invoice_date, due_date, " +
-                        "amount, currency, cgst, sgst, igst, customer_ref, pay_link, payee_account, payee_ifsc, autopay, status, paid_at, " +
-                        "source, confidence, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "amount, currency, cgst, sgst, igst, customer_ref, account_name, pay_link, upi_id, payee_account, payee_ifsc, autopay, status, paid_at, " +
+                        "source, confidence, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 userId, m.id(), kind, clip(vendor, 200), clip(vendorKey, 200), text(b, "vendorGstin"), invoiceNo,
                 date(text(b, "invoiceDate")), due, amount, Optional.ofNullable(text(b, "currency")).orElse("INR"),
                 decimal(b.get("cgst")), decimal(b.get("sgst")), decimal(b.get("igst")), text(b, "customerRef"),
-                text(b, "payLink"), text(b, "payeeAccount"), text(b, "payeeIfsc"), b.path("autopay").asBoolean(false),
+                clip(text(b, "accountName"), 100), clip(payLink, 1000), clip(upi, 100), text(b, "payeeAccount"), text(b, "payeeIfsc"), b.path("autopay").asBoolean(false),
                 paid ? "paid" : "due", paid ? now : null, source, Json.write(conf), now, now);
         return jdbc.queryForObject("SELECT MAX(id) FROM bills WHERE user_id = ? AND message_id = ?", Long.class, userId, m.id());
     }
 
     private void state(long messageId, String state) {
         jdbc.update("UPDATE messages SET bill_state = ? WHERE id = ?", state, messageId);
+    }
+
+    /**
+     * Folds bills that are the same bill told twice into one (see {@link #save}), for bills read
+     * before that rule existed or read in the other order. The older bill stays.
+     * @return how many were folded in
+     */
+    public int mergeDuplicates() {
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT id, user_id, vendor_key, amount, currency, due_date FROM bills " +
+                "WHERE kind = 'bill' AND due_date IS NOT NULL AND amount IS NOT NULL AND (status = 'due' OR paid_at >= ?) ORDER BY id",
+                OffsetDateTime.now(ZoneOffset.UTC).minusDays(60));
+        Set<Long> gone = new HashSet<>();
+        int merged = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            Map<String, Object> keep = rows.get(i);
+            long keepId = ((Number) keep.get("id")).longValue();
+            if (gone.contains(keepId)) continue;
+            for (int j = i + 1; j < rows.size(); j++) {
+                Map<String, Object> dup = rows.get(j);
+                long dupId = ((Number) dup.get("id")).longValue();
+                if (gone.contains(dupId) || !sameBill(keep, dup)) continue;
+                fold(keepId, dupId);
+                gone.add(dupId);
+                merged++;
+            }
+        }
+        return merged;
+    }
+
+    private static boolean sameBill(Map<String, Object> a, Map<String, Object> b) {
+        if (!Objects.equals(a.get("user_id"), b.get("user_id")) || !Objects.equals(a.get("currency"), b.get("currency"))) return false;
+        if (((BigDecimal) a.get("amount")).compareTo((BigDecimal) b.get("amount")) != 0) return false;
+        String first = firstWord(str(a.get("vendor_key")));
+        if (first == null || !first.equals(firstWord(str(b.get("vendor_key"))))) return false;
+        LocalDate da = LocalDate.parse(a.get("due_date").toString().substring(0, 10));
+        LocalDate db = LocalDate.parse(b.get("due_date").toString().substring(0, 10));
+        return Math.abs(Duration.between(da.atStartOfDay(), db.atStartOfDay()).toDays()) <= SAME_BILL_DAYS;
+    }
+
+    private void fold(long keepId, long dupId) {
+        Map<String, Object> d = jdbc.queryForMap("SELECT * FROM bills WHERE id = ?", dupId);
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        jdbc.update("UPDATE bills SET account_name = COALESCE(account_name, ?), customer_ref = COALESCE(customer_ref, ?), " +
+                        "pay_link = COALESCE(pay_link, ?), upi_id = COALESCE(upi_id, ?), invoice_no = COALESCE(invoice_no, ?), " +
+                        "vendor_gstin = COALESCE(vendor_gstin, ?), payee_account = COALESCE(payee_account, ?), payee_ifsc = COALESCE(payee_ifsc, ?), " +
+                        "due_date = CASE WHEN ? < due_date THEN ? ELSE due_date END, " +
+                        "status = CASE WHEN ? = 'paid' THEN 'paid' ELSE status END, paid_at = COALESCE(paid_at, ?), updated_at = ? WHERE id = ?",
+                d.get("account_name"), d.get("customer_ref"), d.get("pay_link"), d.get("upi_id"), d.get("invoice_no"),
+                d.get("vendor_gstin"), d.get("payee_account"), d.get("payee_ifsc"),
+                d.get("due_date"), d.get("due_date"), d.get("status"), d.get("paid_at"), now, keepId);
+        jdbc.update("UPDATE messages SET bill_id = ? WHERE bill_id = ?", keepId, dupId);
+        jdbc.update("DELETE FROM bills WHERE id = ?", dupId);
+    }
+
+    private static String firstWord(String vendorKey) {
+        if (vendorKey == null) return null;
+        String w = vendorKey.trim().split(" ")[0];
+        return w.length() >= 2 ? w : null;
+    }
+
+    private static final Pattern ANCHOR = Pattern.compile(
+            "<a\\s[^>]*?href\\s*=\\s*([\"'])(.*?)\\1[^>]*>(.*?)</a>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern PAY_WORDS = Pattern.compile(
+            "\\b(pay|quick\\s*pay|make\\s+(a\\s+)?payment|recharge\\s+now)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NOT_PAY = Pattern.compile(
+            "unsubscribe|pay\\s*later|history|privacy|terms|paid|paypal", Pattern.CASE_INSENSITIVE);
+    private static final Pattern UPI_LINK = Pattern.compile(
+            "upi://pay\\?[^\"'\\s>]*?\\bpa=([A-Za-z0-9._-]{2,64}(?:@|%40)[A-Za-z][A-Za-z0-9.-]{1,32})", Pattern.CASE_INSENSITIVE);
+
+    /** The mail's own "Pay now" button, when it has one that goes to an https page. */
+    static String payLinkIn(String html) {
+        if (html == null || html.isBlank()) return null;
+        Matcher m = ANCHOR.matcher(html.length() > 400_000 ? html.substring(0, 400_000) : html);
+        while (m.find()) {
+            String href = m.group(2).replace("&amp;", "&").trim();
+            String label = m.group(3).replaceAll("<[^>]+>", " ").replace("&nbsp;", " ").replaceAll("\\s+", " ").trim();
+            if (label.isEmpty() || label.length() > 40 || !href.startsWith("https://") || href.length() > 1000) continue;
+            if (PAY_WORDS.matcher(label).find() && !NOT_PAY.matcher(label).find()) return href;
+        }
+        return null;
+    }
+
+    /** A UPI ID from a {@code upi://pay?pa=…} link in the mail, if there is one. */
+    static String upiIn(String html) {
+        if (html == null) return null;
+        Matcher m = UPI_LINK.matcher(html);
+        return m.find() ? m.group(1).replace("%40", "@") : null;
     }
 
     // ── reminders ────────────────────────────────────────────
@@ -380,7 +493,12 @@ public class BillService {
                 "AND autopay = FALSE AND due_date BETWEEN ? AND ?", userId, today.minusDays(30), today.plusDays(7));
         if (rows.isEmpty()) return null;
         BigDecimal inr = BigDecimal.ZERO;
-        for (Map<String, Object> r : rows) if ("INR".equals(r.get("currency")) && r.get("amount") != null) inr = inr.add((BigDecimal) r.get("amount"));
+        for (Map<String, Object> r : rows) {
+            if (r.get("amount") == null) continue;
+            BigDecimal a = (BigDecimal) r.get("amount");
+            BigDecimal v = "INR".equals(r.get("currency")) ? a : fx.inr(a, str(r.get("currency")));
+            if (v != null) inr = inr.add(v);
+        }
         String n = rows.size() == 1 ? "1 bill due this week" : rows.size() + " bills due this week";
         return inr.signum() > 0 ? n + " (" + money(inr, "INR") + ")" : n;
     }

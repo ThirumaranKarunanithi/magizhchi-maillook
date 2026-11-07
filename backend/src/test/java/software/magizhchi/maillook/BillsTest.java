@@ -53,7 +53,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
         "maillook.ai.api-key=",
         "magizhchi.apps.pa.api=",
         "magizhchi.apps.data.secret=data-secret-for-tests",
-        "maillook.bills.free-per-month=3",
+        "maillook.bills.free-per-month=5",
         "maillook.bills.timer=false"})
 @AutoConfigureMockMvc
 class BillsTest {
@@ -72,6 +72,7 @@ class BillsTest {
     @DynamicPropertySource
     static void dataUrl(DynamicPropertyRegistry r) {
         r.add("magizhchi.apps.data.api", () -> "http://localhost:" + data.getAddress().getPort());
+        r.add("maillook.fx.url", () -> "http://localhost:" + data.getAddress().getPort() + "/fx");
     }
 
     @AfterAll
@@ -120,7 +121,7 @@ class BillsTest {
         assertThat(setup.path("on").asBoolean()).isFalse();
         assertThat(setup.path("linked").asBoolean()).isTrue();
         assertThat(setup.path("balance").asInt()).isEqualTo(42);
-        assertThat(setup.path("freeLeft").asInt()).isEqualTo(3);
+        assertThat(setup.path("freeLeft").asInt()).isEqualTo(5);
 
         // The estimate only counts: two of three mails look like bills, all within the free allowance.
         JsonNode est = call(get("/api/bills/scan?days=90"), token, 200);
@@ -164,7 +165,44 @@ class BillsTest {
         assertThat(call(get("/api/messages/" + reminderMail + "/bill"), token, 200).path("bill").path("id").asLong())
                 .isEqualTo(act.path("id").asLong());
 
-        // The free allowance (3 a month here) is used up: the next bill goes on credits, and Data says
+        // The same bill told again by Google Pay, under another name and a later date: it joins the
+        // ACT bill and adds what that mail knew (the account's name, its own Pay now button).
+        deliverHtml("Google Pay <payments-noreply@google.example>", "New bill from ACT Broadband",
+                "<p>New bill from ACT Broadband. Account Name: alwarpuram. Amount Rs. 1,180.</p>"
+                        + "<a href=\"https://pay.example/act?b=1&amp;c=2\"><span>Pay Now</span></a> <a href=\"https://x.example/u\">Unsubscribe</a>");
+        deliver("Railway <billing@railway.example>", "Your Railway invoice",
+                "Invoice in_1Q9. Amount due USD 20.00, charged to your card.", List.of());
+        call(post("/api/sync"), token, 202);
+        long gpayMail = waitForMessage(token, "New bill from ACT Broadband");
+        waitForMessage(token, "Your Railway invoice");
+        bills.work(10);
+        JsonNode three = call(get("/api/bills"), token, 200).path("bills");
+        assertThat(three).hasSize(3);
+        JsonNode joined = find(three, "ACT Fibernet");
+        assertThat(joined.path("id").asLong()).isEqualTo(act.path("id").asLong());
+        assertThat(joined.path("dueDate").asText()).isEqualTo(DUE.toString());
+        assertThat(joined.path("accountName").asText()).isEqualTo("alwarpuram");
+        assertThat(joined.path("payLink").asText()).isEqualTo("https://pay.example/act?b=1&c=2");
+        assertThat(joined.has("amountInr")).isFalse();
+        assertThat(call(get("/api/messages/" + gpayMail + "/bill"), token, 200).path("bill").path("id").asLong())
+                .isEqualTo(act.path("id").asLong());
+        // A dollar bill also says what it comes to in rupees.
+        JsonNode usd = find(three, "Railway");
+        assertThat(usd.path("currency").asText()).isEqualTo("USD");
+        assertThat(usd.path("amountInr").decimalValue()).isEqualByComparingTo("1878.40");
+        assertThat(usd.path("fxDate").asText()).isEqualTo("2026-11-06");
+
+        // Bills read before the joining rule: folded together on the next pass, the older one kept.
+        long userId = jdbc.queryForObject("SELECT id FROM users WHERE email = 'tiru@magizhchi.test'", Long.class);
+        jdbc.update("INSERT INTO bills (user_id, kind, vendor, vendor_key, due_date, amount, currency, status) VALUES (?, 'bill', 'BSNL Landline', 'bsnl landline', ?, 640, 'INR', 'due')", userId, DUE.plusDays(1));
+        jdbc.update("INSERT INTO bills (user_id, kind, vendor, vendor_key, due_date, amount, currency, status, account_name) VALUES (?, 'bill', 'BSNL', 'bsnl', ?, 640, 'INR', 'due', 'home')", userId, DUE.plusDays(4));
+        assertThat(bills.mergeDuplicates()).isEqualTo(1);
+        JsonNode bsnl = find(call(get("/api/bills"), token, 200).path("bills"), "BSNL Landline");
+        assertThat(bsnl.path("accountName").asText()).isEqualTo("home");
+        assertThat(bsnl.path("dueDate").asText()).isEqualTo(DUE.plusDays(1).toString());
+        jdbc.update("DELETE FROM bills WHERE vendor_key = 'bsnl landline'");
+
+        // The free allowance (5 a month here) is used up: the next bill goes on credits, and Data says
         // there are none. It waits, and doesn't ask Data again on every pass.
         deliver("Airtel <bills@airtel.example>", "Your Airtel bill", "Amount due Rs. 499 by the 20th.", List.of());
         call(post("/api/sync"), token, 202);
@@ -201,7 +239,7 @@ class BillsTest {
         // Not a bill, and never from this sender again.
         long receipt = find(call(get("/api/bills"), token, 200).path("bills"), "Academy Supplies").path("id").asLong();
         call(post("/api/bills/" + receipt + "/not-a-bill").contentType(MediaType.APPLICATION_JSON).content("{\"never\":true}"), token, 200);
-        assertThat(call(get("/api/bills"), token, 200).path("bills")).hasSize(1);
+        assertThat(call(get("/api/bills"), token, 200).path("bills")).hasSize(2);
         assertThat(jdbc.queryForObject("SELECT is_biller FROM billers WHERE from_email = 'accounts@supplies.example'", Boolean.class)).isFalse();
     }
 
@@ -226,6 +264,11 @@ class BillsTest {
         String path = ex.getRequestURI().getPath();
         String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         String secret = ex.getRequestHeaders().getFirst("X-Integration-Secret");
+        if (path.equals("/fx")) {
+            reply(ex, 200, ex.getRequestURI().getQuery().contains("base=USD")
+                    ? "{\"amount\":1.0,\"base\":\"USD\",\"date\":\"2026-11-06\",\"rates\":{\"INR\":93.92}}" : "{\"rates\":{}}");
+            return;
+        }
         if (!SECRET.equals(secret)) {
             reply(ex, 403, "{\"message\":\"Bad integration secret.\"}");
             return;
@@ -241,7 +284,13 @@ class BillsTest {
                 return;
             }
             String bill;
-            if (body.contains("ACT Fibernet")) {
+            if (body.contains("ACT Broadband")) {
+                bill = "{\"kind\":\"bill\",\"vendor\":\"ACT Broadband\",\"accountName\":\"alwarpuram\",\"dueDate\":\"" + DUE.plusDays(6) + "\","
+                        + "\"amount\":1180,\"currency\":\"INR\",\"payLink\":null,\"autopay\":false,\"alreadyPaid\":false,\"confidence\":{}}";
+            } else if (body.contains("in_1Q9")) {
+                bill = "{\"kind\":\"bill\",\"vendor\":\"Railway\",\"invoiceNo\":\"in_1Q9\",\"dueDate\":\"" + DUE.plusDays(3) + "\","
+                        + "\"amount\":20,\"currency\":\"USD\",\"autopay\":true,\"alreadyPaid\":false,\"confidence\":{}}";
+            } else if (body.contains("ACT Fibernet")) {
                 bill = "{\"kind\":\"bill\",\"vendor\":\"ACT Fibernet\",\"invoiceNo\":\"INV-77\",\"dueDate\":\"" + DUE + "\","
                         + "\"amount\":1180,\"currency\":\"INR\",\"autopay\":false,\"alreadyPaid\":false,"
                         + "\"confidence\":{\"amount\":0.98,\"dueDate\":0.6}}";
@@ -291,6 +340,17 @@ class BillsTest {
             mp.addBodyPart(p);
         }
         m.setContent(mp);
+        m.setSentDate(Date.from(Instant.now()));
+        m.saveChanges();
+        greenMail.getUserManager().getUserByEmail("tiru@magizhchi.test").deliver(m);
+    }
+
+    private void deliverHtml(String from, String subject, String html) throws Exception {
+        MimeMessage m = new MimeMessage(Session.getInstance(new Properties()));
+        m.setFrom(new InternetAddress(from));
+        m.setRecipients(Message.RecipientType.TO, InternetAddress.parse("tiru@magizhchi.test"));
+        m.setSubject(subject);
+        m.setContent(html, "text/html; charset=UTF-8");
         m.setSentDate(Date.from(Instant.now()));
         m.saveChanges();
         greenMail.getUserManager().getUserByEmail("tiru@magizhchi.test").deliver(m);

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import qrcode from 'qrcode-generator'
 import { useNavigate } from 'react-router-dom'
 import { get, patch, post } from '../api.js'
 import { useMail } from '../state.jsx'
 import { safeHttpUrl } from '../util.js'
-import { DATA_WEB, TONE_CLASS, dueLabel, dueTone, money, unsure } from '../bills.js'
+import { DATA_WEB, TONE_CLASS, dueLabel, dueTone, inrNote, money, onPhone, unsure, upiLink } from '../bills.js'
+import { native, openOutside } from '../native.js'
 import { IconAlert, IconCheck, IconReceipt } from './Icons.jsx'
 
 const todayIso = () => new Date().toLocaleDateString('en-CA')
@@ -16,6 +18,7 @@ export function BillEditor({ bill, onSaved, onCancel }) {
     amount: bill.amount ?? '',
     dueDate: bill.dueDate || '',
     invoiceNo: bill.invoiceNo || '',
+    accountName: bill.accountName || '',
     autopay: !!bill.autopay,
   })
   const [busy, setBusy] = useState(false)
@@ -47,8 +50,11 @@ export function BillEditor({ bill, onSaved, onCancel }) {
       <label className="font-semibold text-slate-600">Due date
         <input type="date" className={`${input} ${flag('dueDate')}`} value={f.dueDate} onChange={set('dueDate')} />
       </label>
-      <label className="col-span-2 font-semibold text-slate-600">Invoice number
+      <label className="font-semibold text-slate-600">Invoice number
         <input className={`${input} ${flag('invoiceNo')}`} value={f.invoiceNo} onChange={set('invoiceNo')} maxLength={100} />
+      </label>
+      <label className="font-semibold text-slate-600">Account name
+        <input className={`${input} ${flag('accountName')}`} value={f.accountName} onChange={set('accountName')} maxLength={100} placeholder="e.g. Home" />
       </label>
       <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700">
         <input type="checkbox" checked={f.autopay} onChange={set('autopay')} /> Paid automatically (auto-debit) — no reminders
@@ -65,11 +71,14 @@ export function BillEditor({ bill, onSaved, onCancel }) {
 export function BillFacts({ bill }) {
   const tax = [['CGST', bill.cgst], ['SGST', bill.sgst], ['IGST', bill.igst]].filter(([, v]) => v != null && Number(v) > 0)
   const items = [
+    bill.accountName && ['Account name', bill.accountName, 'accountName'],
+    bill.customerRef && ['Account no.', bill.customerRef, 'customerRef'],
     bill.invoiceNo && ['Invoice', bill.invoiceNo, 'invoiceNo'],
-    bill.customerRef && ['Account', bill.customerRef, 'customerRef'],
+    bill.amountInr != null && bill.currency && bill.currency !== 'INR' && ['In rupees', `${money(bill.amountInr)} · 1 ${bill.currency} = ₹${Number(bill.fxRate).toFixed(2)}${bill.fxDate ? ` on ${bill.fxDate}` : ''}`, 'amountInr'],
     bill.vendorGstin && ['GSTIN', bill.vendorGstin, 'vendorGstin'],
     tax.length > 0 && ['Tax', tax.map(([k, v]) => `${k} ${money(v, bill.currency)}`).join(' · '), 'tax'],
     bill.payeeAccount && ['Pay to', `${bill.payeeAccount}${bill.payeeIfsc ? ` · ${bill.payeeIfsc}` : ''}`, 'payeeAccount'],
+    bill.upiId && ['UPI', bill.upiId, 'upiId'],
   ].filter(Boolean)
   if (!items.length) return null
   return (
@@ -81,6 +90,75 @@ export function BillFacts({ bill }) {
         </div>
       ))}
     </dl>
+  )
+}
+
+function UpiQr({ link }) {
+  const svg = useMemo(() => {
+    const q = qrcode(0, 'M')
+    q.addData(link)
+    q.make()
+    return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true })
+  }, [link])
+  // The SVG is drawn here from a UPI link MailLook built, not from markup in the mail.
+  return <div className="h-36 w-36 shrink-0 rounded-lg bg-white p-1 ring-1 ring-slate-200" role="img" aria-label="UPI QR code" dangerouslySetInnerHTML={{ __html: svg }} />
+}
+
+/**
+ * Pay now: the biller's own payment page, or (with a UPI ID) the phone's UPI apps with the amount
+ * filled in, or on a computer a QR code to scan with them. Then it asks whether it went through.
+ */
+export function PayNow({ bill, onPaid, busy, compact = false }) {
+  const [asked, setAsked] = useState(false)
+  const [qr, setQr] = useState(false)
+  if (bill.kind !== 'bill' || bill.status !== 'due' || bill.autopay) return null
+  const page = safeHttpUrl(bill.payLink)
+  const upi = upiLink(bill)
+  if (!page && !upi) return null
+  const phone = onPhone()
+  const size = compact ? '!px-2.5 !py-1 text-xs' : '!px-3 !py-1.5 text-sm'
+
+  function pay() {
+    setAsked(true)
+    if (upi && phone) {
+      window.location.href = upi
+    } else if (upi) {
+      setQr((v) => !v)
+    } else if (native) {
+      openOutside(page)
+    } else {
+      window.open(page, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  return (
+    <div className="w-full">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" className={`btn-primary ${size}`} onClick={pay}>
+          Pay {money(bill.amount, bill.currency)}{upi ? (phone ? ' by UPI' : ' · UPI QR') : ' ↗'}
+        </button>
+        {upi && page && (
+          <button type="button" className={`btn-secondary ${size}`} onClick={() => { setAsked(true); native ? openOutside(page) : window.open(page, '_blank', 'noopener,noreferrer') }}>
+            {new URL(page).hostname.replace(/^www\./, '')} ↗
+          </button>
+        )}
+        {asked && (
+          <span className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2 py-1 text-xs text-emerald-900 ring-1 ring-emerald-200">
+            Paid it?
+            <button type="button" className="font-semibold underline" onClick={onPaid} disabled={busy}>Yes, mark paid</button>
+            <button type="button" className="text-emerald-700 hover:underline" onClick={() => { setAsked(false); setQr(false) }}>Not yet</button>
+          </span>
+        )}
+      </div>
+      {qr && upi && (
+        <div className="mt-2 flex items-center gap-3 rounded-xl bg-slate-50 p-2 text-xs text-slate-600">
+          <UpiQr link={upi} />
+          <p className="min-w-0">
+            Scan with Google Pay, PhonePe, Paytm or your bank’s app. It fills in <b className="text-brand-ink">{bill.upiId}</b> and <b className="text-brand-ink num">{money(bill.amount, bill.currency)}</b>; check both before you pay.
+          </p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -167,7 +245,6 @@ export default function BillCard({ message }) {
   }
 
   const tone = dueTone(bill, today)
-  const pay = safeHttpUrl(bill.payLink)
   const shaky = ['amount', 'dueDate', 'vendor'].some((k) => unsure(bill, k))
   return (
     <section className="rounded-xl border border-slate-200 bg-white/80 p-3 text-sm" aria-label="Bill">
@@ -176,13 +253,14 @@ export default function BillCard({ message }) {
         <div className="min-w-0 flex-1">
           <p className="truncate font-bold text-brand-ink">
             <span className={unsure(bill, 'vendor') ? 'text-amber-800' : ''}>{bill.vendor}</span>
+            {bill.accountName && <span className="font-normal text-slate-500"> · {bill.accountName}</span>}
           </p>
           <p className="flex flex-wrap items-baseline gap-x-2">
             <span className={`text-xl font-bold num ${unsure(bill, 'amount') ? 'text-amber-800' : 'text-brand-ink'}`}>{money(bill.amount, bill.currency)}</span>
+            {inrNote(bill) && <span className="text-sm font-semibold text-slate-500 num">{inrNote(bill)}</span>}
             <span className={`rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ${TONE_CLASS[tone]} ${unsure(bill, 'dueDate') ? '!ring-amber-400' : ''}`}>{dueLabel(bill, today)}</span>
           </p>
         </div>
-        {pay && bill.status === 'due' && <a className="btn-secondary shrink-0 !px-2.5 !py-1 text-xs" href={pay} target="_blank" rel="noreferrer">Pay ↗</a>}
       </div>
 
       {shaky && !editing && (
@@ -197,6 +275,7 @@ export default function BillCard({ message }) {
       ) : (
         <>
           <BillFacts bill={bill} />
+          <div className="mt-2.5"><PayNow bill={bill} onPaid={() => setStatus('paid')} busy={!!busy} /></div>
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {bill.kind === 'bill' && (bill.status === 'due'
               ? <button className="btn-primary !px-2.5 !py-1 text-xs" onClick={() => setStatus('paid')} disabled={!!busy}>{busy === 'paid' ? <span className="spinner" /> : <IconCheck size={13} />} Mark paid</button>

@@ -35,6 +35,9 @@ maillook:
   bills:
     # Bills read each month at MailLook's cost before the person's Data credits are used.
     free-per-month: ${MAILLOOK_BILLS_FREE_PER_MONTH:20}
+  fx:
+    # Rupee value of bills in other currencies (ECB rates via Frankfurter, no key). Empty: off.
+    url: ${MAILLOOK_FX_URL:https://api.frankfurter.dev/v1/latest}
   # Where this API and the web app are reached from the internet. Sign in with Google / Microsoft
   # sends people back to {public-url}/api/oauth/{google|microsoft}/callback, then on to {web-url}/accounts.
   public-url: ${MAILLOOK_PUBLIC_URL:http://localhost:8097}
