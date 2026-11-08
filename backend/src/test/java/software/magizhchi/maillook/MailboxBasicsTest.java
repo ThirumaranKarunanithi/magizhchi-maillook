@@ -194,10 +194,56 @@ class MailboxBasicsTest {
         assertThat(whole).contains("text/html").contains("text/plain");
         assertThat(whole.replaceAll("=\\r?\\n", "").replace("=3D", "=")).contains("/api/sig/" + picture.substring(picture.lastIndexOf('/') + 1));
 
+        // A photo and a logo, a layout, WhatsApp, social handles and a booking link.
+        var face = new java.awt.image.BufferedImage(400, 400, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var faceOut = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(face, "jpg", faceOut);
+        String rich = design.replace("\"template\":\"gold-crest\"", "\"template\":\"peacock-royal\",\"layout\":\"card\","
+                + "\"photoCrop\":{\"x\":0.2,\"y\":-0.1,\"zoom\":1.5},\"whatsapp\":\"+91 98400 12345\",\"linkedin\":\"@owner-name\","
+                + "\"instagram\":\"https://instagram.com/magizhchi\",\"booking\":\"meet.magizhchi.software/book/owner\"");
+        JsonNode withArt = call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .file(new MockMultipartFile("photo", "me.jpg", "image/jpeg", faceOut.toByteArray()))
+                .file(new MockMultipartFile("logo", "logo.png", "image/png", pngOut.toByteArray()))
+                .param("design", rich), token, 200);
+        JsonNode rd = withArt.path("signatureDesign");
+        assertThat(rd.path("layout").asText()).isEqualTo("card");
+        assertThat(rd.path("photo").asText()).hasSize(32);
+        assertThat(rd.path("logo").asText()).hasSize(32);
+        assertThat(rd.path("photoCrop").path("zoom").asDouble()).isEqualTo(1.5);
+        assertThat(rd.path("linkedin").asText()).isEqualTo("https://www.linkedin.com/in/owner-name");
+        assertThat(rd.path("booking").asText()).isEqualTo("https://meet.magizhchi.software/book/owner");
+        String richHtml = withArt.path("signatureHtml").asText();
+        assertThat(richHtml).contains("https://wa.me/919840012345").contains("/api/sig/icon/linkedin/1f8a8a")
+                .contains("https://instagram.com/magizhchi").contains("Book a meeting");
+        assertThat(withArt.path("signature").asText()).contains("Book a meeting: https://meet.magizhchi.software/book/owner");
+        // The photo comes back for the designer; the icons load without signing in.
+        assertThat(mvc.perform(get("/api/sig/" + rd.path("photo").asText())).andReturn().getResponse().getContentAsByteArray())
+                .isEqualTo(faceOut.toByteArray());
+        var iconRes = mvc.perform(get("/api/sig/icon/linkedin/1f8a8a")).andReturn().getResponse();
+        assertThat(iconRes.getStatus()).isEqualTo(200);
+        assertThat(iconRes.getContentType()).isEqualTo("image/png");
+        assertThat(mvc.perform(get("/api/sig/icon/nope/1f8a8a")).andReturn().getResponse().getStatus()).isEqualTo(404);
+        // Saving again without new uploads keeps the same photo and logo; a token from elsewhere is dropped.
+        String resave = json.writeValueAsString(((com.fasterxml.jackson.databind.node.ObjectNode) rd.deepCopy()).put("tagline", "Still here"));
+        JsonNode kept = call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .param("design", resave), token, 200);
+        assertThat(kept.path("signatureDesign").path("photo").asText()).isEqualTo(rd.path("photo").asText());
+        assertThat(kept.path("signatureDesign").path("logo").asText()).isEqualTo(rd.path("logo").asText());
+        String forged = resave.replace(rd.path("logo").asText(), "0123456789abcdef0123456789abcdef");
+        JsonNode dropped = call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .param("design", forged), token, 200);
+        assertThat(dropped.path("signatureDesign").has("logo")).isFalse();
+        call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .param("design", design.replace("\"template\":\"gold-crest\"", "\"template\":\"gold-crest\",\"layout\":\"poster\"")), token, 400);
+
         // Back to plain text: the design goes, its text copy stays.
         JsonNode plainAgain = call(delete("/api/accounts/" + accountId + "/signature-design"), token, 200);
         assertThat(plainAgain.path("signatureDesign").isNull()).isTrue();
-        assertThat(plainAgain.path("signature").asText()).isEqualTo(sigText);
+        assertThat(plainAgain.path("signature").asText()).isEqualTo(dropped.path("signature").asText());
 
         // Typing a signature again replaces the design.
         call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")

@@ -32,12 +32,30 @@ public class SignatureController {
         this.accounts = accounts;
     }
 
-    /** Multipart: {@code design} (JSON: template, name, title, company, phone, email, website, address, tagline) and {@code image} (PNG or JPEG). */
+    /**
+     * Multipart: {@code design} (JSON: template, layout, name, title, company, phone, whatsapp, email, website,
+     * address, tagline, booking, social links, photo/logo tokens, photoCrop), {@code image} (the banner, PNG or
+     * JPEG) and, when newly chosen, {@code photo} and {@code logo}.
+     */
     @PutMapping(path = "/accounts/{id}/signature-design", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Map<String, Object> save(@RequestAttribute long userId, @PathVariable long id,
-                                    @RequestParam("design") String design, @RequestParam("image") MultipartFile image) throws IOException {
-        royal.save(userId, id, design, image == null ? null : image.getBytes());
+                                    @RequestParam("design") String design, @RequestParam("image") MultipartFile image,
+                                    @RequestParam(value = "photo", required = false) MultipartFile photo,
+                                    @RequestParam(value = "logo", required = false) MultipartFile logo) throws IOException {
+        royal.save(userId, id, design, image == null ? null : image.getBytes(),
+                photo == null ? null : photo.getBytes(), logo == null ? null : logo.getBytes());
         return view(id);
+    }
+
+    /** The round icons under a signature, in the template's colour (six hex digits). */
+    @GetMapping("/sig/icon/{name}/{color}")
+    public ResponseEntity<byte[]> icon(@PathVariable String name, @PathVariable String color) {
+        byte[] png = SignatureIcons.png(name, color.replaceFirst("\\.png$", ""));
+        if (png == null) throw ApiException.notFound("Icon");
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePublic())
+                .body(png);
     }
 
     @DeleteMapping("/accounts/{id}/signature-design")

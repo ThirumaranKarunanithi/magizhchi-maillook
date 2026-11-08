@@ -7,7 +7,10 @@
 
 export const BANNER_W = 520
 export const BANNER_H = 170
-const STAGE_H = 122 // the banner above the reflection floor
+const REFLECT_H = 48 // the reflection floor under the banner
+// This render's size: the banner grows taller when there are more lines (set at the start of each render).
+let STAGE_H = BANNER_H - REFLECT_H
+let FULL_H = BANNER_H
 
 const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Cinzel+Decorative:wght@700&family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Playfair+Display:ital,wght@0,600;0,700;1,700&family=Noto+Serif+Tamil:wght@600;700&display=block'
 
@@ -248,17 +251,17 @@ function flare(ctx, x, y, len, color) {
 }
 
 function backdrop(ctx, t, rnd) {
-  const g = ctx.createLinearGradient(0, 0, 0, BANNER_H)
+  const g = ctx.createLinearGradient(0, 0, 0, FULL_H)
   g.addColorStop(0, t.bg[0])
   g.addColorStop(1, t.bg[1])
   ctx.fillStyle = g
-  ctx.fillRect(0, 0, BANNER_W, BANNER_H)
+  ctx.fillRect(0, 0, BANNER_W, FULL_H)
   // Key light behind the name, the way a set is lit.
   const k = ctx.createRadialGradient(250, 50, 4, 250, 60, 300)
   k.addColorStop(0, t.light)
   k.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = k
-  ctx.fillRect(0, 0, BANNER_W, BANNER_H)
+  ctx.fillRect(0, 0, BANNER_W, FULL_H)
 
   ctx.save()
   const ink = t.light_bg ? 'rgba(120,96,50,' : 'rgba(255,230,170,'
@@ -275,7 +278,7 @@ function backdrop(ctx, t, rnd) {
   } else if (t.pattern === 'damask') {
     ctx.strokeStyle = ink + '0.07)'
     ctx.lineWidth = 0.8
-    for (let y = 10; y < BANNER_H; y += 26) {
+    for (let y = 10; y < FULL_H; y += 26) {
       for (let x = (y / 26) % 2 ? 13 : 0; x < BANNER_W; x += 26) {
         ctx.beginPath()
         for (let a = 0; a < 4; a++) {
@@ -313,11 +316,11 @@ function backdrop(ctx, t, rnd) {
   } else if (t.pattern === 'paper') {
     for (let i = 0; i < 2200; i++) {
       ctx.fillStyle = `rgba(110,90,50,${rnd() * 0.05})`
-      ctx.fillRect(rnd() * BANNER_W, rnd() * BANNER_H, 1, 1)
+      ctx.fillRect(rnd() * BANNER_W, rnd() * FULL_H, 1, 1)
     }
     for (let i = 0; i < 40; i++) {
       ctx.strokeStyle = `rgba(150,130,90,${0.04 + rnd() * 0.04})`
-      const x = rnd() * BANNER_W, y = rnd() * BANNER_H
+      const x = rnd() * BANNER_W, y = rnd() * FULL_H
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + rnd() * 10 - 5, y + rnd() * 3); ctx.stroke()
     }
   }
@@ -345,8 +348,8 @@ function frame(ctx, t) {
   ctx.restore()
 }
 
-function crest(ctx, t, mono, rnd) {
-  const cx = 78, cy = 62, r = 40
+/** The medallion: initials struck in metal, or their photo set inside the rim like a cameo. */
+function crest(ctx, t, mono, rnd, { cx = 78, cy = STAGE_H / 2 + 1, r = 40, photo = null, crop = null } = {}) {
   const c = METALS[t.metal]
   ctx.save()
   if (t.crest === 'peacock') {
@@ -388,7 +391,7 @@ function crest(ctx, t, mono, rnd) {
   ctx.shadowColor = t.light_bg ? 'rgba(90,70,30,0.35)' : 'rgba(0,0,0,0.6)'
   ctx.shadowBlur = 14
   ctx.shadowOffsetY = 5
-  if (t.crest === 'gem') {
+  if (t.crest === 'gem' && !photo) {
     // A cut sapphire: an octagon of facets, lit from the top left.
     const pts = Array.from({ length: 8 }, (_, i) => {
       const a = (i / 8) * Math.PI * 2 + Math.PI / 8
@@ -410,10 +413,12 @@ function crest(ctx, t, mono, rnd) {
     // A struck coin: rim, beads, a recessed field.
     const rim = ctx.createRadialGradient(cx - r * 0.4, cy - r * 0.5, 2, cx, cy, r)
     rim.addColorStop(0, c[0]); rim.addColorStop(0.55, c[2]); rim.addColorStop(1, c[3])
-    ctx.fillStyle = t.crest === 'seal' ? 'rgba(0,0,0,0)' : rim
+    ctx.fillStyle = t.crest === 'seal' && !photo ? 'rgba(0,0,0,0)' : rim
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill()
     ctx.shadowColor = 'transparent'
-    if (t.crest === 'seal') {
+    if (photo) {
+      cameo(ctx, photo, crop, cx, cy, r * 0.8)
+    } else if (t.crest === 'seal') {
       // Blind emboss: no ink, only light and shade pressed into the paper.
       ctx.lineWidth = 2.2
       ctx.strokeStyle = 'rgba(255,255,255,0.9)'
@@ -432,7 +437,7 @@ function crest(ctx, t, mono, rnd) {
       ctx.lineWidth = 1
       ctx.stroke()
     }
-    ctx.fillStyle = t.crest === 'seal' ? 'rgba(130,108,70,0.4)' : c[1]
+    ctx.fillStyle = t.crest === 'seal' && !photo ? 'rgba(130,108,70,0.4)' : c[1]
     for (let i = 0; i < 36; i++) {
       const a = (i / 36) * Math.PI * 2
       ctx.beginPath(); ctx.arc(cx + Math.cos(a) * r * 0.9, cy + Math.sin(a) * r * 0.9, 1, 0, Math.PI * 2); ctx.fill()
@@ -441,7 +446,9 @@ function crest(ctx, t, mono, rnd) {
   ctx.restore()
 
   const size = mono.length > 1 ? 30 : 36
-  if (t.crest === 'seal') {
+  if (photo) {
+    // no letters over a face
+  } else if (t.crest === 'seal') {
     // Pressed letters: shade above-left, light below-right.
     ctx.save()
     ctx.font = fontFor(t, size, mono)
@@ -454,6 +461,83 @@ function crest(ctx, t, mono, rnd) {
     metalText(ctx, t, mono, cx, cy + size * 0.36, size, { depth: 3, glint: 0.3, align: 'center' })
   }
   if (t.flare) sparkle(ctx, cx - r * 0.55, cy - r * 0.6, 9 + rnd() * 3, t.flare)
+}
+
+/**
+ * A photo inside a circle: it covers the circle, panned and zoomed as they set it (crop x/y in -1..1 of the
+ * room to move, zoom 1..4), with a shadow inside the rim and a curved glass highlight across the top.
+ */
+function cameo(ctx, img, crop, cx, cy, rr) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height
+  if (!w || !h) return
+  const zoom = crop?.zoom || 1
+  const k = ((2 * rr) / Math.min(w, h)) * zoom
+  const dw = w * k, dh = h * k
+  const left = cx - dw / 2 + (crop?.x || 0) * ((dw - 2 * rr) / 2)
+  const top = cy - dh / 2 + (crop?.y || 0) * ((dh - 2 * rr) / 2)
+  ctx.save()
+  ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.clip()
+  ctx.drawImage(img, left, top, dw, dh)
+  const inner = ctx.createRadialGradient(cx, cy, rr * 0.7, cx, cy, rr)
+  inner.addColorStop(0, 'rgba(0,0,0,0)')
+  inner.addColorStop(1, 'rgba(0,0,0,0.45)')
+  ctx.fillStyle = inner
+  ctx.fillRect(cx - rr, cy - rr, rr * 2, rr * 2)
+  const glass = ctx.createLinearGradient(0, cy - rr, 0, cy)
+  glass.addColorStop(0, 'rgba(255,255,255,0.32)')
+  glass.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = glass
+  ctx.beginPath(); ctx.ellipse(cx, cy - rr * 0.42, rr * 0.82, rr * 0.5, 0, Math.PI, 0); ctx.fill()
+  ctx.restore()
+  ctx.save()
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke()
+  ctx.restore()
+}
+
+/**
+ * A logo, kept in its own shape inside a box. On dark designs it sits on a small cream plaque with a metal
+ * edge, so dark logos still read; on paper it is printed straight on.
+ */
+function logoPlaque(ctx, t, img, x, y, maxW, maxH, { pad = 6 } = {}) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height
+  if (!w || !h) return 0
+  const k = Math.min((maxW - pad * 2) / w, (maxH - pad * 2) / h)
+  const dw = w * k, dh = h * k
+  const bw = dw + pad * 2, bh = dh + pad * 2
+  const by = y + (maxH - bh) / 2
+  ctx.save()
+  if (!t.light_bg) {
+    const c = METALS[t.metal]
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'
+    ctx.shadowBlur = 10
+    ctx.shadowOffsetY = 3
+    const edge = ctx.createLinearGradient(x, by, x, by + bh)
+    edge.addColorStop(0, c[0]); edge.addColorStop(0.5, c[2]); edge.addColorStop(1, c[3])
+    ctx.fillStyle = edge
+    roundRect(ctx, x - 1.5, by - 1.5, bw + 3, bh + 3, 7)
+    ctx.fill()
+    ctx.shadowColor = 'transparent'
+    const paper = ctx.createLinearGradient(x, by, x, by + bh)
+    paper.addColorStop(0, '#fffaf0'); paper.addColorStop(1, '#efe4cc')
+    ctx.fillStyle = paper
+    roundRect(ctx, x, by, bw, bh, 6)
+    ctx.fill()
+  }
+  ctx.drawImage(img, x + pad, by + pad, dw, dh)
+  ctx.restore()
+  return bw
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
 }
 
 function fitSize(ctx, t, text, max, from, min) {
@@ -479,7 +563,7 @@ function divider(ctx, t, x, y, w) {
 
 /** The floor: the lower part of the stage, mirrored and fading, with a gloss line where it meets. */
 function reflection(ctx, t, scale) {
-  const band = BANNER_H - STAGE_H
+  const band = FULL_H - STAGE_H
   const src = ctx.getImageData(0, (STAGE_H - band) * scale, BANNER_W * scale, band * scale)
   const tmp = document.createElement('canvas')
   tmp.width = BANNER_W * scale
@@ -488,7 +572,7 @@ function reflection(ctx, t, scale) {
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   // Cover the floor with the backdrop's lower tone, then lay the mirror on it.
-  const floor = ctx.createLinearGradient(0, STAGE_H * scale, 0, BANNER_H * scale)
+  const floor = ctx.createLinearGradient(0, STAGE_H * scale, 0, FULL_H * scale)
   floor.addColorStop(0, shade(t.bg[1], t.light_bg ? 0.985 : 1.25))
   floor.addColorStop(1, t.bg[1])
   ctx.fillStyle = floor
@@ -520,7 +604,7 @@ function reflection(ctx, t, scale) {
 /** The grade: a 256-step curve per channel (lift, gamma, gain), saturation, vignette and grain. */
 function grade(ctx, t, scale, rnd) {
   const { lift, gamma, gain, sat, vignette, grain } = t.grade
-  const w = BANNER_W * scale, h = BANNER_H * scale
+  const w = BANNER_W * scale, h = FULL_H * scale
   const img = ctx.getImageData(0, 0, w, h)
   const d = img.data
   const lut = [0, 1, 2].map((ch) => {
@@ -551,49 +635,146 @@ function grade(ctx, t, scale, rnd) {
   ctx.putImageData(img, 0, 0)
 }
 
+/** A line in engraved small capitals (designation), or in Tamil letters set plainly. Returns its width. */
+function capsLine(ctx, t, text, x, y, maxW, { from = 12, ink = t.titleInk, weight = 600 } = {}) {
+  const tamil = TAMIL.test(text)
+  const shown = tamil ? text : text.toUpperCase()
+  const font = (s) => (tamil ? `${weight} ${s}px "Noto Serif Tamil"` : `${weight} ${s}px "Cinzel"`) + ', Georgia, serif'
+  const spaced = 'letterSpacing' in ctx && !tamil // spacing would pull Tamil letters apart
+  ctx.save()
+  let s = from
+  for (; s > 8; s--) {
+    ctx.font = font(s)
+    if (spaced) ctx.letterSpacing = `${(s * 0.18).toFixed(1)}px`
+    if (ctx.measureText(shown).width <= maxW) break
+  }
+  ctx.font = font(s)
+  ctx.fillStyle = ink
+  ctx.shadowColor = t.light_bg ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)'
+  ctx.shadowOffsetY = t.light_bg ? 1 : 1.5
+  ctx.shadowBlur = t.light_bg ? 0 : 3
+  ctx.fillText(shown, x, y)
+  const w = ctx.measureText(shown).width
+  ctx.restore()
+  return w
+}
+
+/** The person's name under a company headline: an elegant italic in the light of the metal. */
+function serifLine(ctx, t, text, x, y, maxW) {
+  const tamil = TAMIL.test(text)
+  const font = (s) => (tamil ? `600 ${s}px "Noto Serif Tamil"` : `italic 600 ${s}px "Cormorant Garamond"`) + ', Georgia, serif'
+  ctx.save()
+  let s = 19
+  for (; s > 11; s--) {
+    ctx.font = font(s)
+    if (ctx.measureText(text).width <= maxW) break
+  }
+  ctx.font = font(s)
+  ctx.fillStyle = t.light_bg ? METALS[t.metal][3] : METALS[t.metal][0]
+  ctx.shadowColor = t.light_bg ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.65)'
+  ctx.shadowOffsetY = 1.5
+  ctx.shadowBlur = t.light_bg ? 0 : 3
+  ctx.fillText(text, x, y)
+  ctx.restore()
+}
+
+/** The upright gold rule between the photo and the details on the card layout. */
+function vRule(ctx, t, x, top, bottom) {
+  const c = METALS[t.metal]
+  ctx.save()
+  const g = ctx.createLinearGradient(0, top, 0, bottom)
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.2, c[1]); g.addColorStop(0.5, c[0]); g.addColorStop(0.8, c[1]); g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(x - 0.5, top, 1, bottom - top)
+  const m = (top + bottom) / 2
+  ctx.fillStyle = c[1]
+  ctx.beginPath(); ctx.moveTo(x, m - 4); ctx.lineTo(x + 4, m); ctx.lineTo(x, m + 4); ctx.lineTo(x - 4, m); ctx.fill()
+  ctx.restore()
+}
+
+export const LAYOUTS = [
+  { id: 'person', name: 'Person', blurb: 'Photo or initials, then your name, designation and company' },
+  { id: 'company', name: 'Company', blurb: 'Logo and company name first, then your name and designation' },
+  { id: 'card', name: 'Card', blurb: 'Photo, a gold rule, your details, and the logo on the right' },
+]
+
 /**
  * Draws one banner. `scale` 3 is the saved picture; previews use less. Returns the canvas.
- * Details: { name, title, company }.
+ * Details: { layout, name, title (designation), company, photoImg, photoCrop, logoImg }.
  */
 export function renderBanner(template, details, scale = 2, canvas = document.createElement('canvas')) {
   const t = typeof template === 'string' ? templateById(template) : template
-  const name = (details.name || '').trim() || 'Your Name'
-  const title = [details.title, details.company].map((s) => (s || '').trim()).filter(Boolean).join('  ·  ')
+  const layout = LAYOUTS.some((l) => l.id === details.layout) ? details.layout : 'person'
+  const trim = (s) => (s || '').trim()
+  const name = trim(details.name) || 'Your Name'
+  const title = trim(details.title)
+  const company = trim(details.company)
+  const photo = details.photoImg || null
+  const logo = details.logoImg || null
+  const crop = details.photoCrop || null
+
+  // What goes where in this layout.
+  let headline = name
+  const lines = []
+  if (layout === 'company') {
+    headline = company || name
+    if (company) lines.push({ kind: 'serif', text: name })
+    if (title) lines.push({ kind: 'caps', text: title })
+  } else {
+    if (title) lines.push({ kind: 'caps', text: title })
+    if (company || (logo && layout === 'person')) lines.push({ kind: 'company', text: company })
+  }
+
+  // The banner grows by a line's height when there are two lines under the headline.
+  STAGE_H = lines.length > 1 ? 142 : 122
+  FULL_H = STAGE_H + REFLECT_H
   canvas.width = BANNER_W * scale
-  canvas.height = BANNER_H * scale
+  canvas.height = FULL_H * scale
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   ctx.setTransform(scale, 0, 0, scale, 0, 0)
-  const rnd = seeded(hash(t.id + name))
+  const rnd = seeded(hash(t.id + name + company))
+  const midY = STAGE_H / 2 + 1
 
   backdrop(ctx, t, rnd)
   frame(ctx, t)
-  crest(ctx, t, initials(name), rnd)
 
-  const x = 146, maxW = BANNER_W - x - 22
-  const size = fitSize(ctx, t, name, maxW, 40, 20)
-  const nameY = title ? 62 : 74
-  const w = metalText(ctx, t, name, x, nameY, size, { depth: Math.max(3, Math.round(size / 7)), glint: 0.36 })
-  if (title) {
-    divider(ctx, t, x, nameY + 13, Math.min(maxW, Math.max(140, w)))
-    ctx.save()
-    const shown = TAMIL.test(title) ? title : title.toUpperCase()
-    const titleFont = (s) => (TAMIL.test(title) ? `600 ${s}px "Noto Serif Tamil"` : `600 ${s}px "Cinzel"`) + ', Georgia, serif'
-    const spaced = 'letterSpacing' in ctx && !TAMIL.test(title) // spacing would pull Tamil letters apart
-    let ts = 12
-    for (; ts > 8; ts--) {
-      ctx.font = titleFont(ts)
-      if (spaced) ctx.letterSpacing = `${(ts * 0.18).toFixed(1)}px`
-      if (ctx.measureText(shown).width <= maxW) break
+  let x = 146
+  let right = BANNER_W - 22
+  if (layout === 'company') {
+    if (logo) logoPlaque(ctx, t, logo, 22, midY - 44, 112, 88, { pad: 8 })
+    else crest(ctx, t, initials(headline), rnd, { cy: midY })
+    if (photo) {
+      crest(ctx, t, '', rnd, { cx: BANNER_W - 52, cy: midY, r: 28, photo, crop })
+      right = BANNER_W - 92
     }
-    ctx.font = titleFont(ts)
-    ctx.fillStyle = t.titleInk
-    ctx.shadowColor = t.light_bg ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)'
-    ctx.shadowOffsetY = t.light_bg ? 1 : 1.5
-    ctx.shadowBlur = t.light_bg ? 0 : 3
-    ctx.fillText(shown, x, nameY + 36)
-    ctx.restore()
+  } else if (layout === 'card') {
+    crest(ctx, t, initials(name), rnd, { cx: 72, cy: midY, photo, crop })
+    vRule(ctx, t, 132, 22, STAGE_H - 18)
+    x = 148
+    if (logo) {
+      logoPlaque(ctx, t, logo, BANNER_W - 22 - 84, midY - 34, 84, 68, { pad: 6 })
+      right = BANNER_W - 22 - 96
+    }
+  } else {
+    crest(ctx, t, initials(name), rnd, { cy: midY, photo, crop })
   }
-  if (t.flare) flare(ctx, Math.min(x + w - 6, BANNER_W - 40), nameY - size * 0.62, 120, t.flare)
+  const maxW = right - x
+
+  const size = fitSize(ctx, t, headline, maxW, layout === 'card' ? 34 : 40, 18)
+  const nameY = lines.length === 0 ? midY + size * 0.32 : lines.length === 1 ? 62 : 60
+  const w = metalText(ctx, t, headline, x, nameY, size, { depth: Math.max(3, Math.round(size / 7)), glint: 0.36 })
+  if (lines.length) divider(ctx, t, x, nameY + 13, Math.min(maxW, Math.max(140, w)))
+  lines.forEach((line, i) => {
+    const y = nameY + 36 + i * 22
+    if (line.kind === 'caps') capsLine(ctx, t, line.text, x, y, maxW)
+    else if (line.kind === 'serif') serifLine(ctx, t, line.text, x, y + 1, maxW)
+    else {
+      let lx = x
+      if (logo && layout === 'person') lx += logoPlaque(ctx, t, logo, x, y - 17, 84, 24, { pad: 3 }) + 9
+      if (line.text) capsLine(ctx, t, line.text, lx, y, right - lx, { from: 12, weight: 700, ink: t.light_bg ? METALS[t.metal][3] : METALS[t.metal][1] })
+    }
+  })
+  if (t.flare) flare(ctx, Math.min(x + w - 6, right - 18), nameY - size * 0.62, 120, t.flare)
 
   reflection(ctx, t, scale)
   ctx.setTransform(1, 0, 0, 1, 0, 0)

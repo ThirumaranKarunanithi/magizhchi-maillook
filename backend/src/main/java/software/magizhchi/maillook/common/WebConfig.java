@@ -50,8 +50,8 @@ public class WebConfig implements WebMvcConfigurer {
                 return true;
             }
         }).addPathPatterns("/api/**").excludePathPatterns("/api/auth/sso", "/api/health", "/api/hooks/meet", "/api/oauth/*/callback", "/api/suite/**",
-                // Signature pictures, loaded by whoever reads the mail; each address is a long random token.
-                "/api/sig/*",
+                // Signature pictures and icons, loaded by whoever reads the mail; each picture sits behind a long random token.
+                "/api/sig/**",
                 // Magizhchi Forms' server, sending a form's mail from its owner's mailbox: its shared secret guards it.
                 "/api/integration/forms/**");
     }

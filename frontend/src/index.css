@@ -219,13 +219,13 @@
   .royal-card.is-tilting { transition: transform 0.08s linear; }
   .royal-card:focus-visible { outline: 2px solid #e5b85a; outline-offset: 4px; }
   .royal-card-face {
-    position: relative; display: block; overflow: hidden; border-radius: 0.6rem; aspect-ratio: 520 / 170;
+    position: relative; display: block; overflow: hidden; border-radius: 0.6rem; min-height: 4rem;
     box-shadow: 0 18px 36px -14px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(214, 170, 80, 0.22);
     transition: box-shadow 0.35s;
     -webkit-box-reflect: below 3px linear-gradient(transparent 62%, rgba(255, 255, 255, 0.16));
   }
-  .royal-card-face img { display: block; width: 100%; height: 100%; object-fit: cover; }
-  .royal-card-wait { display: block; width: 100%; height: 100%; background: linear-gradient(90deg, #1f1810, #2c2214, #1f1810); background-size: 200% 100%; animation: royal-wait 1.4s linear infinite; }
+  .royal-card-face img { display: block; width: 100%; height: auto; }
+  .royal-card-wait { display: block; width: 100%; aspect-ratio: 520 / 170; background: linear-gradient(90deg, #1f1810, #2c2214, #1f1810); background-size: 200% 100%; animation: royal-wait 1.4s linear infinite; }
   @keyframes royal-wait { to { background-position: -200% 0; } }
   .royal-card-glare {
     position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.35s; mix-blend-mode: screen;
@@ -235,6 +235,20 @@
   .royal-card:hover .royal-card-face { box-shadow: 0 26px 48px -16px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(229, 184, 90, 0.55); }
   .royal-card.is-picked .royal-card-face { box-shadow: 0 26px 48px -16px rgba(0, 0, 0, 0.9), 0 0 0 2px #e5b85a, 0 0 28px rgba(229, 184, 90, 0.35); }
   .royal-card-label { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.7rem 0.15rem 0; font-size: 0.8rem; line-height: 1.3; transform: translateZ(18px); }
+  .royal-layouts { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .royal-layout {
+    display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.45rem 0.8rem 0.45rem 0.55rem; border-radius: 0.7rem;
+    color: #d9c08a; font-size: 0.8rem; font-weight: 600; border: 1px solid rgba(214, 170, 80, 0.28); background: rgba(255, 230, 170, 0.04);
+    transition: border-color 0.2s, background 0.2s, color 0.2s;
+  }
+  .royal-layout:hover { border-color: rgba(229, 184, 90, 0.7); }
+  .royal-layout.is-picked { color: #2a1b05; border-color: #e5b85a; background: linear-gradient(180deg, #fff3c9, #e9c46c 55%, #c99a3c); }
+  .royal-layout:focus-visible { outline: 2px solid #e5b85a; outline-offset: 3px; }
+  .photo-frame {
+    flex: none; border-radius: 9999px; background-repeat: no-repeat; cursor: grab; touch-action: none;
+    box-shadow: 0 0 0 3px #e9c46c, 0 0 0 4px #9c7424, 0 6px 16px rgba(0, 0, 0, 0.25);
+  }
+  .photo-frame:active { cursor: grabbing; }
   .royal-card-tick {
     position: absolute; top: -0.45rem; right: -0.45rem; display: inline-flex; align-items: center; justify-content: center;
     width: 1.5rem; height: 1.5rem; border-radius: 9999px; background: linear-gradient(135deg, #fff1c2, #c8962f); color: #2a1b05;
