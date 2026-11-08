@@ -14,6 +14,8 @@ import software.magizhchi.maillook.common.ApiException;
 import software.magizhchi.maillook.mail.LaneClassifier;
 import software.magizhchi.maillook.mail.MailSearch;
 import software.magizhchi.maillook.mail.MessageRepo;
+import software.magizhchi.maillook.account.AccountRepo;
+import software.magizhchi.maillook.mail.DraftRepo;
 import software.magizhchi.maillook.mail.Waiting;
 
 import java.nio.charset.StandardCharsets;
@@ -47,14 +49,19 @@ public class SuiteBrainController {
     private final JdbcTemplate jdbc;
     private final MessageRepo messages;
     private final Waiting waiting;
+    private final DraftRepo drafts;
+    private final AccountRepo accounts;
     private final String provisionSecret;
 
     public SuiteBrainController(SuiteDelegationVerifier verifier, JdbcTemplate jdbc, MessageRepo messages,
-                                Waiting waiting, @Value("${magizhchi.provision-secret:}") String provisionSecret) {
+                                Waiting waiting, DraftRepo drafts, AccountRepo accounts,
+                                @Value("${magizhchi.provision-secret:}") String provisionSecret) {
         this.verifier = verifier;
         this.jdbc = jdbc;
         this.messages = messages;
         this.waiting = waiting;
+        this.drafts = drafts;
+        this.accounts = accounts;
         this.provisionSecret = provisionSecret == null ? "" : provisionSecret;
     }
 
@@ -84,7 +91,19 @@ public class SuiteBrainController {
                                 "q", prop("string", "Search text, e.g. 'invoice from:priya'."),
                                 "unread", prop("boolean", "Only unread mail."),
                                 "limit", prop("integer", "How many to return, 1-15 (default 8).")),
-                        List.of())));
+                        List.of()),
+                tool("save_draft", "write",
+                        "Save an email as a draft in MailLook for the user to review and send themselves. Nothing is sent.",
+                        Map.of(
+                                "to", Map.of("type", "array", "items", Map.of("type", "string"),
+                                        "description", "Recipient email addresses."),
+                                "subject", prop("string", "Subject line."),
+                                "body", prop("string", "Plain-text body.")),
+                        List.of("to", "subject", "body")),
+                flag(tool("discard_draft", "write",
+                        "Delete a draft this assistant saved. Used by Undo.",
+                        Map.of("draftId", prop("integer", "The draft's id.")),
+                        List.of("draftId")), "hidden")));
         return out;
     }
 
@@ -108,6 +127,14 @@ public class SuiteBrainController {
             case "needs_reply" -> needsReply(userId);
             case "search_mail" -> searchMail(userId, input);
             case "person_timeline" -> personTimeline(userId, input);
+            case "save_draft" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield saveDraft(userId, input);
+            }
+            case "discard_draft" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield discardDraft(userId, input);
+            }
             default -> throw new ApiException(HttpStatus.NOT_FOUND, "Unknown tool: " + name);
         };
     }
@@ -171,6 +198,42 @@ public class SuiteBrainController {
             return m;
         }).toList();
         return Map.of("items", items);
+    }
+
+    /** Saves a draft for the person to review. This connector can never send mail. */
+    private Object saveDraft(long userId, Map<String, Object> input) {
+        List<String> to = new ArrayList<>();
+        if (input.get("to") instanceof List<?> list) {
+            for (Object o : list) {
+                String a = o == null ? "" : o.toString().trim();
+                if (a.contains("@") && a.length() < 200) to.add(a);
+            }
+        }
+        if (to.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "At least one valid recipient address is needed.");
+        String subject = input.get("subject") == null ? "" : input.get("subject").toString().trim();
+        String body = input.get("body") == null ? "" : input.get("body").toString();
+        if (body.length() > 20_000) throw new ApiException(HttpStatus.BAD_REQUEST, "That email is too long for a draft.");
+        var mailboxes = accounts.forUser(userId);
+        if (mailboxes.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Add a mailbox in MailLook first.");
+        long id = drafts.insert(userId, new DraftRepo.Draft(0, userId, mailboxes.get(0).id(), "new", null,
+                to, List.of(), List.of(), subject, body, null, null), Instant.now());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("draftId", id);
+        out.put("message", "Draft saved in MailLook. Open MailLook to review and send it.");
+        out.put("undo", Map.of("tool", "discard_draft", "input", Map.of("draftId", id)));
+        return out;
+    }
+
+    private Object discardDraft(long userId, Map<String, Object> input) {
+        long id;
+        try {
+            id = (long) Double.parseDouble(String.valueOf(input.get("draftId")));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "draftId is required.");
+        }
+        if (!drafts.delete(userId, id)) throw new ApiException(HttpStatus.NOT_FOUND, "That draft is already gone.");
+        return Map.of("ok", true, "message", "Draft discarded.");
     }
 
     private static Map<String, Object> brief(MessageRepo.Row r) {
