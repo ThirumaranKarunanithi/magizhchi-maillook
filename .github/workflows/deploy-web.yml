@@ -1,0 +1,64 @@
+# Builds the MailLook web app and uploads it to Hostinger (maillook.magizhchi.software).
+# Railway already redeploys the backend on every push; this does the same for the website.
+#
+# Needs these repository secrets (GitHub → Settings → Secrets and variables → Actions):
+#   HOSTINGER_FTP_HOST      the FTP host from hPanel → Files → FTP Accounts (e.g. ftp.magizhchi.software)
+#   HOSTINGER_FTP_USER      the FTP username
+#   HOSTINGER_FTP_PASSWORD  the FTP password
+#   HOSTINGER_FTP_DIR       the subdomain's folder as the FTP account sees it, ending in "/"
+#                           (e.g. /domains/magizhchi.software/public_html/maillook/ or /public_html/maillook/)
+# Until they are all set, the upload step is skipped and the build still runs as a check.
+name: Deploy web app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      HAS_FTP: ${{ secrets.HOSTINGER_FTP_HOST != '' && secrets.HOSTINGER_FTP_USER != '' && secrets.HOSTINGER_FTP_PASSWORD != '' && secrets.HOSTINGER_FTP_DIR != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (uses frontend/.env.production)
+        run: npm run build
+
+      - name: Check the build has the server rules
+        run: test -f dist/.htaccess && test -f dist/index.html
+
+      - name: Upload to Hostinger
+        if: env.HAS_FTP == 'true'
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.HOSTINGER_FTP_HOST }}
+          username: ${{ secrets.HOSTINGER_FTP_USER }}
+          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: frontend/dist/
+          server-dir: ${{ secrets.HOSTINGER_FTP_DIR }}
+
+      - name: Upload skipped
+        if: env.HAS_FTP != 'true'
+        run: echo "::notice::Built, but not uploaded. Add the HOSTINGER_FTP_* secrets to upload automatically."
