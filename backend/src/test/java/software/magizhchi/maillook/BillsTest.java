@@ -86,6 +86,14 @@ class BillsTest {
     @Autowired JdbcTemplate jdbc;
 
     @Test
+    void keepsRealPaymentPagesNotMailTrackers() {
+        assertThat(BillService.usablePayLink("https://www.actcorp.in/quick-pay")).isEqualTo("https://www.actcorp.in/quick-pay");
+        assertThat(BillService.usablePayLink("https://c.gle/ANiao5oAbc")).isNull();
+        assertThat(BillService.usablePayLink("https://click.mail.example.com/x")).isNull();
+        assertThat(BillService.usablePayLink("http://www.actcorp.in/pay")).isNull();
+    }
+
+    @Test
     void findsTheAccountNameInTheMail() {
         assertThat(BillService.accountNameIn("Bill Amount: Rs. 6010.92\nBill Category: Broadband\nAccount Name: alwarpuram\nDue Date: Nov 15, 2026")).isEqualTo("alwarpuram");
         assertThat(BillService.accountNameIn("Account Name\nalwarpuram\nDue Date")).isEqualTo("alwarpuram");

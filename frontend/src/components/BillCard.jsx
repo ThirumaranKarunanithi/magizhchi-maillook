@@ -167,6 +167,14 @@ export function PayNow({ bill, onPaid, busy, compact = false, onSetUp }) {
             <button type="button" className="text-emerald-700 hover:underline" onClick={() => { setAsked(false); setQr(false) }}>Not yet</button>
           </span>
         )}
+        {asked && onSetUp && (
+          <span className="text-xs text-slate-500">
+            Link didn’t work?{' '}
+            {bill.messageId && <button type="button" className="font-semibold text-peacock-700 hover:underline" onClick={() => navigate(`/?open=${bill.messageId}`)}>Pay from the mail</button>}
+            {bill.messageId && ' · '}
+            <button type="button" className="font-semibold text-peacock-700 hover:underline" onClick={onSetUp}>Change the link</button>
+          </span>
+        )}
       </div>
       {qr && upi && (
         <div className="mt-2 flex items-center gap-3 rounded-xl bg-slate-50 p-2 text-xs text-slate-600">

@@ -334,7 +334,8 @@ public class BillService {
                 }
             }
         }
-        String payLink = Optional.ofNullable(text(b, "payLink")).orElse(payLinkIn(m.bodyHtml()));
+        String payLink = usablePayLink(text(b, "payLink"));
+        if (payLink == null) payLink = payLinkIn(m.bodyHtml());
         String upi = Optional.ofNullable(text(b, "upiId")).orElse(upiIn(m.bodyHtml()));
         if (existing != null) {
             OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -492,6 +493,7 @@ public class BillService {
         for (Map<String, Object> o : jdbc.queryForList("SELECT vendor_key, pay_link, upi_id FROM bills WHERE user_id = ? AND id <> ? " +
                 "AND (pay_link IS NOT NULL OR upi_id IS NOT NULL) ORDER BY updated_at DESC, id DESC LIMIT 50", me.get(0).get("user_id"), billId)) {
             if (!first.equals(firstWord(str(o.get("vendor_key"))))) continue;
+            if (o.get("upi_id") == null && usablePayLink(str(o.get("pay_link"))) == null) continue;
             jdbc.update("UPDATE bills SET pay_link = ?, upi_id = ? WHERE id = ?", o.get("pay_link"), o.get("upi_id"), billId);
             return true;
         }
@@ -534,13 +536,34 @@ public class BillService {
             "upi://pay\\?[^\"'\\s>]*?\\bpa=([A-Za-z0-9._-]{2,64}(?:@|%40)[A-Za-z][A-Za-z0-9.-]{1,32})", Pattern.CASE_INSENSITIVE);
 
     /** The mail's own "Pay now" button, when it has one that goes to an https page. */
+    /**
+     * Mail tracking redirects ({@code c.gle}, {@code links.*}, {@code click.*} …) stand in for the real
+     * page and go stale or only work inside the app that sent them; they are not the biller's payment
+     * page, so they are not kept.
+     */
+    private static final Pattern TRACKER_HOST = Pattern.compile(
+            "(^|\\.)(c\\.gle|goo\\.gl|g\\.co|bit\\.ly|t\\.co|tinyurl\\.com|lnkd\\.in|sendgrid\\.net|mandrillapp\\.com|list-manage\\.com|"
+                    + "mailchimp\\.com|rs6\\.net|ct\\.sendgrid\\.net|amazonses\\.com|awstrack\\.me|hubspotlinks\\.com|mjt\\.lu)$"
+                    + "|^(click|clicks|links?|track|tracking|email|e|em|url\\d*|t)\\.", Pattern.CASE_INSENSITIVE);
+
+    /** An https link that leads to a real page, not a mail tracker's redirect; else null. */
+    public static String usablePayLink(String link) {
+        if (link == null || !link.startsWith("https://") || link.length() > 1000) return null;
+        try {
+            String host = java.net.URI.create(link).getHost();
+            return host == null || TRACKER_HOST.matcher(host).find() ? null : link;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     static String payLinkIn(String html) {
         if (html == null || html.isBlank()) return null;
         Matcher m = ANCHOR.matcher(html.length() > 400_000 ? html.substring(0, 400_000) : html);
         while (m.find()) {
             String href = m.group(2).replace("&amp;", "&").trim();
             String label = m.group(3).replaceAll("<[^>]+>", " ").replace("&nbsp;", " ").replaceAll("\\s+", " ").trim();
-            if (label.isEmpty() || label.length() > 40 || !href.startsWith("https://") || href.length() > 1000) continue;
+            if (label.isEmpty() || label.length() > 40 || usablePayLink(href) == null) continue;
             if (PAY_WORDS.matcher(label).find() && !NOT_PAY.matcher(label).find()) return href;
         }
         return null;
