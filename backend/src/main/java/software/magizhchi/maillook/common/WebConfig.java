@@ -49,6 +49,8 @@ public class WebConfig implements WebMvcConfigurer {
                 req.setAttribute("userId", userId);
                 return true;
             }
-        }).addPathPatterns("/api/**").excludePathPatterns("/api/auth/sso", "/api/health", "/api/hooks/meet", "/api/oauth/*/callback", "/api/suite/**");
+        }).addPathPatterns("/api/**").excludePathPatterns("/api/auth/sso", "/api/health", "/api/hooks/meet", "/api/oauth/*/callback", "/api/suite/**",
+                // Magizhchi Forms' server, sending a form's mail from its owner's mailbox: its shared secret guards it.
+                "/api/integration/forms/**");
     }
 }

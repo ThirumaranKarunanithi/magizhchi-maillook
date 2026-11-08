@@ -18,6 +18,7 @@ import PersonCard from './PersonCard.jsx'
 import InviteCard from './InviteCard.jsx'
 import BillCard from './BillCard.jsx'
 import WaitingCard from './WaitingCard.jsx'
+import { FormsFilled, FormsMenu, SentFormStrip } from './FormsBits.jsx'
 import { QuickReplies, Translate } from './MailExtras.jsx'
 import { whenLabel } from '../when.js'
 import { AccountDot } from './Sidebar.jsx'
@@ -201,6 +202,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
         </button>
         <PaMenu message={detail} />
         <MeetMenu message={detail} onStarted={() => setMeetKey((k) => k + 1)} />
+        <FormsMenu message={detail} />
         {detail.canUnsubscribe && (
           <button className="btn-ghost" onClick={unsubscribe} disabled={unsub?.busy} title="Unsubscribe from this sender">
             {unsub?.busy ? <span className="spinner" /> : <IconUnsub size={17} />}<span className="hidden sm:inline">Unsubscribe</span>
@@ -249,6 +251,8 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
         <InviteCard key={`inv-${detail.id}`} message={detail} />
         <BillCard key={`bill-${detail.id}`} message={detail} />
         {detail.folder !== 'SENT' && <PersonCard email={detail.fromEmail} name={detail.fromName} />}
+        {detail.folder !== 'SENT' && <FormsFilled email={detail.fromEmail} />}
+        <SentFormStrip message={detail} />
         <WaitingCard key={`wt-${detail.id}`} message={detail} />
         <FollowUpCard message={detail} />
         <NoteCard message={detail} open={noteOpen} onClose={() => setNoteOpen(false)}

@@ -12,7 +12,7 @@ import { useInstall } from '../install.js'
 import { ANDROID_APK_URL, onAndroidBrowser } from './GetAppsCard.jsx'
 import {
   IconAlert, IconArchive, IconBook, IconCalendar, IconChevron, IconClock, IconCompose, IconDraft, IconFolder, IconHand, IconInbox, IconInfo,
-  IconInstall, IconLogout, IconReceipt, IconNews, IconPaperclip, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
+  IconInstall, IconLogout, IconForm, IconReceipt, IconNews, IconPaperclip, IconRefresh, IconSend, IconSettings, IconSnooze, IconSpam, IconSparkle, IconTrash,
 } from './Icons.jsx'
 
 /** Bills, with how many are overdue or due this week. Hidden when the server has no Magizhchi Data. */
@@ -30,6 +30,24 @@ function BillsNav({ active, onGo }) {
       <IconReceipt size={17} className="text-slate-500" />
       <span>Bills</span>
       {c.dueSoon > 0 && <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800 num" title="Overdue or due in the next 7 days">{c.dueSoon}</span>}
+    </button>
+  )
+}
+
+function FormsNav({ active, onGo }) {
+  const location = useLocation()
+  const [c, setC] = useState(null)
+  useEffect(() => {
+    let live = true
+    get('/api/forms/count').then((r) => live && setC(r)).catch(() => {})
+    return () => { live = false }
+  }, [location.pathname])
+  if (!c?.configured || c.linked === false) return null
+  return (
+    <button className={`nav-item ${active ? 'active' : ''}`} onClick={onGo}>
+      <IconForm size={17} className="text-slate-500" />
+      <span>Forms</span>
+      {c.approvals > 0 && <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800 num" title="Approvals waiting on you">{c.approvals}</span>}
     </button>
   )
 }
@@ -284,6 +302,7 @@ export default function Sidebar({ onNavigate }) {
           <span>Files</span>
         </button>
         <BillsNav active={location.pathname === '/bills'} onGo={() => go('/bills')} />
+        <FormsNav active={location.pathname === '/forms'} onGo={() => go('/forms')} />
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>
           <IconNews size={17} className="text-slate-500" />
           <span>Subscriptions</span>

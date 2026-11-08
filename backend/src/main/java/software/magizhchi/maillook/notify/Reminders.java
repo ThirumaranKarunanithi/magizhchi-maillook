@@ -49,6 +49,14 @@ public class Reminders {
         this.push = push;
     }
 
+    private software.magizhchi.maillook.forms.FormsWatch formsWatch;
+
+    /** The Forms line of the briefing ("Forms: 12 new responses · 3 approvals waiting"). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setFormsWatch(software.magizhchi.maillook.forms.FormsWatch formsWatch) {
+        this.formsWatch = formsWatch;
+    }
+
     @Scheduled(initialDelay = 30_000, fixedDelay = 60_000)
     public void onTimer() {
         try {
@@ -128,6 +136,11 @@ public class Reminders {
                 if (waits > 0) body += " · you're waiting on " + waits + (waits == 1 ? " reply" : " replies");
                 String billLine = bills.briefingLine(userId, local.toLocalDate());
                 if (billLine != null) body += " · " + billLine;
+                if (formsWatch != null) {
+                    String email = jdbc.queryForObject("SELECT email FROM users WHERE id = ?", String.class, userId);
+                    String formsLine = formsWatch.briefingLine(userId, email, u.get("tz").toString(), now);
+                    if (formsLine != null) body += " · " + formsLine;
+                }
                 push.reminder(userId, "Your morning briefing", body + ". Tap for today's plan.", "/today", "maillook-briefing");
                 sent++;
             } catch (Exception e) {

@@ -298,12 +298,34 @@ public class MailActions {
     // ── send ──────────────────────────────────────────────────────
 
     /** {@code inviteCardId}: a Meet room booked from this mailbox; the mail then carries its calendar invite. */
+    /** {@code form}: a Magizhchi Forms form or poll to put in the mail (see forms.FormMail); each person then gets their own copy. */
     public record Outgoing(long accountId, List<String> to, List<String> cc, List<String> bcc,
-                           String subject, String text, Long replyToMessageId, String inviteCardId) {
+                           String subject, String text, Long replyToMessageId, String inviteCardId,
+                           com.fasterxml.jackson.databind.JsonNode form) {
+        public Outgoing(long accountId, List<String> to, List<String> cc, List<String> bcc,
+                        String subject, String text, Long replyToMessageId, String inviteCardId) {
+            this(accountId, to, cc, bcc, subject, text, replyToMessageId, inviteCardId, null);
+        }
+
         public Outgoing(long accountId, List<String> to, List<String> cc, List<String> bcc,
                         String subject, String text, Long replyToMessageId) {
-            this(accountId, to, cc, bcc, subject, text, replyToMessageId, null);
+            this(accountId, to, cc, bcc, subject, text, replyToMessageId, null, null);
         }
+
+        public boolean hasForm() {
+            return form != null && form.isObject() && form.hasNonNull("formId");
+        }
+    }
+
+    /** Sends mail that carries a form, one copy per person (forms.FormMail). Set by that bean. */
+    public interface FormSender {
+        MessageRepo.Row send(long userId, Outgoing o, List<OutFile> files);
+    }
+
+    private FormSender formSender;
+
+    public void formSender(FormSender s) {
+        this.formSender = s;
     }
 
     public MessageRepo.Row send(long userId, Outgoing o, List<MultipartFile> files) {
@@ -320,6 +342,12 @@ public class MailActions {
     }
 
     public MessageRepo.Row deliver(long userId, Outgoing o, List<OutFile> files) {
+        if (o.hasForm() && formSender != null) return formSender.send(userId, o, files);
+        return deliver(userId, o, files, null);
+    }
+
+    /** {@code html}: an HTML version of the mail to go with its plain text (null for plain text only). */
+    public MessageRepo.Row deliver(long userId, Outgoing o, List<OutFile> files, String html) {
         Account a = accounts.find(o.accountId()).filter(x -> x.userId() == userId)
                 .orElseThrow(() -> ApiException.notFound("Account"));
         if ((o.to() == null || o.to().isEmpty()) && (o.cc() == null || o.cc().isEmpty()) && (o.bcc() == null || o.bcc().isEmpty())) {
@@ -332,13 +360,15 @@ public class MailActions {
             var session = imap.smtpSession(a);
             MimeMessage msg = new MimeMessage(session);
             boolean multipart = files != null && !files.isEmpty();
-            MimeMessageHelper h = new MimeMessageHelper(msg, multipart && booking == null, "UTF-8");
+            boolean withHtml = html != null && booking == null;
+            MimeMessageHelper h = new MimeMessageHelper(msg, (multipart || withHtml) && booking == null, "UTF-8");
             h.setFrom(new InternetAddress(a.email(), a.displayName() == null ? a.email() : a.displayName(), "UTF-8"));
             h.setTo(addrs(o.to()));
             if (o.cc() != null && !o.cc().isEmpty()) h.setCc(addrs(o.cc()));
             if (o.bcc() != null && !o.bcc().isEmpty()) h.setBcc(addrs(o.bcc()));
             h.setSubject(o.subject() == null ? "" : o.subject());
-            h.setText(o.text() == null ? "" : o.text(), false);
+            if (withHtml) h.setText(o.text() == null ? "" : o.text(), html);
+            else h.setText(o.text() == null ? "" : o.text(), false);
             h.setSentDate(new Date());
             if (booking != null) {
                 List<String> people = new ArrayList<>(MeetInvites.addresses(nn(o.to())));
@@ -364,7 +394,7 @@ public class MailActions {
             String threadKey = original != null ? original.threadKey() : SyncService.threadKey(messageId, null, null, o.subject());
             MessageRepo.NewMessage row = new MessageRepo.NewMessage(a.id(), "SENT", uid, messageId, threadKey,
                     a.displayName(), a.email().toLowerCase(Locale.ROOT), nn(o.to()), nn(o.cc()), o.subject(),
-                    MessageParser.snippet(o.text()), o.text(), null, attachmentMeta(files),
+                    MessageParser.snippet(o.text()), o.text(), withHtml ? html : null, attachmentMeta(files),
                     OffsetDateTime.now(ZoneOffset.UTC), true, false, null, null, null, false);
             Long id = messages.insert(row);
             if (original != null && "INBOX".equals(original.folder()) && !original.seen()) messages.setSeen(original.id(), true);

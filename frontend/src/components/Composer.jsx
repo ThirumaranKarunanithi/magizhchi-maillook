@@ -4,6 +4,7 @@ import { API_BASE, del, getToken, postForm, put } from '../api.js'
 import { clearBackup, writeBackup } from '../backup.js'
 import { useMail } from '../state.jsx'
 import { bodyAsText, EMAIL_RE, formatSize, fullDate, signatureBlock, splitAddresses } from '../util.js'
+import { FormButton, FormChip } from './FormsBits.jsx'
 import { IconAlert, IconBell, IconCalendar, IconChevron, IconClock, IconPaperclip, IconPlus, IconSend, IconTrash, IconX } from './Icons.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import ComposerAi from './ComposerAi.jsx'
@@ -236,6 +237,8 @@ export default function Composer() {
   const [showCc, setShowCc] = useState(init.cc.length > 0 || init.bcc.length > 0)
   const [subject, setSubject] = useState(init.subject)
   const [invite, setInvite] = useState(init.invite)
+  // A Magizhchi Forms form or poll going with this mail (each person then gets their own copy and link).
+  const [formCard, setFormCard] = useState(composer.form || null)
   const [text, setText] = useState(init.text)
   const [files, setFiles] = useState([]) // picked here, not yet kept with the draft
   const [kept, setKept] = useState(composer.draft?.files || []) // kept with the draft on the server
@@ -458,6 +461,7 @@ export default function Composer() {
       subject, text,
       ...(init.replyToMessageId ? { replyToMessageId: init.replyToMessageId } : {}),
       ...(invite ? { inviteCardId: invite.cardId } : {}),
+      ...(formCard ? { form: formCard } : {}),
       ...(remind ? { remindAt: followUpAt(remind, opts.sendAt || new Date()).toISOString() } : {}),
       mode: composer.mode || 'new',
       // It waits on the server: for the undo window, or until the chosen time.
@@ -608,6 +612,8 @@ export default function Composer() {
           </div>
         )}
 
+        {formCard && <FormChip form={formCard} onRemove={() => setFormCard(null)} />}
+
         {(files.length > 0 || kept.length > 0) && (
           <div className="flex flex-wrap gap-1.5 border-t border-slate-100 px-4 py-2">
             {kept.map((f) => (
@@ -659,6 +665,7 @@ export default function Composer() {
           <button className="btn-ghost" onClick={() => fileInput.current?.click()} disabled={sending} title="Attach files">
             <IconPaperclip size={16} /> Attach
           </button>
+          <FormButton onPick={setFormCard} disabled={sending} />
           <label className={`btn-ghost !px-1.5 ${remind ? '!text-brand-primary' : ''}`} title="If nobody replies by then, the mail comes back to Needs me">
             <IconBell size={15} />
             <select className="max-w-[9.5rem] bg-transparent text-sm outline-none" value={remind} onChange={(e) => setRemind(e.target.value)} aria-label="Remind me if nobody replies">

@@ -89,6 +89,12 @@ magizhchi:
       # The secret must match MAILLOOK_INTEGRATION_SECRET on Data. Blank hides Bills.
       api: ${MAGIZHCHI_DATA_URL:}
       secret: ${MAGIZHCHI_DATA_SECRET:}
+    forms:
+      # Magizhchi Forms: approvals and new responses in the inbox, forms and polls sent from Compose.
+      # The secret must match MAILLOOK_INTEGRATION_SECRET on Forms. Blank hides Forms.
+      api: ${MAGIZHCHI_FORMS_URL:}
+      web: ${MAGIZHCHI_FORMS_WEB:https://forms.magizhchi.software}
+      secret: ${MAGIZHCHI_FORMS_SECRET:}
 
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:5177,http://localhost:4173}
