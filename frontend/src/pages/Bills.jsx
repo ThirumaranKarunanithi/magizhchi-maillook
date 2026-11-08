@@ -5,6 +5,7 @@ import { useMail } from '../state.jsx'
 import { DATA_WEB, TONE_CLASS, daysLeft, dueLabel, dueTone, groupBills, inrNote, money, shortDay, totalInr, unsure, upiLink } from '../bills.js'
 import { safeHttpUrl } from '../util.js'
 import { BillEditor, BillFacts, PayNow } from '../components/BillCard.jsx'
+import BillsSummary from './BillsSummary.jsx'
 import { IconAlert, IconCheck, IconChevron, IconMenu, IconReceipt } from '../components/Icons.jsx'
 
 const GROUPS = [
@@ -23,6 +24,7 @@ export default function Bills() {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const openId = Number(params.get('open')) || null
+  const [view, setView] = useState(params.get('view') === 'month' ? 'month' : 'bills')
 
   const loadSetup = useCallback(() => get('/api/bills/setup').then(setSetup).catch((e) => setError(e.message)), [])
   const loadBills = useCallback(() => get('/api/bills').then(setData).catch((e) => setError(e.message)), [])
@@ -53,6 +55,14 @@ export default function Bills() {
           <h1 className="truncate text-base font-bold leading-tight">Bills</h1>
           <p className="truncate text-xs text-slate-500">Found in your mail and read by Magizhchi Data</p>
         </div>
+        {setup?.on && (
+          <div className="flex shrink-0 rounded-lg bg-slate-100 p-0.5 text-sm font-semibold" role="tablist" aria-label="Bills view">
+            {[['bills', 'Bills'], ['month', 'Month']].map(([k, label]) => (
+              <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)}
+                className={`rounded-md px-3 py-1 ${view === k ? 'bg-white text-brand-ink shadow-sm' : 'text-slate-500 hover:text-brand-ink'}`}>{label}</button>
+            ))}
+          </div>
+        )}
       </header>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-4 max-md:pb-24 sm:px-5">
@@ -61,6 +71,7 @@ export default function Bills() {
           {!setup ? <p className="py-10 text-center text-sm text-slate-500"><span className="spinner" /> Loading…</p>
             : !setup.configured ? <p className="card p-4 text-sm text-slate-600">Bills aren’t set up on this server yet.</p>
               : !setup.on ? <TurnOn setup={setup} onOn={(s) => { setSetup(s); loadBills() }} />
+                : view === 'month' ? <BillsSummary />
                 : (
                   <>
                     <Waiting setup={setup} onRetry={async () => {

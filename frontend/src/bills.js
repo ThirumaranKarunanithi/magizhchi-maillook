@@ -102,3 +102,19 @@ export function upiLink(b) {
 
 /** On a phone a UPI link opens the payment apps; on a computer it is shown as a QR code to scan. */
 export const onPhone = () => typeof navigator !== 'undefined' && /Android|iPhone|iPad|MagizhchiMailLookApp/i.test(navigator.userAgent)
+
+/** Kinds of spending, as the summary and the editor name them. */
+export const CATEGORY_LABEL = {
+  internet: 'Internet',
+  phone: 'Phone',
+  power: 'Electricity',
+  utilities: 'Gas and water',
+  software: 'Software and cloud',
+  insurance: 'Insurance',
+  education: 'Education',
+  home: 'Rent and home',
+  tax: 'Tax',
+  entertainment: 'Entertainment',
+  shopping: 'Shopping',
+  other: 'Other',
+}

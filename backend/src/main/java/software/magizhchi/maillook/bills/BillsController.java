@@ -178,6 +178,12 @@ public class BillsController {
             args.add(u == null ? null : BillService.upiId(u));
             payWay = true;
         }
+        if (body.containsKey("category")) {
+            String c = trimmed(body.get("category"), 20);
+            if (c != null && !BillSummary.CATEGORIES.contains(c)) throw ApiException.bad("Unknown kind of spending: " + c);
+            sets.add("category = ?");
+            args.add(c);
+        }
         if (body.containsKey("accountName")) { sets.add("account_name = ?"); args.add(trimmed(body.get("accountName"), 100)); }
         if (body.containsKey("invoiceNo")) { sets.add("invoice_no = ?"); args.add(trimmed(body.get("invoiceNo"), 100)); }
         if (body.containsKey("dueDate")) { sets.add("due_date = ?"); args.add(dateOrNull(body.get("dueDate"))); sets.add("remind_before_sent = FALSE"); sets.add("remind_day_sent = FALSE"); }
@@ -281,6 +287,7 @@ public class BillsController {
         m.put("messageId", r.get("message_id"));
         m.put("kind", r.get("kind"));
         m.put("vendor", r.get("vendor"));
+        m.put("category", r.get("category") != null ? r.get("category") : BillSummary.guess(Objects.toString(r.get("vendor"), null)));
         m.put("vendorGstin", r.get("vendor_gstin"));
         m.put("invoiceNo", r.get("invoice_no"));
         m.put("invoiceDate", day(r.get("invoice_date")));

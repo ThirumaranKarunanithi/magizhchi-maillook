@@ -127,6 +127,58 @@ class BillsTest {
     }
 
     @Test
+    void summarisesTheMonthAndPacksItForTheAccountant() throws Exception {
+        String token = call(post("/api/auth/sso").contentType(MediaType.APPLICATION_JSON).content(
+                "{\"idToken\":\"" + TestIds.idToken("2b7c1f0e-3333-4d3a-8b44-000000000034", "summary@magizhchi.test", "Summary") + "\"}"), null, 200).path("token").asText();
+        long userId = jdbc.queryForObject("SELECT id FROM users WHERE email = 'summary@magizhchi.test'", Long.class);
+        LocalDate today = LocalDate.now(INDIA);
+        String sql = "INSERT INTO bills (user_id, kind, vendor, vendor_key, vendor_gstin, invoice_no, invoice_date, amount, currency, cgst, sgst, status) " +
+                "VALUES (?, 'bill', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'due')";
+        jdbc.update(sql, userId, "ACT Fibernet", "act fibernet", null, null, today, 6010.92, "INR", null, null);
+        jdbc.update(sql, userId, "Railway", "railway", null, "in_1", today, 20, "USD", null, null);
+        jdbc.update(sql, userId, "Hostinger, Inc.", "hostinger inc", "27AAACH1234B1Z5", "=HST-1", today, 3540, "INR", 270, 270);
+        jdbc.update(sql, userId, "ACT Fibernet", "act fibernet", null, null, today.minusMonths(1), 4500, "INR", null, null);
+
+        JsonNode sum = call(get("/api/bills/summary?month=" + YearMonth.from(today)), token, 200);
+        assertThat(sum.path("count").asInt()).isEqualTo(3);
+        assertThat(sum.path("total").decimalValue()).isEqualByComparingTo("11429.32");   // 6010.92 + 20 × 93.92 + 3540
+        assertThat(sum.path("previousTotal").decimalValue()).isEqualByComparingTo("4500");
+        assertThat(sum.path("byCategory").get(0).path("category").asText()).isEqualTo("internet");
+        assertThat(sum.path("byCategory").get(1).path("category").asText()).isEqualTo("software");
+        assertThat(sum.path("byCategory").get(1).path("total").decimalValue()).isEqualByComparingTo("5418.40");
+        assertThat(sum.path("gst").path("bills").asInt()).isEqualTo(1);
+        assertThat(sum.path("gst").path("total").decimalValue()).isEqualByComparingTo("540");
+        assertThat(sum.path("trend")).hasSize(6);
+        call(get("/api/bills/summary?month=November"), token, 400);
+
+        // The person moves Railway to "other": the month follows.
+        long railway = jdbc.queryForObject("SELECT id FROM bills WHERE user_id = ? AND vendor_key = 'railway'", Long.class, userId);
+        assertThat(call(patch("/api/bills/" + railway).contentType(MediaType.APPLICATION_JSON).content("{\"category\":\"other\"}"), token, 200)
+                .path("category").asText()).isEqualTo("other");
+        call(patch("/api/bills/" + railway).contentType(MediaType.APPLICATION_JSON).content("{\"category\":\"rockets\"}"), token, 400);
+        JsonNode moved = call(get("/api/bills/summary"), token, 200).path("byCategory");
+        assertThat(moved.get(1).path("category").asText()).isEqualTo("software");
+        assertThat(moved.get(1).path("total").decimalValue()).isEqualByComparingTo("3540");
+        assertThat(moved.get(2).path("category").asText()).isEqualTo("other");
+
+        // The GST pack: a spreadsheet of the month, safe to open in Excel.
+        var res = mvc.perform(get("/api/bills/gst-pack?month=" + YearMonth.from(today)).header("Authorization", "Bearer " + token)).andReturn().getResponse();
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getHeader("Content-Disposition")).contains("bills-" + YearMonth.from(today) + ".zip");
+        String csv = null;
+        try (var zip = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(res.getContentAsByteArray()))) {
+            for (var e = zip.getNextEntry(); e != null; e = zip.getNextEntry()) {
+                if (e.getName().endsWith(".csv")) csv = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        }
+        assertThat(csv).startsWith("﻿Invoice date,Vendor,Vendor GSTIN");
+        assertThat(csv).contains("\"Hostinger, Inc.\",27AAACH1234B1Z5,'=HST-1,").contains(",3000.00,270.00,270.00,");
+        assertThat(csv).contains("Railway,,in_1,,other,USD,20.00,1878.40,");
+        assertThat(csv.lines().count()).isEqualTo(4);
+        call(get("/api/bills/gst-pack?month=2001-01"), token, 404);
+    }
+
+    @Test
     void readsBankAndUpiAlerts() {
         PaymentAlert upi = PaymentAlert.parse("Debit Alert From SIB",
                 "Rs.6,010.92 debited from A/c XX1234 on 08-11-26 to VPA actfibernet@ybl (UPI Ref No 6123). Avl Bal Rs.20,000");

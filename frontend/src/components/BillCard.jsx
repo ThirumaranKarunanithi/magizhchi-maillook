@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { get, patch, post } from '../api.js'
 import { useMail } from '../state.jsx'
 import { safeHttpUrl } from '../util.js'
-import { DATA_WEB, TONE_CLASS, dueLabel, dueTone, inrNote, money, onPhone, unsure, upiLink } from '../bills.js'
+import { CATEGORY_LABEL, DATA_WEB, TONE_CLASS, dueLabel, dueTone, inrNote, money, onPhone, unsure, upiLink } from '../bills.js'
 import { native, openOutside } from '../native.js'
 import { IconAlert, IconCheck, IconReceipt } from './Icons.jsx'
 
@@ -19,6 +19,7 @@ export function BillEditor({ bill, onSaved, onCancel }) {
     dueDate: bill.dueDate || '',
     invoiceNo: bill.invoiceNo || '',
     accountName: bill.accountName || '',
+    category: bill.category || 'other',
     payLink: bill.payLink || '',
     upiId: bill.upiId || '',
     autopay: !!bill.autopay,
@@ -57,6 +58,11 @@ export function BillEditor({ bill, onSaved, onCancel }) {
       </label>
       <label className="font-semibold text-slate-600">Account name
         <input className={`${input} ${flag('accountName')}`} value={f.accountName} onChange={set('accountName')} maxLength={100} placeholder="e.g. Home" />
+      </label>
+      <label className="col-span-2 font-semibold text-slate-600">Kind of spending
+        <select className={`${input} border-slate-200`} value={f.category} onChange={set('category')}>
+          {Object.entries(CATEGORY_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
       </label>
       <label className="col-span-2 font-semibold text-slate-600">Pay link <span className="font-normal text-slate-400">(the biller’s payment page)</span>
         <input className={`${input} border-slate-200`} value={f.payLink} onChange={set('payLink')} type="url" pattern="https://.*" placeholder="https://…" maxLength={1000} />
