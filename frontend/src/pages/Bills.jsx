@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { get, patch, post, put } from '../api.js'
 import { useMail } from '../state.jsx'
-import { DATA_WEB, TONE_CLASS, dueLabel, dueTone, groupBills, inrNote, money, totalInr, unsure, upiLink } from '../bills.js'
+import { DATA_WEB, TONE_CLASS, daysLeft, dueLabel, dueTone, groupBills, inrNote, money, shortDay, totalInr, unsure, upiLink } from '../bills.js'
 import { safeHttpUrl } from '../util.js'
 import { BillEditor, BillFacts, PayNow } from '../components/BillCard.jsx'
 import { IconAlert, IconCheck, IconChevron, IconMenu, IconReceipt } from '../components/Icons.jsx'
@@ -40,7 +40,8 @@ export default function Bills() {
     return () => clearInterval(t)
   }, [queued, loadSetup, loadBills])
 
-  const replace = (b) => setData((d) => ({ ...d, bills: d.bills.map((x) => (x.id === b.id ? b : x)) }))
+  // A bill saved by the editor comes back without its "above usual" mark: keep it while the amount is the same.
+  const replace = (b) => setData((d) => ({ ...d, bills: d.bills.map((x) => (x.id === b.id ? { ...b, jump: b.jump ?? (Number(b.amount) === Number(x.amount) ? x.jump : undefined) } : x)) }))
   const remove = (id) => setData((d) => ({ ...d, bills: d.bills.filter((x) => x.id !== id) }))
 
   return (
@@ -207,6 +208,12 @@ function BillList({ data, openId, onChange, onRemove }) {
         <Stat label="Next 7 days" n={groups.week.length} total={totalInr(groups.week)} tone={groups.week.length ? 'text-amber-700' : 'text-slate-400'} />
         <Stat label={new Date(`${thisMonth}-01T00:00:00`).toLocaleDateString([], { month: 'long' })} n={monthBills.length} total={totalInr(monthBills)} tone="text-brand-ink" />
       </div>
+      {(data.regular || []).filter((r) => r.late).map((r) => (
+        <p key={r.key} className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
+          <IconAlert size={15} className="mt-0.5 shrink-0" />
+          <span><b>No {r.vendor}{r.account ? ` · ${r.account}` : ''} bill yet.</b> {usually(r)} Check it wasn’t missed, or look on {r.vendor}’s site.</span>
+        </p>
+      ))}
       {GROUPS.map(({ key, title }) => groups[key].length > 0 && (
         <section key={key} aria-label={title}>
           <h2 className="mb-1.5 flex items-baseline gap-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -217,7 +224,50 @@ function BillList({ data, openId, onChange, onRemove }) {
           </div>
         </section>
       ))}
+      {(data.regular || []).length > 0 && <RegularBills list={data.regular} today={today} />}
     </>
+  )
+}
+
+const EVERY = { month: 'Every month', quarter: 'Every 3 months', year: 'Every year' }
+
+function ordinal(d) {
+  return d + (d >= 11 && d <= 13 ? 'th' : { 1: 'st', 2: 'nd', 3: 'rd' }[d % 10] || 'th')
+}
+
+/** "It usually comes around the 5th." */
+function usually(r) {
+  return r.every === 'month' ? `It usually comes around the ${ordinal(r.usualDay)}.` : `It usually comes by ${shortDay(r.nextBy)}.`
+}
+
+/** The bills that come again and again: when the next one should come, and what it usually costs. */
+function RegularBills({ list, today }) {
+  return (
+    <section aria-label="Regular bills">
+      <h2 className="mb-1.5 flex items-baseline gap-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+        Regular bills <span className="num font-semibold normal-case tracking-normal">{list.length}</span>
+      </h2>
+      <div className="card divide-y divide-slate-200/70 overflow-hidden">
+        {list.map((r) => {
+          const d = daysLeft(r.nextBy, today)
+          return (
+            <div key={r.key} className="flex items-center gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[15px] font-semibold text-brand-ink sm:text-sm">
+                  {r.vendor}{r.account && <span className="font-normal text-slate-500"> · {r.account}</span>}
+                </div>
+                <div className="truncate text-sm text-slate-500 sm:text-xs">
+                  {EVERY[r.every]}{r.every === 'month' ? `, around the ${ordinal(r.usualDay)}` : ''} · usually {money(r.usualAmount, r.currency)} · {r.count} bills seen
+                </div>
+              </div>
+              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ${r.late ? TONE_CLASS.soon : TONE_CLASS.calm}`}>
+                {r.late ? 'Late' : d != null && d <= 0 ? 'Coming any day' : `Next by ${shortDay(r.nextBy)}`}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -284,6 +334,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
           <div className="shrink-0 text-right">
             <div className="text-[15px] font-bold num text-brand-ink sm:text-sm">{money(bill.amount, bill.currency)}</div>
             {inrNote(bill) && <div className="text-xs font-semibold text-slate-500 num">{inrNote(bill)}</div>}
+            {bill.jump && <div className="text-xs font-semibold text-amber-700 num" title={`Usually ${money(bill.jump.usual, bill.currency)}`}>↑ {bill.jump.percent}% more than usual</div>}
             <span className={`mt-0.5 inline-block rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ${TONE_CLASS[tone]}`}>{dueLabel(bill, today)}</span>
           </div>
           <IconChevron size={15} className={`shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`} />

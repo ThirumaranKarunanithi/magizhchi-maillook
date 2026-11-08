@@ -37,9 +37,11 @@ public class BillsController {
     private final MailActions actions;
     private final JdbcTemplate jdbc;
     private final FxRates fx;
+    private final BillWatch watch;
 
-    public BillsController(BillService bills, DataClient data, MailActions actions, JdbcTemplate jdbc, FxRates fx) {
+    public BillsController(BillService bills, DataClient data, MailActions actions, JdbcTemplate jdbc, FxRates fx, BillWatch watch) {
         this.fx = fx;
+        this.watch = watch;
         this.bills = bills;
         this.data = data;
         this.actions = actions;
@@ -118,10 +120,35 @@ public class BillsController {
                         "WHERE b.user_id = ? AND (b.status = 'due' OR b.created_at >= ? OR b.paid_at >= ?) " +
                         "ORDER BY b.due_date NULLS LAST, b.id DESC LIMIT 500", userId, since, since);
         List<Map<String, Object>> out = new ArrayList<>();
-        for (Map<String, Object> r : rows) out.add(view(r));
+        Map<Long, BillWatch.Jump> jumps = watch.jumps(userId);
+        for (Map<String, Object> r : rows) {
+            Map<String, Object> v = view(r);
+            BillWatch.Jump j = jumps.get(((Number) r.get("id")).longValue());
+            if (j != null) v.put("jump", Map.of("usual", j.usual(), "percent", j.percent()));
+            out.add(v);
+        }
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("bills", out);
-        m.put("today", LocalDate.now(BillService.INDIA).toString());
+        LocalDate today = LocalDate.now(BillService.INDIA);
+        m.put("today", today.toString());
+        List<Map<String, Object>> regular = new ArrayList<>();
+        for (BillWatch.Regular g : watch.regulars(userId, today)) {
+            Map<String, Object> x = new LinkedHashMap<>();
+            x.put("key", g.key());
+            x.put("vendor", g.vendor());
+            x.put("account", g.account());
+            x.put("every", g.every().name().toLowerCase(Locale.ROOT));
+            x.put("usualDay", g.usualDay());
+            x.put("usualAmount", g.usualAmount());
+            x.put("currency", g.currency());
+            x.put("lastAt", g.lastAt().toString());
+            x.put("nextBy", g.nextBy().toString());
+            x.put("late", g.late());
+            x.put("count", g.billIds().size());
+            x.put("billIds", g.billIds());
+            regular.add(x);
+        }
+        m.put("regular", regular);
         return m;
     }
 

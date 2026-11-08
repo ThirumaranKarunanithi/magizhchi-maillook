@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import software.magizhchi.maillook.bills.BillDetector;
 import software.magizhchi.maillook.bills.BillService;
+import software.magizhchi.maillook.bills.BillWatch;
 import software.magizhchi.maillook.bills.PaymentAlert;
 
 import java.io.IOException;
@@ -85,6 +86,45 @@ class BillsTest {
     @Autowired ObjectMapper json;
     @Autowired BillService bills;
     @Autowired JdbcTemplate jdbc;
+
+    @Autowired BillWatch watch;
+
+    @Test
+    void learnsRegularBillsSaysWhenOneIsLateAndMarksJumps() throws Exception {
+        String token = call(post("/api/auth/sso").contentType(MediaType.APPLICATION_JSON).content(
+                "{\"idToken\":\"" + TestIds.idToken("2b7c1f0e-3333-4d3a-8b44-000000000033", "regular@magizhchi.test", "Regular") + "\"}"), null, 200).path("token").asText();
+        long userId = jdbc.queryForObject("SELECT id FROM users WHERE email = 'regular@magizhchi.test'", Long.class);
+        jdbc.update("UPDATE users SET bills_on = TRUE, bills_on_at = CURRENT_TIMESTAMP WHERE id = ?", userId);
+        LocalDate today = LocalDate.now(INDIA);
+        LocalDate last = today.minusDays(40);
+        String sql = "INSERT INTO bills (user_id, kind, vendor, vendor_key, customer_ref, account_name, invoice_date, due_date, amount, currency, status) " +
+                "VALUES (?, 'bill', ?, ?, ?, ?, ?, ?, ?, 'INR', ?)";
+        jdbc.update(sql, userId, "ACT Fibernet", "act fibernet", "1146", "alwarpuram", last.minusMonths(2), last.minusMonths(2).plusDays(10), 4400, "paid");
+        jdbc.update(sql, userId, "ACT Fibernet", "act fibernet", "1146", null, last.minusMonths(1), last.minusMonths(1).plusDays(10), 4500, "paid");
+        jdbc.update(sql, userId, "ACT Broadband", "act broadband", "1146", "alwarpuram", last, last.plusDays(10), 6010, "due");
+        // Another ACT connection, one bill so far: not regular yet, and not mixed in with the first.
+        jdbc.update(sql, userId, "ACT Fibernet", "act fibernet", "2002", null, today.minusDays(3), today.plusDays(7), 2271.50, "due");
+
+        JsonNode res = call(get("/api/bills"), token, 200);
+        assertThat(res.path("regular")).hasSize(1);
+        JsonNode act = res.path("regular").get(0);
+        assertThat(act.path("key").asText()).isEqualTo("act|1146");
+        assertThat(act.path("every").asText()).isEqualTo("month");
+        assertThat(act.path("count").asInt()).isEqualTo(3);
+        assertThat(act.path("account").asText()).isEqualTo("alwarpuram");
+        assertThat(act.path("late").asBoolean()).isTrue();
+        JsonNode jumped = find(res.path("bills"), "ACT Broadband");
+        assertThat(jumped.path("jump").path("percent").asInt()).isEqualTo(35);
+        assertThat(jumped.path("jump").path("usual").decimalValue()).isEqualByComparingTo("4450");
+        assertThat(find(res.path("bills"), "ACT Fibernet").has("jump")).isFalse();
+
+        Instant morning = today.atTime(10, 0).atZone(INDIA).toInstant();
+        assertThat(watch.watch(today.atTime(22, 0).atZone(INDIA).toInstant())).isZero();
+        assertThat(watch.watch(morning)).isGreaterThanOrEqualTo(1);
+        assertThat(watch.watch(morning)).isZero();
+        assertThat(jdbc.queryForList("SELECT title FROM alerts WHERE user_id = ? AND kind = 'reminder'", String.class, userId))
+                .containsExactly("No ACT Broadband · alwarpuram bill yet");
+    }
 
     @Test
     void readsBankAndUpiAlerts() {
@@ -246,7 +286,7 @@ class BillsTest {
         assertThat(bsnl.path("dueDate").asText()).isEqualTo(DUE.plusDays(1).toString());
         // A bill with no way to pay borrows the biller's link; one the person sets is shared.
         jdbc.update("INSERT INTO bills (user_id, kind, vendor, vendor_key, due_date, amount, currency, status) VALUES (?, 'bill', 'ACT Fibernet', 'act fibernet', ?, 2271.50, 'INR', 'due')", userId, DUE);
-        long small = jdbc.queryForObject("SELECT id FROM bills WHERE amount = 2271.50", Long.class);
+        long small = jdbc.queryForObject("SELECT id FROM bills WHERE amount = 2271.50 AND user_id = ?", Long.class, userId);
         assertThat(bills.fillPayWays()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT pay_link FROM bills WHERE id = ?", String.class, small)).isEqualTo("https://pay.example/act?b=1&c=2");
         long bsnlId = bsnl.path("id").asLong();

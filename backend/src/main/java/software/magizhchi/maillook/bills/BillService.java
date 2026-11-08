@@ -664,7 +664,7 @@ public class BillService {
         return t.matches("[A-Za-z0-9._-]{2,64}@[A-Za-z][A-Za-z0-9.-]{1,32}") ? t : null;
     }
 
-    private static String firstWord(String vendorKey) {
+    static String firstWord(String vendorKey) {
         if (vendorKey == null) return null;
         String w = vendorKey.trim().split(" ")[0];
         return w.length() >= 2 ? w : null;
