@@ -283,7 +283,7 @@ public class FormMail implements MailActions.FormSender {
                 : "background:#ffffff;color:#0b6e73;border:1px solid #0b6e73") + "\">" + esc(label) + "</a>";
     }
 
-    static String textToHtml(String text) {
+    public static String textToHtml(String text) {
         StringBuilder out = new StringBuilder();
         Matcher m = URL.matcher(text);
         int at = 0;
@@ -296,7 +296,7 @@ public class FormMail implements MailActions.FormSender {
         return out.toString().replace("\r\n", "\n").replace("\n", "<br>\n");
     }
 
-    static String esc(String s) {
+    public static String esc(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
     }

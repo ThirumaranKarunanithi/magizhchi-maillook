@@ -52,7 +52,11 @@ public class MailActions {
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
 
-    public MailActions(AccountRepo accounts, MessageRepo messages, ImapClient imap, MeetInvites invites, FolderCursors cursors) {
+    private final software.magizhchi.maillook.account.RoyalSignatures royal;
+
+    public MailActions(AccountRepo accounts, MessageRepo messages, ImapClient imap, MeetInvites invites, FolderCursors cursors,
+                       software.magizhchi.maillook.account.RoyalSignatures royal) {
+        this.royal = royal;
         this.invites = invites;
         this.cursors = cursors;
         this.accounts = accounts;
@@ -390,7 +394,8 @@ public class MailActions {
 
     public MessageRepo.Row deliver(long userId, Outgoing o, List<OutFile> files) {
         if (o.hasForm() && formSender != null) return formSender.send(userId, o, files);
-        return deliver(userId, o, files, null);
+        // A designed signature goes as HTML (the plain part keeps its text copy).
+        return deliver(userId, o, files, royal == null ? null : royal.mailHtml(o.accountId(), o.text()));
     }
 
     /** {@code html}: an HTML version of the mail to go with its plain text (null for plain text only). */

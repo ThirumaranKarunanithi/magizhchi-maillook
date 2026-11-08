@@ -10,6 +10,7 @@ import BulkAdd from '../components/BulkAdd.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import BoxCard from '../components/BoxCard.jsx'
 import AlertsCard from '../components/AlertsCard.jsx'
+import SignatureStudio from '../components/SignatureStudio.jsx'
 import DesktopCard from '../components/DesktopCard.jsx'
 import GetAppsCard from '../components/GetAppsCard.jsx'
 import { AccountDot } from '../components/Sidebar.jsx'
@@ -34,6 +35,7 @@ function AccountCard({ account, onChanged, onRemove }) {
   const [sigOpen, setSigOpen] = useState(false)
   const [signature, setSignature] = useState(account.signature || '')
   const [sigBusy, setSigBusy] = useState(false)
+  const [studioOpen, setStudioOpen] = useState(false)
   const status = STATUS[account.status] || STATUS.new
   const sigChanged = signature.trim() !== (account.signature || '').trim()
   const oauth = account.auth === 'oauth'
@@ -79,6 +81,18 @@ function AccountCard({ account, onChanged, onRemove }) {
       setPwError(err.message)
     } finally {
       setPwBusy(false)
+    }
+  }
+
+  async function usePlain() {
+    setSigBusy(true)
+    try {
+      onChanged(await del(`/api/accounts/${account.id}/signature-design`))
+      notify('Back to the plain-text signature', 'success')
+    } catch (e) {
+      notify(e.message, 'error')
+    } finally {
+      setSigBusy(false)
     }
   }
 
@@ -174,19 +188,36 @@ function AccountCard({ account, onChanged, onRemove }) {
       </div>
 
       <div className="mt-3 border-t border-slate-100 pt-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="label !mb-0">Signature</span>
           {!sigOpen && (
             <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-              {account.signature ? account.signature.split('\n').join(' · ') : 'None yet. It goes under new mail, replies and forwards from this mailbox.'}
+              {account.signatureDesign
+                ? `Royal design · ${account.signature ? account.signature.split('\n').join(' · ') : ''}`
+                : account.signature ? account.signature.split('\n').join(' · ') : 'None yet. It goes under new mail, replies and forwards from this mailbox.'}
             </span>
           )}
           {!sigOpen && (
+            <button className="btn-royal !py-1 text-xs" onClick={() => setStudioOpen(true)}>
+              {account.signatureDesign ? 'Change design' : 'Royal designs'}
+            </button>
+          )}
+          {!sigOpen && !account.signatureDesign && (
             <button className="btn-secondary !py-1 text-xs" onClick={() => { setSignature(account.signature || ''); setSigOpen(true) }}>
               {account.signature ? 'Edit' : 'Add signature'}
             </button>
           )}
+          {!sigOpen && account.signatureDesign && (
+            <button className="btn-ghost !py-1 text-xs" onClick={usePlain} disabled={sigBusy}>Use plain text</button>
+          )}
         </div>
+        {!sigOpen && account.signatureImage && (
+          <img src={account.signatureImage.url} alt={`Royal signature for ${account.email}`} width={account.signatureImage.width} height={account.signatureImage.height}
+            className="mt-2 block h-auto w-full max-w-[360px] rounded-md shadow-sm ring-1 ring-black/5" loading="lazy" />
+        )}
+        {studioOpen && (
+          <SignatureStudio account={account} notify={notify} onClose={() => setStudioOpen(false)} onSaved={(u) => onChanged({ ...u, id: account.id })} />
+        )}
         {sigOpen && (
           <div className="mt-2">
             <textarea id={`sig-${account.id}`} className="input min-h-[96px] font-[inherit] text-sm leading-relaxed" rows={4} maxLength={2000} autoFocus

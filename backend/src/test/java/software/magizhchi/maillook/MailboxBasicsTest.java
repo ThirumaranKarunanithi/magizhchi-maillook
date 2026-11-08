@@ -150,6 +150,63 @@ class MailboxBasicsTest {
         call(patch("/api/accounts/" + accountId).contentType(MediaType.APPLICATION_JSON).content("{\"signature\":\"  \"}"), token, 200);
         assertThat(call(get("/api/accounts"), token, 200).path(0).path("signature").isNull()).isTrue();
 
+        // ── Royal signature: a design and its banner; the plain copy is made from the same details ──
+        var banner = new java.awt.image.BufferedImage(1560, 450, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        var pngOut = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(banner, "png", pngOut);
+        String design = "{\"template\":\"gold-crest\",\"name\":\"Owner Name\",\"title\":\"Founder\",\"company\":\"Magizhchi Academy\","
+                + "\"phone\":\"+91 98400 12345\",\"email\":\"owner@magizhchi.test\",\"website\":\"magizhchi.software\",\"tagline\":\"Learn with joy\"}";
+        call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", "not a png".getBytes()))
+                .param("design", design), token, 400);
+        call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .param("design", design.replace("gold-crest", "rainbow")), token, 400);
+        JsonNode royal = call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .param("design", design), token, 200);
+        assertThat(royal.path("signature").asText())
+                .isEqualTo("Owner Name\nFounder, Magizhchi Academy\n+91 98400 12345 · owner@magizhchi.test · magizhchi.software\nLearn with joy");
+        assertThat(royal.path("signatureDesign").path("template").asText()).isEqualTo("gold-crest");
+        assertThat(royal.path("signatureImage").path("width").asInt()).isEqualTo(520);
+        String picture = royal.path("signatureImage").path("url").asText();
+        assertThat(picture).contains("/api/sig/");
+        assertThat(royal.path("signatureHtml").asText()).contains(picture).contains("tel:+919840012345").contains("https://magizhchi.software");
+        assertThat(call(get("/api/accounts"), token, 200).path(0).path("signatureDesign").path("name").asText()).isEqualTo("Owner Name");
+        // Anyone reading the mail can load the picture, without signing in.
+        var pic = mvc.perform(get(java.net.URI.create(picture).getPath())).andReturn().getResponse();
+        assertThat(pic.getStatus()).isEqualTo(200);
+        assertThat(pic.getContentType()).isEqualTo("image/png");
+        assertThat(pic.getContentAsByteArray()).isEqualTo(pngOut.toByteArray());
+        assertThat(mvc.perform(get("/api/sig/0123456789abcdef0123456789abcdef")).andReturn().getResponse().getStatus()).isEqualTo(404);
+
+        // Sent mail carries the designed signature as HTML, and its text copy in the plain part.
+        String sigText = royal.path("signature").asText();
+        String royalPayload = json.writeValueAsString(java.util.Map.of("accountId", accountId, "to", List.of("owner@magizhchi.test"),
+                "subject", "Royal hello", "text", "Hello there,\n\n-- \n" + sigText));
+        call(multipart("/api/send").file(new MockMultipartFile("payload", "", "application/json", royalPayload.getBytes(StandardCharsets.UTF_8))), token, 200);
+        MimeMessage royalMail = java.util.Arrays.stream(greenMail.getReceivedMessages()).filter(m -> {
+            try { return "Royal hello".equals(m.getSubject()); } catch (Exception e) { return false; }
+        }).findFirst().orElseThrow();
+        var rawOut = new java.io.ByteArrayOutputStream();
+        royalMail.writeTo(rawOut);
+        String whole = rawOut.toString(StandardCharsets.UTF_8);
+        assertThat(whole).contains("text/html").contains("text/plain");
+        assertThat(whole.replaceAll("=\\r?\\n", "").replace("=3D", "=")).contains("/api/sig/" + picture.substring(picture.lastIndexOf('/') + 1));
+
+        // Back to plain text: the design goes, its text copy stays.
+        JsonNode plainAgain = call(delete("/api/accounts/" + accountId + "/signature-design"), token, 200);
+        assertThat(plainAgain.path("signatureDesign").isNull()).isTrue();
+        assertThat(plainAgain.path("signature").asText()).isEqualTo(sigText);
+
+        // Typing a signature again replaces the design.
+        call(multipart(org.springframework.http.HttpMethod.PUT, "/api/accounts/" + accountId + "/signature-design")
+                .file(new MockMultipartFile("image", "sig.png", "image/png", pngOut.toByteArray()))
+                .param("design", design), token, 200);
+        call(patch("/api/accounts/" + accountId).contentType(MediaType.APPLICATION_JSON).content("{\"signature\":\"Owner\"}"), token, 200);
+        assertThat(call(get("/api/accounts"), token, 200).path(0).path("signatureDesign").isNull()).isTrue();
+        call(patch("/api/accounts/" + accountId).contentType(MediaType.APPLICATION_JSON).content("{\"signature\":\"  \"}"), token, 200);
+
         // ── Drafts: saved, saved again, listed, sent, gone ──
         JsonNode saved = call(put("/api/drafts").contentType(MediaType.APPLICATION_JSON).content(
                 "{\"accountId\":" + accountId + ",\"to\":[\"priya@example.com\"],\"subject\":\"Batch timings\",\"body\":\"Hi Priya,\"}"), token, 200);
@@ -214,7 +271,7 @@ class MailboxBasicsTest {
         if (token != null) req.header("Authorization", "Bearer " + token);
         var res = mvc.perform(req).andReturn().getResponse();
         assertThat(res.getStatus()).as(res.getContentAsString()).isEqualTo(status);
-        String body = res.getContentAsString();
+        String body = res.getContentAsString(StandardCharsets.UTF_8);
         return body.isEmpty() ? json.createObjectNode() : json.readTree(body);
     }
 

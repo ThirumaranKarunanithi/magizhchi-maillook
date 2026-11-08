@@ -29,17 +29,21 @@ public class AccountController {
     private final ProviderDetector detector;
     private final SyncService sync;
     private final OAuthTokens oauth;
+    private final RoyalSignatures royal;
 
-    public AccountController(AccountService service, ProviderDetector detector, SyncService sync, OAuthTokens oauth) {
+    public AccountController(AccountService service, ProviderDetector detector, SyncService sync, OAuthTokens oauth, RoyalSignatures royal) {
         this.service = service;
         this.detector = detector;
         this.sync = sync;
         this.oauth = oauth;
+        this.royal = royal;
     }
 
     @GetMapping("/accounts")
     public List<Map<String, Object>> list(@RequestAttribute long userId) {
-        return service.list(userId);
+        List<Map<String, Object>> out = service.list(userId);
+        for (Map<String, Object> m : out) m.putAll(royal.view(((Number) m.get("id")).longValue()));
+        return out;
     }
 
     @PostMapping("/accounts/detect")
@@ -72,9 +76,13 @@ public class AccountController {
 
     @PatchMapping("/accounts/{id}")
     public Map<String, Object> patch(@RequestAttribute long userId, @PathVariable long id, @RequestBody PatchRequest req) {
-        if (req.signature() != null) service.setSignature(userId, id, req.signature());
+        if (req.signature() != null) {
+            service.setSignature(userId, id, req.signature());
+            royal.clear(userId, id);   // a typed signature replaces the designed one
+        }
         Map<String, Object> view = AccountService.view(service.update(userId, id, req.displayName(), req.color(), req.password()), 0);
         view.put("signature", service.signature(id));
+        view.putAll(royal.view(id));
         return view;
     }
 

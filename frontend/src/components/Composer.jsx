@@ -601,6 +601,15 @@ export default function Composer() {
 
         <textarea ref={bodyRef} className="scroll-thin min-h-0 flex-1 resize-none bg-white px-4 py-3 text-sm leading-relaxed outline-none"
           value={text} onChange={(e) => setText(e.target.value)} aria-label="Message" placeholder="Write something kind…" />
+        {(() => {
+          const from = accounts.find((a) => a.id === Number(fromId))
+          const block = signatureBlock(from?.signature).trim()
+          return from?.signatureDesign && block && text.includes(block) ? (
+            <p className="border-t border-slate-100 bg-amber-50/60 px-4 py-1 text-[11px] text-amber-900">
+              Your royal signature goes in place of the text signature when this sends. Change the text signature here and it goes as plain text.
+            </p>
+          ) : null
+        })()}
 
         {invite && (
           <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-2">
