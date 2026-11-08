@@ -69,11 +69,15 @@ public class SuiteBrainController {
         out.put("app", SuiteDelegationVerifier.AUDIENCE);
         out.put("version", 1);
         out.put("tools", List.of(
-                tool("needs_reply", "read",
+                flag(tool("needs_reply", "read",
                         "Emails that need the user's reply or attention (the 'Needs me' lane, unread, last two weeks), "
                                 + "plus people the user is still waiting to hear back from. Use this for a daily briefing "
                                 + "or when asked 'who is waiting on me?'.",
-                        Map.of(), List.of()),
+                        Map.of(), List.of()), "briefing"),
+                flag(tool("person_timeline", "read",
+                        "Recent inbox mail from one person, newest first.",
+                        Map.of("name", prop("string", "The person's name or email, e.g. Priya.")),
+                        List.of("name")), "personSearch"),
                 tool("search_mail", "read",
                         "Search the user's inbox. Understands plain text plus filters like from:name, is:unread.",
                         Map.of(
@@ -103,6 +107,7 @@ public class SuiteBrainController {
         return switch (name) {
             case "needs_reply" -> needsReply(userId);
             case "search_mail" -> searchMail(userId, input);
+            case "person_timeline" -> personTimeline(userId, input);
             default -> throw new ApiException(HttpStatus.NOT_FOUND, "Unknown tool: " + name);
         };
     }
@@ -150,6 +155,24 @@ public class SuiteBrainController {
         return Map.of("count", found.size(), "messages", found);
     }
 
+    /** The shape PA's person timeline expects: {"items":[{when,title,detail,kind}]}. */
+    private Object personTimeline(long userId, Map<String, Object> input) {
+        String name = input.get("name") == null ? "" : input.get("name").toString().trim();
+        if (name.length() < 2) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "name is required.");
+        }
+        MailSearch from = new MailSearch(null, name, false, false, false, null, null);
+        List<Map<String, Object>> items = messages.list(userId, "INBOX", null, null, from, null, null, 15).stream().map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("when", r.receivedAt() == null ? null : r.receivedAt().toInstant().toString());
+            m.put("title", r.subject() == null || r.subject().isBlank() ? "(no subject)" : r.subject());
+            m.put("detail", cut(r.snippet(), 160));
+            m.put("kind", "mail");
+            return m;
+        }).toList();
+        return Map.of("items", items);
+    }
+
     private static Map<String, Object> brief(MessageRepo.Row r) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", r.id());
@@ -195,6 +218,12 @@ public class SuiteBrainController {
         t.put("description", description);
         t.put("inputSchema", schema);
         return t;
+    }
+
+/** Marks a manifest tool with a PA hint ("briefing": part of My Day, "personSearch": feeds person timelines). */
+    private static Map<String, Object> flag(Map<String, Object> tool, String key) {
+        tool.put(key, true);
+        return tool;
     }
 
     private static Map<String, Object> prop(String type, String description) {
