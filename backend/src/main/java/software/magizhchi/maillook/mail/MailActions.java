@@ -126,6 +126,53 @@ public class MailActions {
         }
     }
 
+    /**
+     * Read/unread or flagged for many mails at once: one connection per mailbox and folder.
+     * Returns the ids changed; a mailbox that can't be reached keeps its mail as it was.
+     */
+    public List<Long> flagMany(long userId, List<Long> ids, Flags.Flag flag, boolean on) {
+        boolean seenFlag = flag == Flags.Flag.SEEN;
+        Map<String, List<MessageRepo.Row>> groups = new LinkedHashMap<>();
+        for (MessageRepo.Row r : messages.byIds(new java.util.LinkedHashSet<>(ids))) {
+            if (r.userId() != userId || (seenFlag ? r.seen() : r.flagged()) == on) continue;
+            groups.computeIfAbsent(r.accountId() + "|" + r.folder(), k -> new ArrayList<>()).add(r);
+        }
+        List<Long> changed = new ArrayList<>();
+        for (List<MessageRepo.Row> rows : groups.values()) {
+            MessageRepo.Row first = rows.get(0);
+            List<MessageRepo.Row> onServer = rows.stream().filter(r -> r.uid() != null).toList();
+            boolean ok = onServer.isEmpty();
+            if (!ok) {
+                Account a = account(first);
+                Store store = null;
+                IMAPFolder f = null;
+                try {
+                    store = imap.connect(a);
+                    f = serverFolder(store, a, first.folder());
+                    if (f != null) {
+                        f.open(Folder.READ_WRITE);
+                        long[] uids = onServer.stream().mapToLong(MessageRepo.Row::uid).toArray();
+                        Message[] found = java.util.Arrays.stream(f.getMessagesByUID(uids)).filter(java.util.Objects::nonNull).toArray(Message[]::new);
+                        if (found.length > 0) f.setFlags(found, new Flags(flag), on);
+                    }
+                    ok = true;
+                } catch (MessagingException e) {
+                    // unreachable just now: leave this group as it was
+                } finally {
+                    ImapClient.closeQuietly(f, false);
+                    ImapClient.closeQuietly(store);
+                }
+            }
+            if (!ok) continue;
+            for (MessageRepo.Row r : rows) {
+                if (seenFlag) messages.setSeen(r.id(), on);
+                else messages.setFlagged(r.id(), on);
+                changed.add(r.id());
+            }
+        }
+        return changed;
+    }
+
     // ── moves ─────────────────────────────────────────────────────
 
     public void archive(long userId, long id) {

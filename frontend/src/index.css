@@ -51,6 +51,7 @@
   --backdrop: rgba(11, 58, 66, 0.32);
 
   --row-selected: linear-gradient(90deg, rgba(245, 179, 32, 0.20), rgba(245, 179, 32, 0.06) 80%);
+  --row-picked: rgba(14, 124, 134, 0.10);
 
   --paper: #fffdf8;
   --paper-edge: rgba(160, 120, 60, 0.16);
@@ -116,6 +117,7 @@
   --backdrop: rgba(2, 12, 14, 0.6);
 
   --row-selected: linear-gradient(90deg, rgba(245, 179, 32, 0.16), rgba(245, 179, 32, 0.03) 80%);
+  --row-picked: rgba(60, 190, 200, 0.16);
 
   --paper: #fffdf8;
   --paper-edge: rgba(120, 90, 40, 0.10);
@@ -302,6 +304,16 @@
   .msg-row { transition: background 0.2s, transform 0.25s var(--ease-out); }
   .msg-row:hover { transform: translateX(2px); }
   .msg-row[aria-current='true'] { background: var(--row-selected) !important; }
+  .bulk-bar .icon-btn { width: 1.75rem; }
+  .msg-row.picked { background: var(--row-picked) !important; }
+  /* the tick box takes the unread dot's place on hover, and stays on every row once one is ticked */
+  .pick-check { opacity: 0; transition: opacity 0.12s; }
+  .msg-row:hover .pick-check, .msg-row:focus-within .pick-check, .msg-row.picking .pick-check { opacity: 1; }
+  .msg-row:hover .pick-dot, .msg-row:focus-within .pick-dot, .msg-row.picking .pick-dot { opacity: 0; }
+  @media (hover: none) {
+    .msg-row:not(.picking) .pick-check { opacity: 0; pointer-events: none; }
+    .msg-row:not(.picking) .pick-dot { opacity: 1; }
+  }
   .row-actions { opacity: 0; transition: opacity 0.15s; }
   .msg-row:hover .row-actions, .msg-row:focus-within .row-actions { opacity: 1; }
   /* touch screens: tapping opens the mail, which has the same actions, so the row stays clean */

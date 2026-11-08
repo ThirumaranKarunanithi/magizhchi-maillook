@@ -174,6 +174,34 @@ class EverydayMailTest {
         assertThat(undo.path("moved").asInt()).isEqualTo(3);
         assertThat(call(get("/api/messages").param("lane", "can_wait"), token, 200).path("items")).hasSize(3);
 
+        // ── ticked mails and "select all": read, lane, Trash, each with Undo
+        assertThat(call(get("/api/messages/bulk/count").param("lane", "can_wait"), token, 200).path("count").asInt()).isEqualTo(3);
+        JsonNode picked = call(get("/api/messages").param("lane", "can_wait"), token, 200).path("items");
+        String two = "[" + picked.get(0).path("id").asLong() + "," + picked.get(1).path("id").asLong() + "]";
+        JsonNode read = call(post("/api/messages/bulk/apply").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ids\":" + two + ",\"action\":\"seen\"}"), token, 200);
+        assertThat(read.path("moved").asInt() + read.path("failed").asInt()).isLessThanOrEqualTo(2);
+        assertThat(call(get("/api/messages").param("lane", "can_wait").param("unread", "true"), token, 200).path("items")).hasSizeLessThanOrEqualTo(1);
+        JsonNode laned = call(post("/api/messages/bulk/apply").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ids\":" + two + ",\"action\":\"lane\",\"lane\":\"fyi\"}"), token, 200);
+        assertThat(laned.path("moved").asInt()).isEqualTo(2);
+        assertThat(call(get("/api/messages").param("lane", "can_wait"), token, 200).path("items")).hasSize(1);
+        JsonNode laneBack = laned.path("undo").get(0);
+        assertThat(laneBack.path("lane").asText()).isEqualTo("can_wait");
+        call(post("/api/messages/bulk/apply").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ids\":" + laneBack.path("ids") + ",\"action\":\"lane\",\"lane\":\"can_wait\"}"), token, 200);
+        JsonNode trashed = call(post("/api/messages/bulk/apply").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"filter\":{\"lane\":\"can_wait\",\"folder\":\"INBOX\"},\"action\":\"trash\"}"), token, 200);
+        assertThat(trashed.path("moved").asInt()).isEqualTo(3);
+        assertThat(trashed.path("more").asBoolean()).isFalse();
+        assertThat(call(get("/api/messages").param("folder", "TRASH"), token, 200).path("items")).hasSize(3);
+        JsonNode trashBack = trashed.path("undo").get(0);
+        assertThat(trashBack.path("folder").asText()).isEqualTo("INBOX");
+        call(post("/api/messages/bulk/apply").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ids\":" + trashBack.path("ids") + ",\"action\":\"move\",\"folder\":\"INBOX\"}"), token, 200);
+        assertThat(call(get("/api/messages").param("lane", "can_wait"), token, 200).path("items")).hasSize(3);
+        call(post("/api/messages/bulk/apply").contentType(MediaType.APPLICATION_JSON).content("{\"ids\":[1],\"action\":\"explode\"}"), token, 400);
+
         // ── Files: every attachment, by kind and by name
         JsonNode all = call(get("/api/files"), token, 200).path("items");
         List<String> names = new java.util.ArrayList<>();

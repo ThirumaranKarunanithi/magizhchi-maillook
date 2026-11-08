@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { del, get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
 import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
-import MessageList from '../components/MessageList.jsx'
+import MessageList, { PickBox } from '../components/MessageList.jsx'
+import { BulkBar, BulkPane, SelectAllStrip, bulkAbilities } from '../components/BulkBar.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
 import AskCard from '../components/AskCard.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
@@ -12,6 +13,9 @@ import { whenLabel } from '../when.js'
 import { IconArchive, IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconSparkle, IconTrash, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
+/** Moving more than this many at once asks first. */
+const ASK_ABOVE = 200
+const plural = (n, one = 'mail', many = 'mails') => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
 const EMPTY = {
   needs_me: { emoji: '🎉', title: 'Nothing needs you right now', text: 'Nobody is waiting on you. Go make yourself a nice cup of chai.' },
@@ -143,6 +147,14 @@ export default function Mail() {
   const reqSeq = useRef(0)
   const syncTimer = useRef(null)
 
+  // Ticked mails: ids, or the whole view ("Select all 776") with its total.
+  const [picked, setPicked] = useState(() => new Set())
+  const [pickAll, setPickAll] = useState(false)
+  const [pickTotal, setPickTotal] = useState(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkAsk, setBulkAsk] = useState(null) // { action, extra }
+  const anchor = useRef(null)
+
   // debounce search
   useEffect(() => {
     const t = setTimeout(() => setQ(qInput.trim()), 350)
@@ -263,6 +275,179 @@ export default function Mail() {
       setLoadingMore(false)
     }
   }
+
+  // ── ticking many mails ───────────────────────────────────────
+  const shown = asked ? asked.result?.items || [] : items
+  const clearPicks = useCallback(() => {
+    setPicked(new Set())
+    setPickAll(false)
+    setPickTotal(null)
+    anchor.current = null
+  }, [])
+  useEffect(() => { clearPicks() }, [view, accountId, folderCode, q, filters, !!asked]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Mail that left the list leaves the selection too.
+  useEffect(() => {
+    if (pickAll) return
+    setPicked((prev) => {
+      if (!prev.size) return prev
+      const here = new Set(shown.map((m) => m.id))
+      const next = new Set([...prev].filter((id) => here.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [shown, pickAll])
+
+  const canPick = !cfg.drafts
+  const allShownPicked = shown.length > 0 && shown.every((m) => picked.has(m.id))
+  const someShownPicked = shown.some((m) => picked.has(m.id))
+  const wholeViewPossible = !asked && !!nextCursor && cfg.folder !== 'SNOOZED' && cfg.folder !== 'WAITING'
+  const pickCount = pickAll ? pickTotal ?? picked.size : picked.size
+  const pickedItems = shown.filter((m) => picked.has(m.id))
+  const can = bulkAbilities(cfg)
+
+  function onPick(id, { range } = {}) {
+    setPickAll(false)
+    const from = anchor.current // read now: the updater below runs later, after the anchor moves
+    setPicked((prev) => {
+      const next = new Set(prev)
+      if (range && from != null) {
+        const ids = shown.map((m) => m.id)
+        const a = ids.indexOf(from)
+        const b = ids.indexOf(id)
+        if (a >= 0 && b >= 0) {
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(ids[i])
+          return next
+        }
+      }
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    anchor.current = id
+  }
+
+  function toggleAllShown() {
+    if (allShownPicked) clearPicks()
+    else {
+      setPickAll(false)
+      setPicked(new Set(shown.map((m) => m.id)))
+    }
+  }
+
+  // Everything shown is ticked and there is more: ask how many the whole view holds.
+  useEffect(() => {
+    if (!allShownPicked || !wholeViewPossible) { setPickTotal(null); return undefined }
+    let gone = false
+    get(`/api/messages/bulk/count${baseQuery()}`).then((r) => { if (!gone) setPickTotal(r?.count ?? null) }).catch(() => {})
+    return () => { gone = true }
+  }, [allShownPicked, wholeViewPossible, baseQuery])
+
+  const viewFilter = () => ({
+    lane: cfg.lane, folder: cfg.folder, accountId: accountId ?? null, q: q || null, from: filters.from || null,
+    hasAttachment: filters.hasAttachment || null, unread: filters.unread || null, flagged: filters.flagged || null,
+    after: sinceIso(filters.since) || null, tz: TZ || null,
+  })
+
+  function bulkMessage(action, extra, n) {
+    switch (action) {
+      case 'archive': return `Done: ${plural(n)} archived ✓`
+      case 'trash': return `Moved ${plural(n)} to Trash`
+      case 'move': return `Moved ${plural(n)} to ${extra.label || folderLabel(extra.folder)}`
+      case 'seen': return `Marked ${plural(n)} as read`
+      case 'unseen': return `Marked ${plural(n)} as unread`
+      case 'flag': return `Flagged ${plural(n)}`
+      case 'unflag': return `Unflagged ${plural(n)}`
+      case 'lane': return `Moved ${plural(n)} to ${LANE_LABEL[extra.lane]}`
+      case 'snooze': return extra.at ? `Snoozed ${plural(n)} until ${whenLabel(extra.at)}` : `${plural(n)} back in your inbox`
+      default: return `${plural(n)} done`
+    }
+  }
+
+  function askTitle(action, extra, n) {
+    if (action === 'archive') return `Archive ${plural(n)}?`
+    if (action === 'trash') return `Move ${plural(n)} to Trash?`
+    return `Move ${plural(n)} to ${extra.label || folderLabel(extra.folder)}?`
+  }
+
+  async function runBulk(action, extra = {}) {
+    const n = pickCount
+    if (!n) return
+    if (['archive', 'trash', 'move'].includes(action) && n > ASK_ABOVE && !extra.confirmed) {
+      setBulkAsk({ action, extra })
+      return
+    }
+    setBulkBusy(true)
+    const body = { action, folder: extra.folder ?? null, lane: extra.lane ?? null, at: extra.at ?? null }
+    if (pickAll) body.filter = viewFilter()
+    else body.ids = [...picked]
+    try {
+      const res = await post('/api/messages/bulk/apply', body)
+      setBulkAsk(null)
+      const doneIds = new Set(res.ids || [])
+      const leaves = ['archive', 'trash', 'move'].includes(action)
+        || (action === 'snooze' && (!!extra.at || cfg.folder === 'SNOOZED'))
+        || (action === 'lane' && cfg.lane !== 'all' && cfg.lane !== extra.lane)
+      const patch = action === 'seen' || action === 'unseen' ? { seen: action === 'seen' }
+        : action === 'flag' || action === 'unflag' ? { flagged: action === 'flag' }
+          : action === 'lane' ? { lane: extra.lane, laneSource: 'user' } : null
+      const update = (list) => (leaves ? list.filter((m) => !doneIds.has(m.id))
+        : patch ? list.map((m) => (doneIds.has(m.id) ? { ...m, ...patch } : m)) : list)
+      if (pickAll) {
+        load({ silent: true })
+      } else {
+        setItems(update)
+        if (asked?.result) setAsked((a) => (a?.result ? { ...a, result: { ...a.result, items: update(a.result.items || []) } } : a))
+      }
+      if (leaves && selectedId && (doneIds.has(selectedId) || pickAll)) setSelectedId(null)
+      clearPicks()
+      refreshCounts()
+      let msg = bulkMessage(action, extra, res.moved)
+      if (res.failed > 0) msg += `. ${plural(res.failed)} couldn\u2019t be changed just now.`
+      if (res.more) msg += ' That was the first 2,000; do it again for the rest.'
+      const undo = res.undo || []
+      notify(msg, res.failed > 0 && !res.moved ? 'error' : 'success', undo.length ? {
+        ms: 12000,
+        action: {
+          label: 'Undo',
+          run: async () => {
+            try {
+              for (const step of undo) {
+                await post('/api/messages/bulk/apply', { ids: step.ids, action: step.action, folder: step.folder ?? null, lane: step.lane ?? null, at: null })
+              }
+              bumpMail()
+              refreshCounts()
+              notify('Undone ✓', 'success')
+            } catch (e) {
+              notify(e.message, 'error')
+            }
+          },
+        },
+      } : {})
+    } catch (e) {
+      notify(e.message, 'error')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  // Keys: x ticks the open mail, Ctrl+A ticks everything shown, Esc clears.
+  useEffect(() => {
+    function onKey(e) {
+      const t = e.target
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (document.querySelector('[aria-modal="true"]')) return
+      if (e.key === 'Escape' && (picked.size || pickAll)) { clearPicks(); return }
+      if (!canPick) return
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && shown.length) {
+        e.preventDefault()
+        setPickAll(false)
+        setPicked(new Set(shown.map((m) => m.id)))
+        return
+      }
+      if (e.key === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey && selectedId) onPick(selectedId)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }) // bound afresh each render so it sees the current list
 
   // Archive all of "Can wait" (or "For my info") in one go, with Undo.
   const sweepable = !folderCode && (cfg.lane === 'can_wait' || cfg.lane === 'fyi')
@@ -422,8 +607,19 @@ export default function Mail() {
       {/* message list */}
       <section className={`${selectedId ? 'hidden md:flex' : 'flex'} slab rise-3d d1 w-full shrink-0 flex-col overflow-hidden max-lg:rounded-none md:w-[340px] xl:w-[400px]`}>
         <div className="border-b border-slate-200/70 px-3 pb-2 pt-3">
+          {picked.size > 0 || pickAll ? (
+            <BulkBar count={pickCount} allLoaded={allShownPicked} someLoaded={someShownPicked} onToggleAll={toggleAllShown} onClear={clearPicks}
+              can={can} anyUnread={pickAll ? true : pickedItems.some((m) => !m.seen)} folder={cfg.folder}
+              accountId={new Set(pickedItems.map((m) => m.accountId)).size === 1 ? pickedItems[0].accountId : accountId}
+              busy={bulkBusy} run={runBulk} />
+          ) : (
           <div className="flex items-center gap-1">
             <button className="icon-btn lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu"><IconMenu /></button>
+            {canPick && shown.length > 0 && (
+              <span className="hidden h-8 w-6 items-center justify-center sm:flex">
+                <PickBox checked={false} onClick={toggleAllShown} label="Tick everything shown (Ctrl+A)" />
+              </span>
+            )}
             <div className="min-w-0 flex-1 px-1">
               <h1 className="truncate text-base font-bold leading-tight">{cfg.title}</h1>
               <p className="truncate text-[11px] text-slate-500">
@@ -448,6 +644,15 @@ export default function Mail() {
               <IconRefresh size={17} className={syncing ? 'animate-spin' : ''} />
             </button>
           </div>
+          )}
+          {bulkAsk && (
+            <ConfirmDialog title={askTitle(bulkAsk.action, bulkAsk.extra, pickCount)}
+              confirmLabel={bulkAsk.action === 'trash' ? 'Move to Trash' : bulkAsk.action === 'archive' ? 'Archive' : 'Move'}
+              danger={bulkAsk.action === 'trash'} busy={bulkBusy}
+              onCancel={() => setBulkAsk(null)} onConfirm={() => runBulk(bulkAsk.action, { ...bulkAsk.extra, confirmed: true })}>
+              {pickAll ? `Every mail in ${cfg.title}` : 'Every ticked mail'} moves. You can undo it right after{bulkAsk.action === 'trash' ? ', and mail in Trash can be restored later' : ''}.
+            </ConfirmDialog>
+          )}
           <div className="relative mt-2">
             <IconSearch size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className="input !py-1.5 !pl-8 !pr-8" type="search" placeholder={cfg.drafts ? 'Search works in your mail folders' : 'Search people, subjects, words…'}
@@ -496,6 +701,10 @@ export default function Mail() {
               onKeyDown={(e) => e.key === 'Escape' && setFromOpen(false)} />
           )}
         </div>
+        {(allShownPicked || pickAll) && wholeViewPossible && (
+          <SelectAllStrip shown={shown.length} total={pickTotal} all={pickAll} title={cfg.title}
+            onAll={() => setPickAll(true)} onShown={() => setPickAll(false)} />
+        )}
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto max-md:pb-24">
           {asked && (
             <AskCard question={asked.q} state={asked} items={asked.result?.items} onOpen={setSelectedId}
@@ -518,6 +727,8 @@ export default function Mail() {
             onLoadMore={loadMore}
             onRetry={() => load()}
             onSelect={setSelectedId}
+            picked={canPick ? picked : null}
+            onPick={canPick ? onPick : undefined}
             onDone={onArchive}
             onTrash={onTrash}
             onMoveLane={onMoveLane}
@@ -539,7 +750,11 @@ export default function Mail() {
 
       {/* reading pane */}
       <section className={`${selectedId ? 'flex' : 'hidden md:flex'} slab rise-3d d2 min-w-0 flex-1 flex-col overflow-hidden max-lg:rounded-none`}>
-        {selectedId ? (
+        {picked.size > 0 || pickAll ? (
+          <BulkPane count={pickCount} all={pickAll} title={cfg.title} pickedItems={pickedItems} can={can}
+            anyUnread={pickAll ? true : pickedItems.some((m) => !m.seen)} anyUnflagged={pickAll ? true : pickedItems.some((m) => !m.flagged)}
+            busy={bulkBusy} run={runBulk} onClear={clearPicks} />
+        ) : selectedId ? (
           <ReadingPane
             key={selectedId}
             id={selectedId}
@@ -563,7 +778,7 @@ export default function Mail() {
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
             <img src="/brand/maillook-mark.svg" alt="" width="112" height="112" className="reflect float-slow" style={{ filter: "drop-shadow(0 18px 30px rgba(0,0,0,.55))" }} />
             <p className="mt-14 text-lg font-bold text-brand-ink">Pick a message to read</p>
-            <p className="mt-1 text-sm text-slate-500">Hover a message to mark it Done, move it, or trash it.</p>
+            <p className="mt-1 text-sm text-slate-500">Hover a message to mark it Done, move it, or trash it. Tick several to handle them together.</p>
           </div>
         )}
       </section>

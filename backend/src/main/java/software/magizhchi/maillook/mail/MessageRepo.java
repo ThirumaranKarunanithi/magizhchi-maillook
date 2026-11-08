@@ -346,6 +346,39 @@ public class MessageRepo {
         return jdbc.query(sql.toString(), mapper(true), args.toArray());
     }
 
+    /** Every mail a view shows (same rules as {@link #list}), newest first: what "Select all" acts on. */
+    public List<Long> matchingIds(long userId, String folder, String lane, Long accountId, MailSearch search, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = matchWhere(userId, folder, lane, accountId, search, args);
+        args.add(limit);
+        return jdbc.queryForList("SELECT m.id FROM messages m JOIN accounts a ON a.id = m.account_id " + where +
+                " ORDER BY m.received_at DESC, m.id DESC LIMIT ?", Long.class, args.toArray());
+    }
+
+    /** How many mails a view shows in all, for "Select all 776". */
+    public long countMatching(long userId, String folder, String lane, Long accountId, MailSearch search) {
+        List<Object> args = new ArrayList<>();
+        String where = matchWhere(userId, folder, lane, accountId, search, args);
+        Long n = jdbc.queryForObject("SELECT COUNT(*) FROM messages m JOIN accounts a ON a.id = m.account_id " + where, Long.class, args.toArray());
+        return n == null ? 0 : n;
+    }
+
+    private static String matchWhere(long userId, String folder, String lane, Long accountId, MailSearch search, List<Object> args) {
+        StringBuilder sql = new StringBuilder("WHERE a.user_id = ? AND m.folder = ? AND m.snoozed_until IS NULL");
+        args.add(userId);
+        args.add(folder);
+        if (lane != null) {
+            sql.append(" AND m.lane = ?");
+            args.add(lane);
+        }
+        if (accountId != null) {
+            sql.append(" AND m.account_id = ?");
+            args.add(accountId);
+        }
+        if (search != null) search.appendTo(sql, args);
+        return sql.toString();
+    }
+
     /** The raw calendar invite sent inside this mail, if any. */
     /** Inbox mail in one lane (not snoozed), newest first: what "Archive all" takes. */
     public List<Long> laneIds(long userId, Long accountId, String lane, int limit) {

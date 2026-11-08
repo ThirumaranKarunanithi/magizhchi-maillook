@@ -1,5 +1,6 @@
+import { useRef } from 'react'
 import { senderName, shortTime } from '../util.js'
-import { IconArchive, IconBell, IconClock, IconFlag, IconNote, IconPaperclip, IconSnooze, IconTrash, IconVideo } from './Icons.jsx'
+import { IconArchive, IconBell, IconCheck, IconClock, IconFlag, IconNote, IconPaperclip, IconSnooze, IconTrash, IconVideo } from './Icons.jsx'
 import MoveMenu from './MoveMenu.jsx'
 import SnoozeMenu from './SnoozeMenu.jsx'
 import { whenLabel } from '../when.js'
@@ -13,7 +14,22 @@ function startsBadge(at) {
   return m > 0 ? `Starts in ${m} min` : 'Meeting now'
 }
 
-function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onMove, onSnooze }) {
+/** A touch screen: a long press starts ticking, then taps tick. */
+const TOUCH = typeof window !== 'undefined' && window.matchMedia?.('(hover: none)').matches
+
+export function PickBox({ checked, mixed = false, onClick, label, className = '' }) {
+  return (
+    <button type="button" role="checkbox" aria-checked={mixed ? 'mixed' : checked} aria-label={label} title={label}
+      onClick={(e) => { e.stopPropagation(); onClick(e) }}
+      className={`pick-box inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-[1.5px] transition-colors ${checked || mixed
+        ? 'border-peacock-700 bg-peacock-700 text-white' : 'border-slate-400 bg-white hover:border-peacock-700'} ${className}`}>
+      {mixed ? <span className="h-0.5 w-2 rounded bg-white" /> : checked ? <IconCheck size={11} strokeWidth={3} /> : null}
+    </button>
+  )
+}
+
+function Row({ m, selected, picked, picking, sentView, onSelect, onPick, onDone, onTrash, onMoveLane, onMove, onSnooze }) {
+  const press = useRef({ timer: null, fired: false })
   const unread = !m.seen
   const toLine = `To: ${(m.to || []).join(', ') || '(no recipients)'}`
   const who = sentView || m.backReason === 'no_reply' || m.waitingDays ? toLine : senderName(m)
@@ -22,16 +38,39 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
       role="button"
       tabIndex={0}
       aria-current={selected ? 'true' : undefined}
-      onClick={() => onSelect(m.id)}
+      onClick={(e) => {
+        if (press.current.fired) { press.current.fired = false; return }
+        if (onPick && (e.shiftKey || e.ctrlKey || e.metaKey || (picking && TOUCH))) {
+          e.preventDefault()
+          onPick(m.id, { range: e.shiftKey })
+          return
+        }
+        onSelect(m.id)
+      }}
       onKeyDown={(e) => { if (e.key === 'Enter') onSelect(m.id) }}
-      className={`msg-row group relative cursor-pointer border-b border-slate-200/70 py-3 pl-4 pr-3 transition-colors sm:py-2.5 ${
-        selected ? 'bg-amber-50' : unread ? 'bg-white hover:bg-slate-50' : 'bg-white/60 hover:bg-slate-50'
+      onMouseDown={(e) => { if (e.shiftKey && onPick) e.preventDefault() /* no text highlight on Shift-click */ }}
+      onTouchStart={() => {
+        if (!onPick) return
+        clearTimeout(press.current.timer)
+        press.current.timer = setTimeout(() => { press.current.fired = true; onPick(m.id, {}); navigator.vibrate?.(15) }, 450)
+      }}
+      onTouchMove={() => clearTimeout(press.current.timer)}
+      onTouchEnd={() => clearTimeout(press.current.timer)}
+      onContextMenu={(e) => { if (TOUCH && onPick) e.preventDefault() }}
+      className={`msg-row group relative cursor-pointer select-none border-b border-slate-200/70 py-3 pl-4 pr-3 transition-colors sm:select-auto sm:py-2.5 ${picking ? 'picking' : ''} ${
+        picked ? 'picked bg-peacock-50' : selected ? 'bg-amber-50' : unread ? 'bg-white hover:bg-slate-50' : 'bg-white/60 hover:bg-slate-50'
       }`}
     >
       <span className="absolute inset-y-0 left-0 w-1" style={{ background: m.accountColor || '#0e7c86' }} title={m.accountEmail} />
       {selected && <span className="absolute inset-y-0 left-1 w-0.5 bg-brand-gold" />}
       <div className="flex items-center gap-2">
-        {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-gold" aria-label="Unread" />}
+        {onPick ? (
+          <span className="pick-slot relative inline-flex h-4 w-4 shrink-0 items-center justify-center">
+            {unread && <span className="pick-dot h-2 w-2 rounded-full bg-brand-gold" aria-label="Unread" />}
+            <PickBox checked={!!picked} label={picked ? 'Untick' : 'Tick to select'}
+              onClick={(e) => onPick(m.id, { range: e.shiftKey })} className="pick-check absolute inset-0" />
+          </span>
+        ) : unread && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-gold" aria-label="Unread" />}
         <span className={`min-w-0 flex-1 truncate text-[17px] sm:text-sm ${unread ? 'font-bold text-brand-ink' : 'font-medium text-slate-700'}`}>{who}</span>
         {m.threadCount > 1 && <span className="rounded bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600 num">{m.threadCount}</span>}
         {m.hasNote && <IconNote size={13} className="text-amber-600" aria-label="Has your note" />}
@@ -79,7 +118,7 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
         </div>
       )}
 
-      <div className="row-actions absolute bottom-1.5 right-2 flex items-center gap-0.5 rounded-lg bg-white/95 shadow-sm ring-1 ring-slate-200">
+      {!picking && <div className="row-actions absolute bottom-1.5 right-2 flex items-center gap-0.5 rounded-lg bg-white/95 shadow-sm ring-1 ring-slate-200">
         <button className="icon-btn" title="Done (archive)" onClick={(e) => { e.stopPropagation(); onDone(m.id) }}>
           <IconArchive size={16} />
         </button>
@@ -89,14 +128,15 @@ function Row({ m, selected, sentView, onSelect, onDone, onTrash, onMoveLane, onM
         <button className="icon-btn hover:!text-red-700" title="Move to Trash" onClick={(e) => { e.stopPropagation(); onTrash(m.id) }}>
           <IconTrash size={16} />
         </button>
-      </div>
+      </div>}
     </div>
   )
 }
 
 export default function MessageList({
-  items, loading, error, selectedId, sentView, empty, nextCursor, loadingMore, onLoadMore, onRetry, ...handlers
+  items, loading, error, selectedId, sentView, empty, nextCursor, loadingMore, onLoadMore, onRetry, picked, ...handlers
 }) {
+  const picking = !!picked && picked.size > 0
   if (loading && !items.length) {
     return (
       <div className="space-y-px" aria-busy="true">
@@ -122,7 +162,7 @@ export default function MessageList({
   return (
     <div>
       {items.map((m) => (
-        <Row key={m.id} m={m} selected={m.id === selectedId} sentView={sentView} {...handlers} />
+        <Row key={m.id} m={m} selected={m.id === selectedId} picked={picked?.has(m.id)} picking={picking} sentView={sentView} {...handlers} />
       ))}
       {nextCursor && (
         <div className="p-3 text-center">
