@@ -19,6 +19,7 @@ import software.magizhchi.maillook.mail.DraftRepo;
 import software.magizhchi.maillook.mail.Waiting;
 import software.magizhchi.maillook.mail.MailActions;
 import software.magizhchi.maillook.mail.Outbox;
+import software.magizhchi.maillook.mail.MailActions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -56,12 +57,13 @@ public class SuiteBrainController {
     private final DraftRepo drafts;
     private final AccountRepo accounts;
     private final Outbox outbox;
+    private final MailActions mailActions;
     private final ObjectMapper mapper;
     private final String provisionSecret;
 
     public SuiteBrainController(SuiteDelegationVerifier verifier, JdbcTemplate jdbc, MessageRepo messages,
                                 Waiting waiting, DraftRepo drafts, AccountRepo accounts,
-                                Outbox outbox, ObjectMapper mapper,
+                                Outbox outbox, MailActions mailActions, ObjectMapper mapper,
                                 @Value("${magizhchi.provision-secret:}") String provisionSecret) {
         this.verifier = verifier;
         this.jdbc = jdbc;
@@ -70,6 +72,7 @@ public class SuiteBrainController {
         this.drafts = drafts;
         this.accounts = accounts;
         this.outbox = outbox;
+        this.mailActions = mailActions;
         this.mapper = mapper;
         this.provisionSecret = provisionSecret == null ? "" : provisionSecret;
     }
@@ -110,16 +113,35 @@ public class SuiteBrainController {
                                 "body", prop("string", "Plain-text body.")),
                         List.of("to", "subject", "body")),
                 tool("send_mail", "danger",
-                        "Send an email from the user's own MailLook mailbox. It goes out after a short undo window. "
-                                + "Only call this once you know the recipient's real email address; write a clear subject and a "
-                                + "complete, polite body in the user's voice. The user is shown the email and presses Send, so "
-                                + "never say it was sent until the result says so.",
+                        "Send a new email from the user's own MailLook mailbox. It goes out after a short undo window, "
+                                + "or at the time you give in sendAt. Only call this once you know the recipient's real email "
+                                + "address; write a clear subject and a complete, polite body in the user's voice, signed with "
+                                + "their first name. The user is shown the email and presses Send, so never say it was sent "
+                                + "until the result says so.",
                         Map.of(
                                 "to", Map.of("type", "array", "items", Map.of("type", "string"),
                                         "description", "Recipient email addresses (1-5)."),
                                 "subject", prop("string", "Subject line."),
-                                "body", prop("string", "Plain-text body.")),
+                                "body", prop("string", "Plain-text body."),
+                                "sendAt", prop("string", "Optional. Send later at this exact time, ISO-8601 UTC like 2026-11-09T03:30:00Z (at least a minute away)."),
+                                "remindIfNoReplyDays", prop("integer", "Optional, 1-30. Remind the user if nobody has replied after this many days.")),
                         List.of("to", "subject", "body")),
+                tool("reply_mail", "danger",
+                        "Reply to an email in the user's inbox (keeps the conversation together). Use search_mail first to get "
+                                + "the message id, and read_mail if you need what it says. Pass the sender's address as to and "
+                                + "the original subject as subject. The user is shown the reply and presses Send.",
+                        Map.of(
+                                "messageId", prop("integer", "The id of the email being replied to (from search_mail)."),
+                                "to", Map.of("type", "array", "items", Map.of("type", "string"),
+                                        "description", "Who the reply goes to; normally just the original sender."),
+                                "subject", prop("string", "The original subject (Re: is added for you)."),
+                                "body", prop("string", "Plain-text reply, signed with the user's first name."),
+                                "remindIfNoReplyDays", prop("integer", "Optional, 1-30. Remind the user if there is no answer.")),
+                        List.of("messageId", "to", "body")),
+                tool("read_mail", "read",
+                        "Read one email from the inbox (the first few paragraphs) so you can summarise it or write a reply.",
+                        Map.of("id", prop("integer", "The message id from search_mail or needs_reply.")),
+                        List.of("id")),
                 flag(tool("cancel_send", "write",
                         "Take back a mail that is still in its undo window; it returns to Drafts. Used by Undo.",
                         Map.of("outboxId", prop("integer", "The queued mail's id.")),
@@ -164,6 +186,11 @@ public class SuiteBrainController {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield sendMail(userId, input);
             }
+            case "reply_mail" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield replyMail(userId, input);
+            }
+            case "read_mail" -> readMail(userId, input);
             case "cancel_send" -> {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield cancelSend(userId, input);
@@ -279,31 +306,97 @@ public class SuiteBrainController {
     }
 
     /**
-     * Sends mail from the person's own mailbox. It is queued for {@link #UNDO_SECONDS} seconds first, so
-     * Undo can still take it back (it returns to Drafts). PA only calls this after the person pressed Send.
+     * Sends mail from the person's own mailbox. It waits in the outbox for {@link #UNDO_SECONDS} seconds (or
+     * until sendAt), so Undo can still take it back to Drafts. PA only calls this after the person pressed Send.
      */
     private Object sendMail(long userId, Map<String, Object> input) {
         List<String> to = addresses(input.get("to"));
         if (to.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "At least one valid recipient address is needed.");
-        if (to.size() > 5) throw new ApiException(HttpStatus.BAD_REQUEST, "The assistant can send to 5 people at a time at most.");
         String subject = input.get("subject") == null ? "" : input.get("subject").toString().trim();
         String body = input.get("body") == null ? "" : input.get("body").toString();
+        return queueMail(userId, to, subject, body, null, input);
+    }
+
+    /** Reply in the same conversation; the recipient defaults to the original sender. */
+    private Object replyMail(long userId, Map<String, Object> input) {
+        long id;
+        try {
+            id = (long) Double.parseDouble(String.valueOf(input.get("messageId")));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "messageId is required.");
+        }
+        MessageRepo.Row original = mailActions.owned(userId, id);
+        List<String> to = addresses(input.get("to"));
+        if (to.isEmpty() && original.fromEmail() != null && ADDRESS.matcher(original.fromEmail()).matches()) {
+            to = List.of(original.fromEmail());
+        }
+        if (to.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Who should the reply go to?");
+        String base = input.get("subject") == null || input.get("subject").toString().isBlank()
+                ? (original.subject() == null ? "" : original.subject()) : input.get("subject").toString().trim();
+        String subject = base.regionMatches(true, 0, "re:", 0, 3) ? base : "Re: " + base;
+        String body = input.get("body") == null ? "" : input.get("body").toString();
+        return queueMail(userId, to, subject, body, id, input);
+    }
+
+    private Object queueMail(long userId, List<String> to, String subject, String body, Long replyTo, Map<String, Object> input) {
+        if (to.size() > 5) throw new ApiException(HttpStatus.BAD_REQUEST, "The assistant can send to 5 people at a time at most.");
         if (subject.isBlank() && body.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "The email is empty.");
         if (subject.length() > 300 || body.length() > 20_000) throw new ApiException(HttpStatus.BAD_REQUEST, "That email is too long.");
         var mailboxes = accounts.forUser(userId);
         if (mailboxes.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Add a mailbox in MailLook first.");
-        MailActions.Outgoing o = new MailActions.Outgoing(mailboxes.get(0).id(), to, List.of(), List.of(),
-                subject, body, null, null);
+        long accountId = mailboxes.get(0).id();
+        if (replyTo != null) accountId = mailActions.owned(userId, replyTo).accountId();
+
+        Instant now = Instant.now();
+        Instant at = now.plusSeconds(UNDO_SECONDS);
+        boolean later = false;
+        Object when = input.get("sendAt");
+        if (when != null && !when.toString().isBlank()) {
+            try {
+                Instant t = Instant.parse(when.toString().trim());
+                if (t.isBefore(now.plusSeconds(60))) throw new ApiException(HttpStatus.BAD_REQUEST, "Send-later needs a time at least a minute from now.");
+                if (t.isAfter(now.plus(Duration.ofDays(366)))) throw new ApiException(HttpStatus.BAD_REQUEST, "Mail can be scheduled up to a year ahead.");
+                at = t;
+                later = true;
+            } catch (java.time.format.DateTimeParseException e) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "sendAt must be a UTC time like 2026-11-09T03:30:00Z.");
+            }
+        }
+
+        MailActions.Outgoing o = new MailActions.Outgoing(accountId, to, List.of(), List.of(), subject, body, replyTo, null);
         ObjectNode payload = mapper.valueToTree(o);
-        var queued = outbox.queue(userId, payload, o, List.of(), Instant.now().plusSeconds(UNDO_SECONDS));
+        int days = clamp(input.get("remindIfNoReplyDays"), 0, 30, 0);
+        if (days > 0) payload.put("remindAt", at.plus(Duration.ofDays(days)).toString());
+        var queued = outbox.queue(userId, payload, o, List.of(), at);
+
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("outboxId", queued.id());
         out.put("to", to);
-        out.put("undoSeconds", UNDO_SECONDS);
-        out.put("message", "Sending to " + String.join(", ", to) + " in " + UNDO_SECONDS + " seconds. You can still undo it.");
+        out.put("undoSeconds", later ? 0 : UNDO_SECONDS);
+        if (later) out.put("sendAt", at.toString());
+        if (days > 0) out.put("remindInDays", days);
+        out.put("message", (later ? "Scheduled for " + at + " to " : "Sending in " + UNDO_SECONDS + " seconds to ")
+                + String.join(", ", to) + ". You can still undo it."
+                + (days > 0 ? " I'll remind you if there's no reply in " + days + " day" + (days == 1 ? "" : "s") + "." : ""));
         out.put("undo", Map.of("tool", "cancel_send", "input", Map.of("outboxId", queued.id())));
         return out;
+    }
+
+    /** The start of one email, for summarising or writing a reply. Kept short: mail is private. */
+    private Object readMail(long userId, Map<String, Object> input) {
+        long id;
+        try {
+            id = (long) Double.parseDouble(String.valueOf(input.get("id")));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "id is required.");
+        }
+        MessageRepo.Row r = mailActions.owned(userId, id);
+        Map<String, Object> m = new LinkedHashMap<>(brief(r));
+        m.put("to", r.to());
+        String text = r.bodyText() == null || r.bodyText().isBlank() ? r.snippet() : r.bodyText();
+        m.put("body", cut(text, 2500));
+        return m;
     }
 
     private Object cancelSend(long userId, Map<String, Object> input) {

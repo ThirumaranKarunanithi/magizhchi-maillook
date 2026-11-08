@@ -42,6 +42,7 @@ class SuiteSendMailTest {
     private JdbcTemplate jdbc;
     private AccountRepo accounts;
     private Outbox outbox;
+    private MailActions mailActions;
     private SuiteBrainController controller;
 
     @BeforeEach
@@ -50,8 +51,9 @@ class SuiteSendMailTest {
         jdbc = mock(JdbcTemplate.class);
         accounts = mock(AccountRepo.class);
         outbox = mock(Outbox.class);
+        mailActions = mock(MailActions.class);
         controller = new SuiteBrainController(verifier, jdbc, mock(MessageRepo.class), mock(Waiting.class),
-                mock(DraftRepo.class), accounts, outbox, new ObjectMapper().findAndRegisterModules(), "secret");
+                mock(DraftRepo.class), accounts, outbox, mailActions, new ObjectMapper().findAndRegisterModules(), "secret");
         when(jdbc.queryForList(anyString(), eq(Long.class), anyString())).thenReturn(List.of(7L));
     }
 
@@ -89,6 +91,65 @@ class SuiteSendMailTest {
         ArgumentCaptor<Instant> when = ArgumentCaptor.forClass(Instant.class);
         verify(outbox).queue(eq(7L), any(ObjectNode.class), any(MailActions.Outgoing.class), anyList(), when.capture());
         assertTrue(when.getValue().isAfter(Instant.now().plusSeconds(10)), "must wait out the undo window, not send instantly");
+    }
+
+    private Outbox.Item queuedItem() {
+        Account a = mock(Account.class);
+        when(a.id()).thenReturn(3L);
+        when(accounts.forUser(7L)).thenReturn(List.of(a));
+        Outbox.Item item = new Outbox.Item(42L, 7L, 3L, new ObjectMapper().createObjectNode(), null, "queued", null, null);
+        when(outbox.queue(anyLong(), any(ObjectNode.class), any(MailActions.Outgoing.class), anyList(), any(Instant.class))).thenReturn(item);
+        return item;
+    }
+
+    @Test
+    void sendLaterQueuesAtThatTimeAndSetsAReplyReminder() {
+        token("read", "write");
+        queuedItem();
+        Instant at = Instant.now().plusSeconds(3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        Map<String, Object> input = Map.of("to", List.of("a@b.co"), "subject", "s", "body", "b",
+                "sendAt", at.toString(), "remindIfNoReplyDays", 3);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> r = (Map<String, Object>) send(input);
+
+        assertEquals(at.toString(), r.get("sendAt"));
+        assertEquals(0, r.get("undoSeconds"));
+        ArgumentCaptor<ObjectNode> payload = ArgumentCaptor.forClass(ObjectNode.class);
+        ArgumentCaptor<Instant> when = ArgumentCaptor.forClass(Instant.class);
+        verify(outbox).queue(eq(7L), payload.capture(), any(MailActions.Outgoing.class), anyList(), when.capture());
+        assertEquals(at, when.getValue());
+        assertEquals(at.plus(java.time.Duration.ofDays(3)).toString(), payload.getValue().path("remindAt").asText());
+    }
+
+    @Test
+    void aSendTimeInThePastIsRefused() {
+        token("read", "write");
+        queuedItem();
+        Map<String, Object> input = Map.of("to", List.of("a@b.co"), "subject", "s", "body", "b",
+                "sendAt", Instant.now().minusSeconds(60).toString());
+        assertThrows(ApiException.class, () -> send(input));
+        assertThrows(ApiException.class, () -> send(Map.of("to", List.of("a@b.co"), "subject", "s", "body", "b", "sendAt", "tomorrow morning")));
+    }
+
+    @Test
+    void replyKeepsTheConversationAndAddsRe() {
+        token("read", "write");
+        queuedItem();
+        MessageRepo.Row original = mock(MessageRepo.Row.class);
+        when(original.accountId()).thenReturn(3L);
+        when(original.fromEmail()).thenReturn("ravi@example.com");
+        when(original.subject()).thenReturn("Quote for Friday");
+        when(mailActions.owned(7L, 99L)).thenReturn(original);
+
+        Object r = controller.run("reply_mail", Map.of("input", Map.of("messageId", 99, "to", List.of(), "body", "Yes, Friday works.")), "Bearer t");
+
+        assertTrue(r instanceof Map);
+        ArgumentCaptor<MailActions.Outgoing> o = ArgumentCaptor.forClass(MailActions.Outgoing.class);
+        verify(outbox).queue(eq(7L), any(ObjectNode.class), o.capture(), anyList(), any(Instant.class));
+        assertEquals(List.of("ravi@example.com"), o.getValue().to());
+        assertEquals("Re: Quote for Friday", o.getValue().subject());
+        assertEquals(99L, o.getValue().replyToMessageId());
     }
 
     @Test
