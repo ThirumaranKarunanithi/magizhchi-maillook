@@ -337,7 +337,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-[15px] font-semibold text-brand-ink sm:text-sm">{bill.vendor}</span>
-              {bill.accountName && <span className="shrink-0 truncate text-sm text-slate-500 sm:text-xs">· {bill.accountName}</span>}
+              {(bill.accountName || bill.customerRef) && <span className="shrink-0 truncate text-sm text-slate-500 sm:text-xs">· {bill.accountName || `A/c ${bill.customerRef}`}</span>}
               {shaky && <IconAlert size={13} className="shrink-0 text-amber-600" aria-label="Check this bill" />}
             </div>
             <div className="truncate text-sm text-slate-500 sm:text-xs">{bill.invoiceNo ? `Invoice ${bill.invoiceNo}` : bill.mailSubject || ''}</div>

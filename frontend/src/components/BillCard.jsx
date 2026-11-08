@@ -294,7 +294,7 @@ export default function BillCard({ message }) {
         <div className="min-w-0 flex-1">
           <p className="truncate font-bold text-brand-ink">
             <span className={unsure(bill, 'vendor') ? 'text-amber-800' : ''}>{bill.vendor}</span>
-            {bill.accountName && <span className="font-normal text-slate-500"> · {bill.accountName}</span>}
+            {(bill.accountName || bill.customerRef) && <span className="font-normal text-slate-500"> · {bill.accountName || `A/c ${bill.customerRef}`}</span>}
           </p>
           <p className="flex flex-wrap items-baseline gap-x-2">
             <span className={`text-xl font-bold num ${unsure(bill, 'amount') ? 'text-amber-800' : 'text-brand-ink'}`}>{money(bill.amount, bill.currency)}</span>
