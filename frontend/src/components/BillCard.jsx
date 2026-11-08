@@ -76,6 +76,14 @@ export function BillEditor({ bill, onSaved, onCancel }) {
   )
 }
 
+/** "Sun 8 Nov · seen in SIB Alerts’ debit alert · ₹11,140 went out" */
+function paidLine(b) {
+  const on = new Date(b.paidAt).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
+  const how = b.paidHow === 'alert' ? ` · seen in an alert from ${b.paidFrom || 'your bank'}` : b.paidHow === 'you' ? ' · marked by you' : b.kind === 'receipt' ? ' · receipt' : ''
+  const out = b.paidInr != null && b.currency && b.currency !== 'INR' ? ` · ${money(b.paidInr)} went out` : ''
+  return on + how + out
+}
+
 /** The facts of one bill, with the shaky ones marked. Shared by the card on a mail and the Bills page. */
 export function BillFacts({ bill }) {
   const tax = [['CGST', bill.cgst], ['SGST', bill.sgst], ['IGST', bill.igst]].filter(([, v]) => v != null && Number(v) > 0)
@@ -88,6 +96,7 @@ export function BillFacts({ bill }) {
     tax.length > 0 && ['Tax', tax.map(([k, v]) => `${k} ${money(v, bill.currency)}`).join(' · '), 'tax'],
     bill.payeeAccount && ['Pay to', `${bill.payeeAccount}${bill.payeeIfsc ? ` · ${bill.payeeIfsc}` : ''}`, 'payeeAccount'],
     bill.upiId && ['UPI', bill.upiId, 'upiId'],
+    bill.status === 'paid' && bill.paidAt && ['Paid', paidLine(bill), 'paidAt'],
   ].filter(Boolean)
   if (!items.length) return null
   return (
@@ -308,6 +317,7 @@ export default function BillCard({ message }) {
               : <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setStatus('due')} disabled={!!busy}>Still to pay</button>)}
             <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setEditing(true)}>Edit</button>
             <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/bills?open=${bill.id}`)}>All bills</button>
+            {bill.paidMessageId && bill.paidMessageId !== message.id && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.paidMessageId}`)}>Open the bank alert</button>}
             <span className="ml-auto flex items-center gap-2 text-xs">
               <button className="text-slate-500 hover:text-brand-ink hover:underline" onClick={() => notABill(false)} disabled={!!busy}>Not a bill</button>
               <button className="text-slate-500 hover:text-brand-ink hover:underline" onClick={() => notABill(true)} disabled={!!busy} title={`Never read mail from ${message.fromEmail} as a bill`}>Never from this sender</button>

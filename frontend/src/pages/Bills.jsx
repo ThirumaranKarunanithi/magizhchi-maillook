@@ -308,6 +308,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
                 {bill.mailFrom && <p className="mt-1.5 truncate text-xs text-slate-500">From the mail “{bill.mailSubject}” · {bill.mailFrom}</p>}
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {bill.messageId && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.messageId}`)}>Open the mail</button>}
+                  {bill.paidMessageId && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.paidMessageId}`)}>Open the bank alert</button>}
                   <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setEditing(true)}>Edit</button>
                   {bill.kind === 'bill' && bill.status === 'paid' && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setStatus('due')} disabled={!!busy}>Still to pay</button>}
                   <button className="ml-auto text-xs text-slate-500 hover:text-brand-ink hover:underline" onClick={notABill} disabled={!!busy}>Not a bill</button>

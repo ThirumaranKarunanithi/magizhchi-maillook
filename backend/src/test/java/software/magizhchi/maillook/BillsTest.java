@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import software.magizhchi.maillook.bills.BillDetector;
 import software.magizhchi.maillook.bills.BillService;
+import software.magizhchi.maillook.bills.PaymentAlert;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -84,6 +85,30 @@ class BillsTest {
     @Autowired ObjectMapper json;
     @Autowired BillService bills;
     @Autowired JdbcTemplate jdbc;
+
+    @Test
+    void readsBankAndUpiAlerts() {
+        PaymentAlert upi = PaymentAlert.parse("Debit Alert From SIB",
+                "Rs.6,010.92 debited from A/c XX1234 on 08-11-26 to VPA actfibernet@ybl (UPI Ref No 6123). Avl Bal Rs.20,000");
+        assertThat(upi.inr()).isEqualByComparingTo("6010.92");
+        assertThat(upi.payee()).isEqualTo("actfibernet@ybl");
+        assertThat(upi.names("act")).isTrue();
+
+        PaymentAlert card = PaymentAlert.parse("Transaction alert", "USD 118.00 spent on your HDFC Bank Credit Card XX4321 at ANTHROPIC on 2026-11-07.");
+        assertThat(card.foreignCurrency()).isEqualTo("USD");
+        assertThat(card.foreignAmount()).isEqualByComparingTo("118");
+        assertThat(card.names("anthropic")).isTrue();
+
+        PaymentAlert gpay = PaymentAlert.parse("You paid ₹2,271.50 to ACT Fibernet", "");
+        assertThat(gpay.inr()).isEqualByComparingTo("2271.50");
+        assertThat(gpay.names("act")).isTrue();
+
+        assertThat(PaymentAlert.parse("Your OTP", "OTP for txn of Rs 500 is 1234")).isNull();
+        assertThat(PaymentAlert.parse("Credit alert", "Rs 5,000 credited to your account")).isNull();
+        assertThat(PaymentAlert.parse("Reminder", "Rs 6,010.92 will be debited from your account on 15 Nov")).isNull();
+        assertThat(PaymentAlert.parse("Your bill", "Amount due Rs 1,180, charged to your card on the 20th")).isNull();
+        assertThat(PaymentAlert.parse("Weekly news", "Read about payments")).isNull();
+    }
 
     @Test
     void keepsRealPaymentPagesNotMailTrackers() {
@@ -252,6 +277,25 @@ class BillsTest {
         assertThat(bills.remind(morning)).isZero();
         assertThat(jdbc.queryForList("SELECT title FROM alerts WHERE kind = 'reminder'", String.class))
                 .anyMatch(t -> t.startsWith("ACT Fibernet bill due on"));
+
+        // The bank's alert that the ACT bill was paid marks it paid; another debit doesn't touch it.
+        deliver("SIB Alerts <alerts@sib.example>", "Debit Alert From SIB",
+                "Rs.500.00 debited from A/c XX1234 to VPA swiggy@icici on " + LocalDate.now(INDIA) + ".", List.of());
+        deliver("SIB Alerts <alerts@sib.example>", "Debit Alert From SIB",
+                "Rs.1,180.00 debited from A/c XX1234 to VPA actfibernet@ybl on " + LocalDate.now(INDIA) + ". UPI Ref 6123.", List.of());
+        call(post("/api/sync"), token, 202);
+        waitForMessage(token, "Debit Alert From SIB");
+        for (int i = 0; i < 50 && jdbc.queryForObject("SELECT COUNT(*) FROM messages WHERE subject = 'Debit Alert From SIB'", Integer.class) < 2; i++) Thread.sleep(100);
+        int readsBefore = reads.size();
+        bills.work(10);
+        assertThat(reads).hasSize(readsBefore);   // alerts are read here, never sent to Data
+        JsonNode byAlert = find(call(get("/api/bills"), token, 200).path("bills"), "ACT Fibernet");
+        assertThat(byAlert.path("status").asText()).isEqualTo("paid");
+        assertThat(byAlert.path("paidHow").asText()).isEqualTo("alert");
+        assertThat(byAlert.path("paidInr").decimalValue()).isEqualByComparingTo("1180");
+        assertThat(byAlert.path("paidFrom").asText()).isEqualTo("SIB Alerts");
+        assertThat(jdbc.queryForList("SELECT bill_state FROM messages WHERE subject = 'Debit Alert From SIB' ORDER BY id", String.class))
+                .containsExactly("payment", "payment_used");
 
         // Fix the amount, mark it paid.
         JsonNode fixed = call(patch("/api/bills/" + act.path("id").asLong()).contentType(MediaType.APPLICATION_JSON)

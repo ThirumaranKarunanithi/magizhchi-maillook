@@ -113,7 +113,8 @@ public class BillsController {
     public Map<String, Object> list(@RequestAttribute long userId) {
         OffsetDateTime since = OffsetDateTime.now(ZoneOffset.UTC).minusDays(120);
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT b.*, m.subject AS mail_subject, m.from_name AS mail_from FROM bills b LEFT JOIN messages m ON m.id = b.message_id " +
+                "SELECT b.*, m.subject AS mail_subject, m.from_name AS mail_from, pm.from_name AS paid_from FROM bills b " +
+                        "LEFT JOIN messages m ON m.id = b.message_id LEFT JOIN messages pm ON pm.id = b.paid_message_id " +
                         "WHERE b.user_id = ? AND (b.status = 'due' OR b.created_at >= ? OR b.paid_at >= ?) " +
                         "ORDER BY b.due_date NULLS LAST, b.id DESC LIMIT 500", userId, since, since);
         List<Map<String, Object>> out = new ArrayList<>();
@@ -172,6 +173,11 @@ public class BillsController {
             args.add(s);
             sets.add("paid_at = ?");
             args.add(s.equals("paid") ? OffsetDateTime.now(ZoneOffset.UTC) : null);
+            // Marked by hand: whatever alert matched before no longer counts (it isn't matched again).
+            sets.add("paid_how = ?");
+            args.add(s.equals("paid") ? "you" : null);
+            sets.add("paid_message_id = NULL");
+            sets.add("paid_inr = NULL");
         }
         sets.add("checked = TRUE");
         sets.add("updated_at = ?");
@@ -229,7 +235,8 @@ public class BillsController {
 
     private Map<String, Object> one(long userId, long id) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT b.*, m.subject AS mail_subject, m.from_name AS mail_from FROM bills b LEFT JOIN messages m ON m.id = b.message_id " +
+                "SELECT b.*, m.subject AS mail_subject, m.from_name AS mail_from, pm.from_name AS paid_from FROM bills b " +
+                        "LEFT JOIN messages m ON m.id = b.message_id LEFT JOIN messages pm ON pm.id = b.paid_message_id " +
                         "WHERE b.id = ? AND b.user_id = ?", id, userId);
         if (rows.isEmpty()) throw ApiException.notFound("Bill");
         return view(rows.get(0));
@@ -272,6 +279,10 @@ public class BillsController {
         m.put("autopay", r.get("autopay"));
         m.put("status", r.get("status"));
         m.put("paidAt", r.get("paid_at") == null ? null : r.get("paid_at").toString());
+        m.put("paidHow", r.get("paid_how"));
+        m.put("paidMessageId", r.get("paid_message_id"));
+        m.put("paidInr", r.get("paid_inr"));
+        m.put("paidFrom", r.get("paid_from"));
         m.put("source", r.get("source"));
         m.put("checked", r.get("checked"));
         Map<String, Object> conf = new LinkedHashMap<>();

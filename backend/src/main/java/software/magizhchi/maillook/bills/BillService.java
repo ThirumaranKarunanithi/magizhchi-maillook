@@ -132,7 +132,7 @@ public class BillService {
     public int scan(long userId, int days, boolean apply) {
         OffsetDateTime since = OffsetDateTime.now(ZoneOffset.UTC).minusDays(Math.max(1, Math.min(days, 365)));
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT m.id, m.subject, m.body_text, m.body_html, m.attachments, m.from_email FROM messages m " +
+                "SELECT m.id, m.subject, m.body_text, m.body_html, m.attachments, m.from_email, m.received_at FROM messages m " +
                         "JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = 'INBOX' " +
                         "AND m.bill_state IS NULL AND m.received_at >= ?", userId, since);
         return screen(userId, rows, apply);
@@ -147,6 +147,15 @@ public class BillService {
             List<String> names = new ArrayList<>();
             for (Map<String, Object> a : Json.maps(str(r.get("attachments")))) names.add(str(a.get("name")));
             String from = str(r.get("from_email")).toLowerCase(Locale.ROOT);
+            if (apply && !Boolean.TRUE.equals(rules.get(from))) {
+                PaymentAlert alert = PaymentAlert.parse(str(r.get("subject")), body);
+                if (alert != null) {
+                    long id = ((Number) r.get("id")).longValue();
+                    jdbc.update("UPDATE messages SET bill_state = 'payment' WHERE id = ? AND bill_state IS NULL", id);
+                    matchAlert(userId, id, alert, received(r.get("received_at")));
+                    continue;
+                }
+            }
             boolean bill = BillDetector.looksLikeBill(str(r.get("subject")), body, names, rules.get(from));
             if (bill) bills++;
             if (apply) {
@@ -183,6 +192,11 @@ public class BillService {
             log.warn("Bills pass failed: {}", e.toString());
         }
         try {
+            lookBackForPayments();
+        } catch (Exception e) {
+            log.warn("Looking back for payments failed: {}", e.toString());
+        }
+        try {
             fillPayWays();
         } catch (Exception e) {
             log.warn("Filling pay links failed: {}", e.toString());
@@ -205,7 +219,7 @@ public class BillService {
      */
     public int work(int limit) {
         List<Map<String, Object>> fresh = jdbc.queryForList(
-                "SELECT m.id, m.subject, m.body_text, m.body_html, m.attachments, m.from_email, a.user_id FROM messages m " +
+                "SELECT m.id, m.subject, m.body_text, m.body_html, m.attachments, m.from_email, m.received_at, a.user_id FROM messages m " +
                         "JOIN accounts a ON a.id = m.account_id JOIN users u ON u.id = a.user_id " +
                         "WHERE u.bills_on = TRUE AND m.folder = 'INBOX' AND m.bill_state IS NULL AND m.created_at >= u.bills_on_at " +
                         "ORDER BY m.id LIMIT 500");
@@ -278,6 +292,7 @@ public class BillService {
         }
         long billId = save(userId, m, b, kind, amount, reply.json().path("source").asText("text"));
         borrowPayWay(billId);
+        matchBill(userId, billId);
         jdbc.update("UPDATE messages SET bill_state = 'read', bill_id = ? WHERE id = ?", billId, messageId);
         return new Result(Outcome.BILL, billId, null);
     }
@@ -419,6 +434,135 @@ public class BillService {
                 d.get("due_date"), d.get("due_date"), d.get("status"), d.get("paid_at"), now, keepId);
         jdbc.update("UPDATE messages SET bill_id = ? WHERE bill_id = ?", keepId, dupId);
         jdbc.update("DELETE FROM bills WHERE id = ?", dupId);
+    }
+
+    // ── paid, seen in a bank or UPI alert ────────────────────
+
+    static final int ALERT_DAYS_BEFORE = 3;   // paid a little before the bill mail came
+    static final int ALERT_DAYS_AFTER = 15;   // or up to two weeks after it was due
+    private final Set<Long> lookedBack = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+    /**
+     * Mail of the last 45 days that was set aside as "not a bill" before alerts were read: the alerts
+     * in it are read now, once per person per run of the server.
+     * @return how many bills they marked paid
+     */
+    public int lookBackForPayments() {
+        int paid = 0;
+        for (Long userId : jdbc.queryForList("SELECT id FROM users WHERE bills_on = TRUE", Long.class)) {
+            if (!lookedBack.add(userId)) continue;
+            List<Map<String, Object>> rows = jdbc.queryForList(
+                    "SELECT m.id, m.subject, m.body_text, m.body_html, m.from_email, m.received_at FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                            "WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.bill_state = 'skip' AND m.received_at >= ? ORDER BY m.received_at",
+                    userId, OffsetDateTime.now(ZoneOffset.UTC).minusDays(45));
+            for (Map<String, Object> r : rows) {
+                String body = r.get("body_text") != null ? r.get("body_text").toString()
+                        : r.get("body_html") == null ? "" : MessageParser.htmlToText(r.get("body_html").toString());
+                PaymentAlert alert = PaymentAlert.parse(str(r.get("subject")), body);
+                if (alert == null) continue;
+                long id = ((Number) r.get("id")).longValue();
+                jdbc.update("UPDATE messages SET bill_state = 'payment' WHERE id = ?", id);
+                if (matchAlert(userId, id, alert, received(r.get("received_at")))) paid++;
+            }
+        }
+        return paid;
+    }
+
+    /**
+     * Marks the bill this alert paid, if one fits: still to pay, not auto-pay, the alert within the
+     * bill's window, and the same amount (for a dollar bill: the same dollars, or rupees within 4% of
+     * today's value when the alert names the biller). A round amount needs the alert to name the
+     * biller too; ₹6,010.92 speaks for itself, ₹500 doesn't.
+     * @return whether a bill was marked paid
+     */
+    boolean matchAlert(long userId, long alertMessageId, PaymentAlert alert, LocalDate on) {
+        if (on == null) return false;
+        List<Map<String, Object>> due = jdbc.queryForList(
+                "SELECT b.id, b.vendor_key, b.amount, b.currency, b.due_date, b.invoice_date, b.created_at, m.received_at AS mail_at " +
+                        "FROM bills b LEFT JOIN messages m ON m.id = b.message_id WHERE b.user_id = ? AND b.kind = 'bill' AND b.status = 'due' " +
+                        "AND b.autopay = FALSE AND b.amount IS NOT NULL ORDER BY b.due_date NULLS LAST, b.id", userId);
+        Map<String, Object> best = null;
+        boolean bestNamed = false;
+        for (Map<String, Object> b : due) {
+            if (!fits(b, alert, on)) continue;
+            boolean named = alert.names(firstWord(str(b.get("vendor_key"))));
+            if (best == null || (named && !bestNamed)) {
+                best = b;
+                bestNamed = named;
+            }
+        }
+        if (best == null) return false;
+        long billId = ((Number) best.get("id")).longValue();
+        BigDecimal paidInr = alert.inr() != null ? alert.inr() : null;
+        int n = jdbc.update("UPDATE bills SET status = 'paid', paid_at = ?, paid_message_id = ?, paid_inr = ?, paid_how = 'alert', updated_at = ? " +
+                        "WHERE id = ? AND status = 'due'",
+                on.atStartOfDay(INDIA).toOffsetDateTime(), alertMessageId, paidInr, OffsetDateTime.now(ZoneOffset.UTC), billId);
+        if (n == 0) return false;
+        jdbc.update("UPDATE messages SET bill_state = 'payment_used' WHERE id = ?", alertMessageId);
+        return true;
+    }
+
+    /** A bill just read: an alert that came a little before it may already have paid it. */
+    boolean matchBill(long userId, long billId) {
+        List<Map<String, Object>> alerts = jdbc.queryForList(
+                "SELECT m.id, m.subject, m.body_text, m.body_html, m.received_at FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                        "WHERE a.user_id = ? AND m.bill_state = 'payment' AND m.received_at >= ? ORDER BY m.received_at",
+                userId, OffsetDateTime.now(ZoneOffset.UTC).minusDays(60));
+        for (Map<String, Object> r : alerts) {
+            String body = r.get("body_text") != null ? r.get("body_text").toString()
+                    : r.get("body_html") == null ? "" : MessageParser.htmlToText(r.get("body_html").toString());
+            PaymentAlert alert = PaymentAlert.parse(str(r.get("subject")), body);
+            if (alert == null) continue;
+            Map<String, Object> b = jdbc.queryForList(
+                    "SELECT b.id, b.vendor_key, b.amount, b.currency, b.due_date, b.invoice_date, b.created_at, b.status, b.autopay, b.kind, " +
+                            "m.received_at AS mail_at FROM bills b LEFT JOIN messages m ON m.id = b.message_id WHERE b.id = ?", billId).get(0);
+            if (!"due".equals(b.get("status")) || Boolean.TRUE.equals(b.get("autopay")) || !"bill".equals(b.get("kind"))) return false;
+            if (fits(b, alert, received(r.get("received_at")))) {
+                return matchAlert(userId, ((Number) r.get("id")).longValue(), alert, received(r.get("received_at")));
+            }
+        }
+        return false;
+    }
+
+    private boolean fits(Map<String, Object> b, PaymentAlert alert, LocalDate on) {
+        LocalDate from = b.get("invoice_date") != null ? day(b.get("invoice_date"))
+                : b.get("mail_at") != null ? received(b.get("mail_at")) : received(b.get("created_at"));
+        LocalDate due = b.get("due_date") != null ? day(b.get("due_date")) : (from == null ? null : from.plusDays(30));
+        if (from == null || due == null || on.isBefore(from.minusDays(ALERT_DAYS_BEFORE)) || on.isAfter(due.plusDays(ALERT_DAYS_AFTER))) return false;
+
+        BigDecimal amount = (BigDecimal) b.get("amount");
+        String currency = Objects.toString(b.get("currency"), "INR");
+        boolean named = alert.names(firstWord(str(b.get("vendor_key"))));
+        if ("INR".equals(currency)) {
+            if (alert.inr() == null || alert.inr().subtract(amount).abs().compareTo(BigDecimal.ONE) > 0) return false;
+            boolean round = amount.remainder(BigDecimal.ONE).signum() == 0;
+            return named || !round;
+        }
+        if (currency.equals(alert.foreignCurrency()) && alert.foreignAmount() != null
+                && alert.foreignAmount().subtract(amount).abs().compareTo(new BigDecimal("0.01")) <= 0) return true;
+        // Only rupees on the alert: near today's value, and it must name the biller.
+        BigDecimal inr = alert.inr() == null ? null : fx.inr(amount, currency);
+        if (inr == null || !named) return false;
+        return alert.inr().subtract(inr).abs().compareTo(inr.multiply(new BigDecimal("0.04"))) <= 0;
+    }
+
+    private static LocalDate received(Object at) {
+        if (at == null) return null;
+        if (at instanceof OffsetDateTime o) return o.atZoneSameInstant(INDIA).toLocalDate();
+        if (at instanceof java.sql.Timestamp t) return t.toInstant().atZone(INDIA).toLocalDate();
+        try {
+            return OffsetDateTime.parse(at.toString()).atZoneSameInstant(INDIA).toLocalDate();
+        } catch (Exception e) {
+            return day(at);
+        }
+    }
+
+    private static LocalDate day(Object d) {
+        try {
+            return d == null ? null : LocalDate.parse(d.toString().substring(0, 10));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private final Set<Long> nameLooked = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());

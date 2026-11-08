@@ -32,7 +32,7 @@ export function shortDay(iso) {
 export function dueLabel(bill, today) {
   if (bill.kind === 'credit_note') return 'Credit note'
   if (bill.kind === 'receipt') return 'Paid (receipt)'
-  if (bill.status === 'paid') return 'Paid'
+  if (bill.status === 'paid') return bill.paidHow === 'alert' ? 'Paid · bank alert' : 'Paid'
   const d = daysLeft(bill.dueDate, today)
   if (bill.autopay) return bill.dueDate ? `Auto-pay · ${shortDay(bill.dueDate)}` : 'Auto-pay'
   if (d == null) return 'No due date'
