@@ -291,6 +291,36 @@ public class BoxClient {
         return new Reply(res.statusCode(), json, res.body());
     }
 
+    /**
+     * Searches inside the documents in the person's own Box drive (Box reads PDFs, Office files, text and
+     * scans and keeps their words): GET /api/conversations/{drive}/content-search. Code 0 = not connected
+     * to Box, or Box unreachable.
+     */
+    public Reply searchInside(long userId, String q) {
+        Optional<Link> link = existing(userId);
+        if (link.isEmpty()) return new Reply(0, null, "not connected");
+        return get(userId, "/api/conversations/" + link.get().driveId() + "/content-search?q="
+                + java.net.URLEncoder.encode(q, StandardCharsets.UTF_8));
+    }
+
+    /** A short-lived link to view one Box file in the browser (Box checks it is the person's). */
+    public Optional<String> previewUrl(long userId, long fileId) {
+        Reply r = get(userId, "/api/files/" + fileId + "/preview-url");
+        if (!r.ok() || r.json() == null) return Optional.empty();
+        String url = r.json().path("url").asText("");
+        return url.isBlank() ? Optional.empty() : Optional.of(url);
+    }
+
+    /** Which attachment each Box file came from, for files MailLook saved: boxFileId → [messageId, index]. */
+    public Map<Long, long[]> savedFrom(List<Long> boxFileIds) {
+        if (boxFileIds.isEmpty()) return Map.of();
+        String in = String.join(",", boxFileIds.stream().map(id -> "?").toList());
+        Map<Long, long[]> out = new java.util.HashMap<>();
+        jdbc.query("SELECT box_file_id, message_id, att_index FROM box_saves WHERE box_file_id IN (" + in + ")",
+                rs -> { out.putIfAbsent(rs.getLong(1), new long[]{rs.getLong(2), rs.getInt(3)}); }, boxFileIds.toArray());
+        return out;
+    }
+
     /** Ids of the saved attachments of these messages, as "messageId:index". */
     public List<String> savedKeys(List<Long> messageIds) {
         if (messageIds.isEmpty()) return List.of();

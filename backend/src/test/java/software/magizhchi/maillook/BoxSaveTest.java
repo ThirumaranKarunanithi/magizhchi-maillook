@@ -159,10 +159,29 @@ class BoxSaveTest {
         assertThat(connected.path("usage").path("limitBytes").asLong()).isEqualTo(107374182400L);
         assertThat(connected.path("usage").path("graceEndsAt").asText()).isEqualTo("2026-11-12T19:30:00Z");
 
+        // Searching inside documents goes to Box's own content search; saved files lead back to their mail.
+        JsonNode inside = call(get("/api/files/inside").param("q", "inheritance deed"), token, 200);
+        assertThat(inside.path("connected").asBoolean()).isTrue();
+        assertThat(inside.path("enabled").asBoolean()).isTrue();
+        assertThat(inside.path("terms").toString()).isEqualTo("[\"inheritance\",\"deed\"]");
+        JsonNode hits = inside.path("results");
+        assertThat(hits).hasSize(2);
+        assertThat(hits.get(0).path("name").asText()).isEqualTo("notes.txt");
+        assertThat(hits.get(0).path("messageId").asLong()).isEqualTo(msgId);
+        assertThat(hits.get(0).path("index").asInt()).isEqualTo(0);
+        assertThat(hits.get(0).path("matches").get(0).path("snippet").asText()).contains("inheritance deed");
+        assertThat(hits.get(1).path("name").asText()).isEqualTo("Will 2019.pdf");
+        assertThat(hits.get(1).path("kind").asText()).isEqualTo("pdf");
+        assertThat(hits.get(1).has("messageId")).isFalse();
+        assertThat(call(get("/api/files/box/5555/open"), token, 200).path("url").asText()).isEqualTo("https://s3.test/will.pdf?sig=1");
+        assertThat(call(get("/api/files/inside").param("q", "x"), token, 200).path("results")).isEmpty();
+
         // Other people's mail can't be saved.
         String other = call(post("/api/auth/sso").contentType(MediaType.APPLICATION_JSON).content(
                 "{\"idToken\":\"" + TestIds.idToken("2b7c1f0e-3333-4d3a-8b44-000000000004", "someone@magizhchi.test", "Someone") + "\"}"), null, 200).path("token").asText();
         call(post("/api/messages/" + msgId + "/box"), other, 404);
+        // Someone without Box gets no results and no call to Box.
+        assertThat(call(get("/api/files/inside").param("q", "inheritance"), other, 200).path("connected").asBoolean()).isFalse();
     }
 
     // ── a stand-in Magizhchi Box ─────────────────────────────────
@@ -208,6 +227,19 @@ class BoxSaveTest {
             } else {
                 reply(ex, 201, "{\"id\":" + (1000 + uploads.size()) + ",\"name\":\"x\"}");
             }
+            return;
+        }
+        if (method.equals("GET") && path.equals("/api/conversations/77/content-search")) {
+            String q = java.net.URLDecoder.decode(ex.getRequestURI().getRawQuery().replaceFirst("^q=", ""), StandardCharsets.UTF_8);
+            reply(ex, 200, "{\"mode\":\"EVERYONE\",\"enabled\":true,\"pending\":0,\"terms\":" + JSON.writeValueAsString(List.of(q.split(" ")))
+                    + ",\"results\":[{\"file\":{\"id\":1001,\"originalFileName\":\"notes.txt\",\"contentType\":\"text/plain\",\"fileSizeBytes\":20,\"folderPath\":\"Attachments/\",\"sentAt\":\"2026-11-07T10:00:00Z\"},"
+                    + "\"matches\":[{\"page\":1,\"kind\":\"text\",\"snippet\":\"the inheritance deed for the house\"}]},"
+                    + "{\"file\":{\"id\":5555,\"originalFileName\":\"Will 2019.pdf\",\"contentType\":\"application/pdf\",\"fileSizeBytes\":90000,\"folderPath\":\"Family/\",\"sentAt\":\"2026-01-02T10:00:00Z\"},"
+                    + "\"matches\":[{\"page\":3,\"kind\":\"page\",\"snippet\":\"by this inheritance deed I leave\"}]}]}");
+            return;
+        }
+        if (method.equals("GET") && path.equals("/api/files/5555/preview-url")) {
+            reply(ex, 200, "{\"url\":\"https://s3.test/will.pdf?sig=1\"}");
             return;
         }
         if (method.equals("GET") && path.equals("/api/storage/usage")) {

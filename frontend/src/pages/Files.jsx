@@ -19,6 +19,14 @@ const KINDS = [
 ]
 
 const VIEW_OF = { INBOX: 'all', SENT: 'sent', ARCHIVE: 'archive' }
+/** The snippet with the searched words in bold (Box sends plain text and the terms). */
+function Marked({ text, terms }) {
+  const ws = (terms || []).filter((t) => t && t.length >= 2).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (!ws.length) return text
+  const re = new RegExp(`(${ws.join('|')})`, 'gi')
+  return text.split(re).map((part, i) => (i % 2 ? <mark key={i} className="rounded bg-amber-100 px-0.5 font-semibold text-brand-ink">{part}</mark> : part))
+}
+
 const day = (iso) => new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short', year: new Date(iso).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' })
 
 /** Files: every attachment from every mailbox in one place, to open, download or save to Magizhchi Box. */
@@ -36,6 +44,8 @@ export default function Files() {
   const [busy, setBusy] = useState(null)
   const [inBox, setInBox] = useState(() => new Set())
   const seq = useRef(0)
+  const [inside, setInside] = useState(null) // Box's answer for words inside documents
+  const insideSeq = useRef(0)
 
   useEffect(() => {
     const t = setTimeout(() => setQ(qInput.trim()), 300)
@@ -62,6 +72,28 @@ export default function Files() {
     setItems(null)
     load()
   }, [load])
+
+  // Words inside documents: Magizhchi Box's own content search over their Box drive.
+  useEffect(() => {
+    const my = ++insideSeq.current
+    if (q.length < 2) { setInside(null); return }
+    setInside({ loading: true, results: [] })
+    get(`/api/files/inside${qs({ q })}`)
+      .then((res) => { if (my === insideSeq.current) setInside(res) })
+      .catch((e) => { if (my === insideSeq.current) setInside({ error: e.message, results: [] }) })
+  }, [q])
+  const insideHits = (inside?.results || []).filter((f) => !kind || f.kind === kind)
+
+  const openInBox = (f) => run(`x${f.boxFileId}`, async () => {
+    const w = window.open('', '_blank') // opened now, while the click still counts, so it isn't blocked
+    try {
+      const { url } = await get(`/api/files/box/${f.boxFileId}/open`)
+      if (w) { w.opener = null; w.location.href = url } else window.location.href = url
+    } catch (e) {
+      w?.close()
+      throw e
+    }
+  })
 
   const key = (f) => `${f.messageId}:${f.index}`
   const path = (f) => `/api/messages/${f.messageId}/attachments/${f.index}`
@@ -99,7 +131,7 @@ export default function Files() {
         <div className="relative">
           <IconSearch size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input className="w-full rounded-xl border border-slate-200 bg-white/70 py-1.5 pl-8 pr-8 text-sm outline-none focus:border-peacock-400"
-            placeholder="File name, sender or subject" value={qInput} onChange={(e) => setQInput(e.target.value)} aria-label="Search files" />
+            placeholder="File name, sender, subject, or words inside a document" value={qInput} onChange={(e) => setQInput(e.target.value)} aria-label="Search files" />
           {qInput && (
             <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand-ink" onClick={() => setQInput('')} aria-label="Clear search"><IconX size={14} /></button>
           )}
@@ -122,11 +154,18 @@ export default function Files() {
             {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="h-[68px] animate-pulse rounded-xl bg-slate-100" />)}
           </div>
         )}
-        {items?.length === 0 && (
+        {q.length >= 2 && inside && (
+          <InsideDocs inside={inside} hits={insideHits} q={q} busy={busy} onOpen={openInBox}
+            onMail={(f) => navigate(`/?view=${VIEW_OF[f.folder] || 'all'}&open=${f.messageId}`)} />
+        )}
+        {q.length >= 2 && items?.length > 0 && insideHits.length > 0 && (
+          <h2 className="mb-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Name, sender or subject</h2>
+        )}
+        {items?.length === 0 && !insideHits.length && !inside?.loading && (
           <div className="py-16 text-center">
             <p className="text-4xl" aria-hidden="true">📎</p>
             <p className="mt-3 font-semibold text-brand-ink">{q || kind ? 'No files match' : 'No files yet'}</p>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-600">{q || kind ? 'Try another name, or All.' : 'Files people send you, and files you send, show up here.'}</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-600">{q || kind ? (inside?.connected ? 'Nothing in the names, and no document in your Magizhchi Box has those words.' : 'Try another name, or All.') : 'Files people send you, and files you send, show up here.'}</p>
           </div>
         )}
         {items?.length > 0 && (
@@ -184,5 +223,67 @@ export default function Files() {
         )}
       </div>
     </section>
+  )
+}
+
+/** "Inside your documents": what Magizhchi Box found in the words of the files in your Box drive. */
+function InsideDocs({ inside, hits, q, busy, onOpen, onMail }) {
+  if (inside.loading) {
+    return (
+      <p className="mb-3 flex items-center gap-2 text-xs text-slate-500" aria-live="polite">
+        <span className="spinner !h-3 !w-3" /> Looking inside your documents in Magizhchi Box…
+      </p>
+    )
+  }
+  if (inside.connected === false) {
+    return (
+      <p className="mb-3 rounded-xl bg-peacock-50/60 px-3 py-2 text-xs text-peacock-900 ring-1 ring-peacock-100">
+        To find words <i>inside</i> documents, save them to Magizhchi Box (the cloud button on a file). Box reads PDFs, Word, Excel and scans, then finds them here.
+      </p>
+    )
+  }
+  if (inside.error || inside.unreachable) {
+    return <p className="mb-3 text-xs text-slate-500">{inside.error || 'Magizhchi Box can’t be reached just now, so only names were searched.'}</p>
+  }
+  if (inside.enabled === false) {
+    return <p className="mb-3 text-xs text-slate-500">Searching inside files is switched off in your Magizhchi Box drive. Turn it on in Box to find words inside documents.</p>
+  }
+  return (
+    <div className="mb-4">
+      <h2 className="mb-2 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+        Inside your documents <span className="font-normal normal-case tracking-normal text-slate-400">· Magizhchi Box</span>
+        {inside.pending > 0 && <span className="font-normal normal-case tracking-normal text-slate-400">· still reading {inside.pending} file{inside.pending === 1 ? '' : 's'}</span>}
+      </h2>
+      {!hits.length && <p className="text-xs text-slate-500">No document in your Box has “{q}” inside it.</p>}
+      <ul className="grid gap-2 lg:grid-cols-2">
+        {hits.map((f) => (
+          <li key={f.boxFileId} className="file-card flex min-w-0 gap-3 rounded-xl p-2.5 pr-2">
+            <FileTile kind={kindOf(f)} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-brand-ink" title={f.name}>{f.name}</div>
+              {f.matches.slice(0, 2).map((m, i) => (
+                <p key={i} className="mt-0.5 line-clamp-2 text-xs text-slate-600">
+                  {m.page > 0 && <span className="mr-1 font-semibold text-slate-500">p.{m.page}</span>}
+                  <Marked text={m.snippet} terms={inside.terms} />
+                </p>
+              ))}
+              {f.messageId ? (
+                <button className="mt-0.5 block max-w-full truncate text-left text-[11px] text-slate-500 hover:text-peacock-700 hover:underline"
+                  title={`Open the mail: ${f.subject || '(no subject)'}`} onClick={() => onMail(f)}>
+                  <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: f.accountColor || '#0e7c86' }} />
+                  From the mail “{f.subject || '(no subject)'}”
+                </button>
+              ) : (
+                <p className="mt-0.5 truncate text-[11px] text-slate-500">In Box{f.folderPath ? ` › ${f.folderPath.replace(/\/$/, '').split('/').join(' › ')}` : ''}{f.at ? ` · ${day(f.at)}` : ''}</p>
+              )}
+            </div>
+            <button className="icon-btn shrink-0 self-center" title={`Open ${f.name} from Magizhchi Box`} aria-label={`Open ${f.name} from Magizhchi Box`}
+              disabled={busy != null} onClick={() => onOpen(f)}>
+              {busy === `x${f.boxFileId}` ? <span className="spinner" /> : <IconEye size={17} />}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

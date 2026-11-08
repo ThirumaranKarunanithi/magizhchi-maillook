@@ -1,5 +1,6 @@
 package software.magizhchi.maillook.mail;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -124,5 +125,90 @@ public class FilesController {
         out.put("items", items);
         out.put("nextCursor", next);
         return out;
+    }
+
+    /**
+     * Words inside documents, found by Magizhchi Box's own content search over the person's Box drive.
+     * Files MailLook saved there are tied back to their mail. Not connected to Box: connected=false.
+     */
+    @GetMapping("/inside")
+    public Map<String, Object> inside(@RequestAttribute long userId, @RequestParam String q) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        String needle = q == null ? "" : q.trim();
+        out.put("connected", box.existing(userId).isPresent());
+        out.put("webUrl", box.existing(userId).map(l -> box.webUrl(l.driveId())).orElse(null));
+        out.put("results", List.of());
+        if (needle.length() < 2 || !(Boolean) out.get("connected")) return out;
+        if (needle.length() > 200) throw ApiException.bad("That's a long search. Try a few words.");
+        software.magizhchi.maillook.suite.BoxClient.Reply r = box.searchInside(userId, needle);
+        if (r.code() == 0) {
+            out.put("connected", box.existing(userId).isPresent());
+            out.put("unreachable", box.existing(userId).isPresent());
+            return out;
+        }
+        if (!r.ok() || r.json() == null) {
+            out.put("error", r.code() == 403 ? "Magizhchi Box doesn't allow searching inside files in your drive." : "Magizhchi Box couldn't search just now.");
+            return out;
+        }
+        JsonNode j = r.json();
+        out.put("enabled", j.path("enabled").asBoolean(false));
+        out.put("pending", j.path("pending").asInt(0));
+        List<String> terms = new ArrayList<>();
+        j.path("terms").forEach(t -> terms.add(t.asText()));
+        out.put("terms", terms);
+
+        List<Long> fileIds = new ArrayList<>();
+        j.path("results").forEach(x -> fileIds.add(x.path("file").path("id").asLong()));
+        Map<Long, long[]> from = box.savedFrom(fileIds);
+        Map<Long, MessageRepo.Row> mails = new java.util.HashMap<>();
+        for (MessageRepo.Row m : messages.byIds(new java.util.LinkedHashSet<>(from.values().stream().map(v -> v[0]).toList()))) {
+            if (m.userId() == userId) mails.put(m.id(), m);
+        }
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (JsonNode x : j.path("results")) {
+            JsonNode f = x.path("file");
+            long id = f.path("id").asLong();
+            String name = f.path("originalFileName").asText("file");
+            String type = f.path("contentType").asText("");
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("boxFileId", id);
+            m.put("name", name);
+            m.put("contentType", type);
+            m.put("kind", kind(name, type));
+            m.put("size", f.path("fileSizeBytes").asLong(0));
+            m.put("folderPath", f.path("folderPath").asText(""));
+            m.put("at", f.path("sentAt").asText(null));
+            List<Map<String, Object>> matches = new ArrayList<>();
+            for (JsonNode h : x.path("matches")) {
+                Map<String, Object> hit = new LinkedHashMap<>();
+                hit.put("page", h.path("page").asInt(0));
+                hit.put("kind", h.path("kind").asText(""));
+                hit.put("snippet", h.path("snippet").asText(""));
+                matches.add(hit);
+            }
+            m.put("matches", matches);
+            long[] src = from.get(id);
+            MessageRepo.Row mail = src == null ? null : mails.get(src[0]);
+            if (mail != null) {
+                m.put("messageId", mail.id());
+                m.put("index", (int) src[1]);
+                m.put("folder", mail.folder());
+                m.put("subject", mail.subject());
+                m.put("fromName", mail.fromName());
+                m.put("fromEmail", mail.fromEmail());
+                m.put("accountColor", mail.accountColor());
+            }
+            results.add(m);
+        }
+        out.put("results", results);
+        return out;
+    }
+
+    /** Opens a file found in Box: a short-lived viewing link from Box. */
+    @GetMapping("/box/{fileId}/open")
+    public Map<String, Object> openInBox(@RequestAttribute long userId, @org.springframework.web.bind.annotation.PathVariable long fileId) {
+        String url = box.previewUrl(userId, fileId).orElseThrow(() ->
+                new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Magizhchi Box couldn't open that file just now."));
+        return Map.of("url", url);
     }
 }
