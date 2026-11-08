@@ -17,6 +17,10 @@ import software.magizhchi.maillook.mail.MessageRepo;
 import software.magizhchi.maillook.account.AccountRepo;
 import software.magizhchi.maillook.mail.DraftRepo;
 import software.magizhchi.maillook.mail.Waiting;
+import software.magizhchi.maillook.mail.MailActions;
+import software.magizhchi.maillook.mail.Outbox;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -51,10 +55,13 @@ public class SuiteBrainController {
     private final Waiting waiting;
     private final DraftRepo drafts;
     private final AccountRepo accounts;
+    private final Outbox outbox;
+    private final ObjectMapper mapper;
     private final String provisionSecret;
 
     public SuiteBrainController(SuiteDelegationVerifier verifier, JdbcTemplate jdbc, MessageRepo messages,
                                 Waiting waiting, DraftRepo drafts, AccountRepo accounts,
+                                Outbox outbox, ObjectMapper mapper,
                                 @Value("${magizhchi.provision-secret:}") String provisionSecret) {
         this.verifier = verifier;
         this.jdbc = jdbc;
@@ -62,6 +69,8 @@ public class SuiteBrainController {
         this.waiting = waiting;
         this.drafts = drafts;
         this.accounts = accounts;
+        this.outbox = outbox;
+        this.mapper = mapper;
         this.provisionSecret = provisionSecret == null ? "" : provisionSecret;
     }
 
@@ -100,6 +109,26 @@ public class SuiteBrainController {
                                 "subject", prop("string", "Subject line."),
                                 "body", prop("string", "Plain-text body.")),
                         List.of("to", "subject", "body")),
+                tool("send_mail", "danger",
+                        "Send an email from the user's own MailLook mailbox. It goes out after a short undo window. "
+                                + "Only call this once you know the recipient's real email address; write a clear subject and a "
+                                + "complete, polite body in the user's voice. The user is shown the email and presses Send, so "
+                                + "never say it was sent until the result says so.",
+                        Map.of(
+                                "to", Map.of("type", "array", "items", Map.of("type", "string"),
+                                        "description", "Recipient email addresses (1-5)."),
+                                "subject", prop("string", "Subject line."),
+                                "body", prop("string", "Plain-text body.")),
+                        List.of("to", "subject", "body")),
+                flag(tool("cancel_send", "write",
+                        "Take back a mail that is still in its undo window; it returns to Drafts. Used by Undo.",
+                        Map.of("outboxId", prop("integer", "The queued mail's id.")),
+                        List.of("outboxId")), "hidden"),
+                flag(tool("known_recipients", "read",
+                        "Which of these addresses the user has emailed before (from their Sent folder).",
+                        Map.of("to", Map.of("type", "array", "items", Map.of("type", "string"),
+                                "description", "Email addresses to check.")),
+                        List.of("to")), "hidden"),
                 flag(tool("discard_draft", "write",
                         "Delete a draft this assistant saved. Used by Undo.",
                         Map.of("draftId", prop("integer", "The draft's id.")),
@@ -131,6 +160,15 @@ public class SuiteBrainController {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield saveDraft(userId, input);
             }
+            case "send_mail" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield sendMail(userId, input);
+            }
+            case "cancel_send" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield cancelSend(userId, input);
+            }
+            case "known_recipients" -> knownRecipients(userId, input);
             case "discard_draft" -> {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield discardDraft(userId, input);
@@ -223,6 +261,75 @@ public class SuiteBrainController {
         out.put("message", "Draft saved in MailLook. Open MailLook to review and send it.");
         out.put("undo", Map.of("tool", "discard_draft", "input", Map.of("draftId", id)));
         return out;
+    }
+
+    /** Undo window for mail sent by the assistant (seconds). */
+    static final int UNDO_SECONDS = 20;
+    private static final java.util.regex.Pattern ADDRESS = java.util.regex.Pattern.compile("^[^@\\s<>,;\"]+@[^@\\s<>,;\"]+\\.[^@\\s<>,;\"]+$");
+
+    private static List<String> addresses(Object raw) {
+        List<String> out = new ArrayList<>();
+        if (raw instanceof List<?> list) {
+            for (Object o : list) {
+                String a = o == null ? "" : o.toString().trim();
+                if (ADDRESS.matcher(a).matches() && a.length() < 200 && !out.contains(a)) out.add(a);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Sends mail from the person's own mailbox. It is queued for {@link #UNDO_SECONDS} seconds first, so
+     * Undo can still take it back (it returns to Drafts). PA only calls this after the person pressed Send.
+     */
+    private Object sendMail(long userId, Map<String, Object> input) {
+        List<String> to = addresses(input.get("to"));
+        if (to.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "At least one valid recipient address is needed.");
+        if (to.size() > 5) throw new ApiException(HttpStatus.BAD_REQUEST, "The assistant can send to 5 people at a time at most.");
+        String subject = input.get("subject") == null ? "" : input.get("subject").toString().trim();
+        String body = input.get("body") == null ? "" : input.get("body").toString();
+        if (subject.isBlank() && body.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "The email is empty.");
+        if (subject.length() > 300 || body.length() > 20_000) throw new ApiException(HttpStatus.BAD_REQUEST, "That email is too long.");
+        var mailboxes = accounts.forUser(userId);
+        if (mailboxes.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Add a mailbox in MailLook first.");
+        MailActions.Outgoing o = new MailActions.Outgoing(mailboxes.get(0).id(), to, List.of(), List.of(),
+                subject, body, null, null);
+        ObjectNode payload = mapper.valueToTree(o);
+        var queued = outbox.queue(userId, payload, o, List.of(), Instant.now().plusSeconds(UNDO_SECONDS));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("outboxId", queued.id());
+        out.put("to", to);
+        out.put("undoSeconds", UNDO_SECONDS);
+        out.put("message", "Sending to " + String.join(", ", to) + " in " + UNDO_SECONDS + " seconds. You can still undo it.");
+        out.put("undo", Map.of("tool", "cancel_send", "input", Map.of("outboxId", queued.id())));
+        return out;
+    }
+
+    private Object cancelSend(long userId, Map<String, Object> input) {
+        long id;
+        try {
+            id = (long) Double.parseDouble(String.valueOf(input.get("outboxId")));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "outboxId is required.");
+        }
+        outbox.takeBack(userId, id);   // 409 "Too late" once it has gone
+        return Map.of("ok", true, "message", "Taken back. It is in your MailLook drafts.");
+    }
+
+    /** Which addresses appear in the person's Sent mail (used by PA's "only ask for new people" setting). */
+    private Object knownRecipients(long userId, Map<String, Object> input) {
+        List<String> known = new ArrayList<>();
+        List<String> unknown = new ArrayList<>();
+        for (String a : addresses(input.get("to"))) {
+            String like = "%" + a.toLowerCase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            Integer n = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id " +
+                            "WHERE a.user_id = ? AND m.folder = 'SENT' AND LOWER(m.to_list) LIKE ? LIMIT 1) t",
+                    Integer.class, userId, like);
+            (n != null && n > 0 ? known : unknown).add(a);
+        }
+        return Map.of("known", known, "unknown", unknown);
     }
 
     private Object discardDraft(long userId, Map<String, Object> input) {
