@@ -303,6 +303,28 @@ public class BoxClient {
                 + java.net.URLEncoder.encode(q, StandardCharsets.UTF_8));
     }
 
+    /** One page of the files in a folder of their Box drive, newest first (Box's Spring page: content, last). */
+    public Reply listFiles(long userId, String folderPrefix, int page, int size) {
+        Optional<Link> link = existing(userId);
+        if (link.isEmpty()) return new Reply(0, null, "not connected");
+        return get(userId, "/api/conversations/" + link.get().driveId() + "/files?page=" + page + "&size=" + size
+                + (folderPrefix == null ? "" : "&folderPrefix=" + java.net.URLEncoder.encode(folderPrefix, StandardCharsets.UTF_8)));
+    }
+
+    /** Files in their Box whose name (or caption) holds q; Box returns up to 30 across all their drives. */
+    public Reply searchNames(long userId, String q) {
+        if (existing(userId).isEmpty()) return new Reply(0, null, "not connected");
+        return get(userId, "/api/files/search?q=" + java.net.URLEncoder.encode(q, StandardCharsets.UTF_8));
+    }
+
+    /** A short-lived link that downloads one Box file. */
+    public Optional<String> downloadUrl(long userId, long fileId) {
+        Reply r = get(userId, "/api/files/" + fileId + "/download-url");
+        if (!r.ok() || r.json() == null) return Optional.empty();
+        String url = r.json().path("url").asText("");
+        return url.isBlank() ? Optional.empty() : Optional.of(url);
+    }
+
     /** A short-lived link to view one Box file in the browser (Box checks it is the person's). */
     public Optional<String> previewUrl(long userId, long fileId) {
         Reply r = get(userId, "/api/files/" + fileId + "/preview-url");

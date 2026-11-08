@@ -1,7 +1,19 @@
 import { useState } from 'react'
+import { put } from '../api.js'
 import { connectBox, planNotice, refreshBox, useBox } from '../box.js'
 import { formatSize } from '../util.js'
 import { IconCloudCheck, IconCloudUp } from './Icons.jsx'
+
+const STORES = [
+  { key: 'box', label: 'Magizhchi Box', hint: 'Every attachment is saved to your Box by itself. Files searches the words inside them.' },
+  { key: 'local', label: 'This computer', hint: 'Attachments stay in your mail. Files lists them, and they download to this device.' },
+]
+
+const TROUBLE = {
+  full: 'Your Box is full or its plan has ended, so saving has paused. Recharge in Magizhchi Box and it carries on.',
+  no_id: 'Saving needs you signed in with Magizhchi ID.',
+  unreachable: 'Couldn’t reach Magizhchi Box or your mailbox just now. It tries again in a few minutes.',
+}
 
 const TONE = {
   info: 'border-peacock-200 bg-peacock-50 text-peacock-800',
@@ -17,6 +29,20 @@ export default function BoxCard({ notify }) {
   const u = box.usage
   const pct = u?.limitBytes ? Math.min(100, (u.usedBytes / u.limitBytes) * 100) : 0
   const notice = planNotice(u)
+
+  async function setStore(store) {
+    if (store === box.filesStore) return
+    setBusy(true)
+    try {
+      await put('/api/box/files-store', { store })
+      await refreshBox()
+      notify(store === 'box' ? 'Attachments now go to your Magizhchi Box by themselves.' : 'Attachments stay in your mail and download to this computer.', 'success')
+    } catch (e) {
+      notify(e.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function connect() {
     setBusy(true)
@@ -44,8 +70,10 @@ export default function BoxCard({ notify }) {
           </h2>
           <p className="mt-0.5 text-sm text-slate-600">
             {box.connected
-              ? <>Attachments you save go to <b className="font-semibold text-brand-ink">{box.folder}</b> in your own Box, one folder per month.</>
-              : 'Tap the cloud on any attachment to keep it in your own Magizhchi Box. It connects by itself the first time.'}
+              ? <>Attachments go to <b className="font-semibold text-brand-ink">{box.folder}</b> in your own Box, one folder per month.</>
+              : box.filesStore === 'box'
+                ? 'Your attachments go to your own Magizhchi Box. It connects by itself in a few minutes, or now with the button.'
+                : 'Tap the cloud on any attachment to keep it in your own Magizhchi Box. It connects by itself the first time.'}
           </p>
         </div>
         {box.connected ? (
@@ -56,6 +84,38 @@ export default function BoxCard({ notify }) {
           </button>
         )}
       </div>
+
+      <fieldset className="mt-4" disabled={busy}>
+        <legend className="mb-1.5 text-sm font-semibold text-brand-ink">Where attachments live</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {STORES.map((o) => {
+            const on = (box.filesStore || 'box') === o.key
+            return (
+              <label key={o.key} className={`flex cursor-pointer gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${on
+                ? 'border-peacock-400 bg-peacock-50/70' : 'border-slate-200 hover:border-slate-300'}`}>
+                <input type="radio" name="files-store" className="mt-1 accent-[#0e7c86]" checked={on} onChange={() => setStore(o.key)} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-brand-ink">{o.label}</span>
+                  <span className="block text-xs text-slate-600">{o.hint}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+        {box.filesStore === 'box' && box.autoSave && (
+          box.autoSave.state ? (
+            <p role="status" className={`mt-2 rounded-xl border px-3 py-2 text-sm ${box.autoSave.state === 'full' ? TONE.warn : TONE.info}`}>
+              {TROUBLE[box.autoSave.state] || box.autoSave.note}
+            </p>
+          ) : box.autoSave.backlog > 0 ? (
+            <p role="status" className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+              <span className="spinner !h-3 !w-3" /> Saving attachments from {box.autoSave.backlog.toLocaleString()} mail{box.autoSave.backlog === 1 ? '' : 's'} to your Box, newest first…
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-slate-600">Every attachment is in your Box.</p>
+          )
+        )}
+      </fieldset>
 
       {u && (
         <div className="mt-4">

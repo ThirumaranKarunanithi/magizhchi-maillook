@@ -6,6 +6,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,10 +39,25 @@ public class BoxController {
 
     private final BoxClient box;
     private final MailActions actions;
+    private final BoxAutoSave auto;
 
-    public BoxController(BoxClient box, MailActions actions) {
+    public BoxController(BoxClient box, MailActions actions, BoxAutoSave auto) {
         this.box = box;
         this.actions = actions;
+        this.auto = auto;
+    }
+
+    public record StoreRequest(String store) {}
+
+    /** "Where attachments live": box (saved to Magizhchi Box by themselves) or local (stay in the mail). */
+    @PutMapping("/box/files-store")
+    public Map<String, Object> setStore(@RequestAttribute long userId, @RequestBody StoreRequest req) {
+        String store = req == null || req.store() == null ? "" : req.store().trim().toLowerCase(java.util.Locale.ROOT);
+        if ("box".equals(store) && !box.configured()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Magizhchi Box isn't set up on this server yet.");
+        }
+        auto.setStore(userId, store);
+        return status(userId);
     }
 
     @GetMapping("/box/status")
@@ -52,6 +69,13 @@ public class BoxController {
         m.put("folder", ROOT.replaceAll("/$", ""));
         m.put("webUrl", box.webUrl(link.map(BoxClient.Link::driveId).orElse(null)));
         m.put("usage", null);
+        String store = box.configured() ? auto.store(userId) : "local";
+        m.put("filesStore", store);
+        if ("box".equals(store)) {
+            Map<String, Object> a = new LinkedHashMap<>(auto.trouble(userId));
+            a.put("backlog", auto.backlog(userId));
+            m.put("autoSave", a);
+        }
         if (link.isPresent()) {
             try {
                 JsonNode u = box.usage(userId);

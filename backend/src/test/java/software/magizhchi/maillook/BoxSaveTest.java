@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
  * Saving attachments to Magizhchi Box, against a stand-in Box that checks requests the way Box does:
@@ -71,6 +72,7 @@ class BoxSaveTest {
     static final AtomicInteger issued = new AtomicInteger();
     static volatile String validToken = null;
     static volatile boolean full = false;
+    static final List<String[]> stored = new CopyOnWriteArrayList<>(); // [id, name]
     static final HttpServer box = startFakeBox();
 
     @DynamicPropertySource
@@ -86,6 +88,7 @@ class BoxSaveTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired software.magizhchi.maillook.suite.BoxAutoSave autoSave;
 
     @Test
     void savesAttachmentsToTheirOwnBox() throws Exception {
@@ -176,6 +179,42 @@ class BoxSaveTest {
         assertThat(call(get("/api/files/box/5555/open"), token, 200).path("url").asText()).isEqualTo("https://s3.test/will.pdf?sig=1");
         assertThat(call(get("/api/files/inside").param("q", "x"), token, 200).path("results")).isEmpty();
 
+        // Attachments live in Box by default: the automatic save puts the rest there by itself, skips the
+        // file Box calls too big, and has nothing left to do on the next round.
+        full = false;
+        JsonNode st = call(get("/api/box/status"), token, 200);
+        assertThat(st.path("filesStore").asText()).isEqualTo("box");
+        assertThat(st.path("autoSave").path("backlog").asInt()).isEqualTo(2);
+        int beforeAuto = uploads.size();
+        assertThat(autoSave.runOnce()).isEqualTo(1);
+        assertThat(uploads.subList(beforeAuto, uploads.size())).anyMatch(u -> u.contains("filename=\"receipt.pdf\""));
+        assertThat(uploads.subList(beforeAuto, uploads.size())).anyMatch(u -> u.contains("filename=\"big.bin\""));
+        assertThat(autoSave.runOnce()).isZero();
+        assertThat(call(get("/api/box/status"), token, 200).path("autoSave").path("backlog").asInt()).isZero();
+        assertThat(call(get("/api/messages/" + receiptId), token, 200).path("attachments").get(0).path("inBox").asBoolean()).isTrue();
+
+        // The Files page now comes from Box, each file tied back to its mail; names are searched in Box.
+        JsonNode files = call(get("/api/files"), token, 200);
+        assertThat(files.path("source").asText()).isEqualTo("box");
+        List<String> boxNames = new java.util.ArrayList<>();
+        files.path("items").forEach(f -> boxNames.add(f.path("name").asText()));
+        assertThat(boxNames).contains("notes.txt", "report.pdf", "receipt.pdf").doesNotContain("big.bin");
+        JsonNode receiptItem = null;
+        for (JsonNode f : files.path("items")) if (f.path("name").asText().equals("receipt.pdf")) receiptItem = f;
+        assertThat(receiptItem.path("messageId").asLong()).isEqualTo(receiptId);
+        assertThat(call(get("/api/files").param("kind", "pdf"), token, 200).path("items")).hasSize(2);
+        JsonNode named = call(get("/api/files").param("q", "notes"), token, 200);
+        assertThat(named.path("source").asText()).isEqualTo("box");
+        assertThat(named.path("items")).hasSize(1);
+        assertThat(call(get("/api/files/box/" + receiptItem.path("boxFileId").asLong() + "/download"), token, 200).path("url").asText())
+                .startsWith("https://s3.test/");
+
+        // Kept on this computer instead: the list is the mail's own again, and nothing more goes to Box.
+        assertThat(call(put("/api/box/files-store").contentType(MediaType.APPLICATION_JSON).content("{\"store\":\"local\"}"), token, 200)
+                .path("filesStore").asText()).isEqualTo("local");
+        assertThat(call(get("/api/files"), token, 200).path("source").asText()).isEqualTo("mail");
+        call(put("/api/box/files-store").contentType(MediaType.APPLICATION_JSON).content("{\"store\":\"cloud\"}"), token, 400);
+
         // Other people's mail can't be saved.
         String other = call(post("/api/auth/sso").contentType(MediaType.APPLICATION_JSON).content(
                 "{\"idToken\":\"" + TestIds.idToken("2b7c1f0e-3333-4d3a-8b44-000000000004", "someone@magizhchi.test", "Someone") + "\"}"), null, 200).path("token").asText();
@@ -225,6 +264,8 @@ class BoxSaveTest {
             } else if (body.contains("filename=\"big.bin\"")) {
                 reply(ex, 413, "{\"message\":\"File exceeds the 500 MB limit\"}");
             } else {
+                java.util.regex.Matcher fn = java.util.regex.Pattern.compile("filename=\"([^\"]+)\"").matcher(body);
+                stored.add(new String[]{String.valueOf(1000 + uploads.size()), fn.find() ? fn.group(1) : "x"});
                 reply(ex, 201, "{\"id\":" + (1000 + uploads.size()) + ",\"name\":\"x\"}");
             }
             return;
@@ -236,6 +277,34 @@ class BoxSaveTest {
                     + "\"matches\":[{\"page\":1,\"kind\":\"text\",\"snippet\":\"the inheritance deed for the house\"}]},"
                     + "{\"file\":{\"id\":5555,\"originalFileName\":\"Will 2019.pdf\",\"contentType\":\"application/pdf\",\"fileSizeBytes\":90000,\"folderPath\":\"Family/\",\"sentAt\":\"2026-01-02T10:00:00Z\"},"
                     + "\"matches\":[{\"page\":3,\"kind\":\"page\",\"snippet\":\"by this inheritance deed I leave\"}]}]}");
+            return;
+        }
+        if (method.equals("GET") && path.equals("/api/conversations/77/files")) {
+            StringBuilder c = new StringBuilder();
+            for (int i = stored.size() - 1; i >= 0; i--) {
+                String[] f = stored.get(i);
+                String type = f[1].endsWith(".pdf") ? "application/pdf" : "text/plain";
+                if (c.length() > 0) c.append(',');
+                c.append("{\"id\":").append(f[0]).append(",\"conversationId\":77,\"originalFileName\":\"").append(f[1])
+                        .append("\",\"contentType\":\"").append(type).append("\",\"fileSizeBytes\":12,\"folderPath\":\"Magizhchi MailLook/Attachments/2026-11/\",\"sentAt\":\"2026-11-08T05:00:00Z\"}");
+            }
+            reply(ex, 200, "{\"content\":[" + c + "],\"last\":true,\"number\":0}");
+            return;
+        }
+        if (method.equals("GET") && path.equals("/api/files/search")) {
+            String q = java.net.URLDecoder.decode(ex.getRequestURI().getRawQuery().replaceFirst("^q=", ""), StandardCharsets.UTF_8);
+            StringBuilder c = new StringBuilder();
+            for (String[] f : stored) {
+                if (!f[1].contains(q)) continue;
+                if (c.length() > 0) c.append(',');
+                c.append("{\"id\":").append(f[0]).append(",\"conversationId\":77,\"originalFileName\":\"").append(f[1]).append("\",\"contentType\":\"text/plain\",\"fileSizeBytes\":12}");
+            }
+            c.append(c.length() > 0 ? "," : "").append("{\"id\":9,\"conversationId\":12,\"originalFileName\":\"notes-in-a-group.txt\"}");
+            reply(ex, 200, "[" + c + "]");
+            return;
+        }
+        if (method.equals("GET") && path.matches("/api/files/\\d+/download-url")) {
+            reply(ex, 200, "{\"url\":\"https://s3.test/f?sig=2\"}");
             return;
         }
         if (method.equals("GET") && path.equals("/api/files/5555/preview-url")) {

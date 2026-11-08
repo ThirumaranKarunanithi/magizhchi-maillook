@@ -35,14 +35,27 @@ public class FilesController {
         KINDS.put("media", new Pattern[]{Pattern.compile("\\.(mp4|mov|webm|mp3|wav|m4a)$"), Pattern.compile("^(video|audio)/")});
     }
     /** Not files people look for: calendar invites, signatures and the mail itself. */
+    /** Not a file anyone keeps: calendar invites, signatures. */
+    public static boolean noise(String name, String type) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        String t = type == null ? "" : type.toLowerCase(Locale.ROOT);
+        return NOISE.matcher(n).find() || t.startsWith("text/calendar") || t.startsWith("application/pkcs7-signature") || t.startsWith("application/pgp-signature");
+    }
+
     private static final Pattern NOISE = Pattern.compile("(\\.(ics|vcs|p7s|asc)$)|^(invite\\.ics|smime\\.p7s|signature\\.asc)$");
 
     private final MessageRepo messages;
     private final software.magizhchi.maillook.suite.BoxClient box;
+    private final software.magizhchi.maillook.suite.BoxAutoSave auto;
 
-    public FilesController(MessageRepo messages, software.magizhchi.maillook.suite.BoxClient box) {
+    /** Where MailLook files attachments in Box (the same place the cloud button saves to). */
+    static final String BOX_ROOT = "Magizhchi MailLook/Attachments/";
+
+    public FilesController(MessageRepo messages, software.magizhchi.maillook.suite.BoxClient box,
+                           software.magizhchi.maillook.suite.BoxAutoSave auto) {
         this.messages = messages;
         this.box = box;
+        this.auto = auto;
     }
 
     static String kind(String name, String type) {
@@ -60,6 +73,19 @@ public class FilesController {
                                     @RequestParam(required = false) String q,
                                     @RequestParam(required = false) String cursor) {
         if (kind != null && !kind.isBlank() && !KINDS.containsKey(kind) && !"other".equals(kind)) throw ApiException.bad("Unknown kind of file.");
+        // Attachments live in Box: the list comes from Box. Until Box is connected (or if it can't be
+        // reached) the mail's own list stands in, and says why.
+        String note = null;
+        if (box.configured() && "box".equals(auto.store(userId))) {
+            if (box.existing(userId).isPresent()) {
+                Map<String, Object> fromBox = fromBox(userId, accountId, kind, q, cursor);
+                if (fromBox != null) return fromBox;
+                note = "unreachable";
+            } else {
+                note = "connecting";
+            }
+            if (cursor != null && !cursor.isBlank() && !cursor.contains(":")) cursor = null;   // a Box page number
+        }
         OffsetDateTime cAt = null;
         Long cId = null;
         if (cursor != null && !cursor.isBlank()) {
@@ -122,9 +148,100 @@ public class FilesController {
             m.put("inBox", m.get("index") instanceof Number n && saved.contains(m.get("messageId") + ":" + n.intValue()));
         }
         Map<String, Object> out = new LinkedHashMap<>();
+        out.put("source", "mail");
+        if (note != null) out.put("boxNote", note);
         out.put("items", items);
         out.put("nextCursor", next);
         return out;
+    }
+
+    /** The Files list from their Box: MailLook's attachment folders, or Box's name search. Null if Box failed. */
+    private Map<String, Object> fromBox(long userId, Long accountId, String kind, String q, String cursor) {
+        String needle = q == null ? "" : q.trim();
+        List<JsonNode> files = new ArrayList<>();
+        String next = null;
+        if (!needle.isEmpty()) {
+            software.magizhchi.maillook.suite.BoxClient.Reply r = box.searchNames(userId, needle);
+            if (!r.ok() || r.json() == null) return null;
+            long drive = box.existing(userId).map(software.magizhchi.maillook.suite.BoxClient.Link::driveId).orElse(0L);
+            for (JsonNode f : r.json()) if (f.path("conversationId").asLong() == drive) files.add(f);
+        } else {
+            int page = 0;
+            if (cursor != null && !cursor.isBlank()) {
+                try {
+                    page = Math.max(0, Integer.parseInt(cursor));
+                } catch (NumberFormatException e) {
+                    page = 0;
+                }
+            }
+            // Read Box pages until there are enough files of this kind to show.
+            for (int i = 0; i < 4; i++) {
+                software.magizhchi.maillook.suite.BoxClient.Reply r = box.listFiles(userId, BOX_ROOT, page, 60);
+                if (!r.ok() || r.json() == null) {
+                    if (i == 0) return null;
+                    break;
+                }
+                for (JsonNode f : r.json().path("content")) {
+                    if (kind == null || kind.isBlank() || kind.equals(kind(f.path("originalFileName").asText(""), f.path("contentType").asText("")))) files.add(f);
+                }
+                page++;
+                boolean last = r.json().path("last").asBoolean(true);
+                next = last ? null : String.valueOf(page);
+                if (last || files.size() >= 60) break;
+            }
+        }
+        List<Long> ids = files.stream().map(f -> f.path("id").asLong()).toList();
+        Map<Long, long[]> from = box.savedFrom(ids);
+        Map<Long, MessageRepo.Row> mails = new java.util.HashMap<>();
+        for (MessageRepo.Row m : messages.byIds(new java.util.LinkedHashSet<>(from.values().stream().map(v -> v[0]).toList()))) {
+            if (m.userId() == userId) mails.put(m.id(), m);
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (JsonNode f : files) {
+            long id = f.path("id").asLong();
+            String name = f.path("originalFileName").asText("file");
+            String type = f.path("contentType").asText("");
+            String k = kind(name, type);
+            if (kind != null && !kind.isBlank() && !kind.equals(k)) continue;
+            long[] src = from.get(id);
+            MessageRepo.Row mail = src == null ? null : mails.get(src[0]);
+            if (accountId != null && (mail == null || mail.accountId() != accountId)) continue;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("boxFileId", id);
+            m.put("name", name);
+            m.put("size", f.path("fileSizeBytes").asLong(0));
+            m.put("contentType", type);
+            m.put("kind", k);
+            m.put("folderPath", f.path("folderPath").asText(""));
+            m.put("receivedAt", f.path("sentAt").asText(null));
+            m.put("inBox", true);
+            if (mail != null) {
+                m.put("messageId", mail.id());
+                m.put("index", (int) src[1]);
+                m.put("accountId", mail.accountId());
+                m.put("accountColor", mail.accountColor());
+                m.put("folder", mail.folder());
+                m.put("fromName", mail.fromName());
+                m.put("fromEmail", mail.fromEmail());
+                m.put("subject", mail.subject());
+                if (mail.receivedAt() != null) m.put("receivedAt", mail.receivedAt().toInstant().toString());
+            }
+            items.add(m);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("source", "box");
+        out.put("items", items);
+        out.put("nextCursor", next);
+        out.put("webUrl", box.existing(userId).map(l -> box.webUrl(l.driveId())).orElse(null));
+        return out;
+    }
+
+    /** Downloads a file from Box: a short-lived download link from Box. */
+    @GetMapping("/box/{fileId}/download")
+    public Map<String, Object> downloadFromBox(@RequestAttribute long userId, @org.springframework.web.bind.annotation.PathVariable long fileId) {
+        String url = box.downloadUrl(userId, fileId).orElseThrow(() ->
+                new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Magizhchi Box couldn't send that file just now."));
+        return Map.of("url", url);
     }
 
     /**

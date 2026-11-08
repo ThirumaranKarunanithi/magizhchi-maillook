@@ -43,6 +43,8 @@ export default function Files() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(null)
   const [inBox, setInBox] = useState(() => new Set())
+  const [source, setSource] = useState('mail') // 'box' when attachments live in Magizhchi Box
+  const [boxNote, setBoxNote] = useState(null) // 'connecting' | 'unreachable' while Box can't give the list
   const seq = useRef(0)
   const [inside, setInside] = useState(null) // Box's answer for words inside documents
   const insideSeq = useRef(0)
@@ -61,6 +63,10 @@ export default function Files() {
       if (my !== seq.current) return
       setItems((prev) => (cursor ? [...(prev || []), ...res.items] : res.items))
       setNext(res.nextCursor)
+      if (!cursor) {
+        setSource(res.source || 'mail')
+        setBoxNote(res.boxNote || null)
+      }
     } catch (e) {
       if (my === seq.current) setError(e.message)
     } finally {
@@ -95,7 +101,20 @@ export default function Files() {
     }
   })
 
-  const key = (f) => `${f.messageId}:${f.index}`
+  const key = (f) => (f.boxFileId ? `box${f.boxFileId}` : `${f.messageId}:${f.index}`)
+
+  // A file from Box downloads through a short-lived link Box hands out.
+  const downloadFromBox = (f) => run(`d${key(f)}`, async () => {
+    const { url } = await get(`/api/files/box/${f.boxFileId}/download`)
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    a.target = '_blank' // a file the browser can show opens beside MailLook instead of replacing it
+    a.download = f.name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  })
   const path = (f) => `/api/messages/${f.messageId}/attachments/${f.index}`
 
   async function run(k, fn) {
@@ -124,7 +143,7 @@ export default function Files() {
           <IconPaperclip size={20} className="hidden text-peacock-600 sm:block" />
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-bold leading-tight">Files</h1>
-            <p className="truncate text-[11px] text-slate-500">Every attachment from every mailbox</p>
+            <p className="truncate text-[11px] text-slate-500">{source === 'box' ? 'Every attachment, from your Magizhchi Box' : 'Every attachment from every mailbox'}</p>
           </div>
           {box?.webUrl && <a className="text-xs font-semibold text-peacock-700 hover:underline" href={box.webUrl} target="_blank" rel="noreferrer">Open Box ↗</a>}
         </div>
@@ -149,6 +168,13 @@ export default function Files() {
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 max-md:pb-24 sm:px-4">
         {error && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
+        {boxNote && (
+          <p role="status" className="mb-3 rounded-xl bg-peacock-50/60 px-3 py-2 text-xs text-peacock-900 ring-1 ring-peacock-100">
+            {boxNote === 'connecting'
+              ? 'Moving your attachments into Magizhchi Box. Until that starts, this list comes from your mail.'
+              : 'Magizhchi Box can’t be reached just now, so this list comes from your mail.'}
+          </p>
+        )}
         {items == null && !error && (
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
             {[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="h-[68px] animate-pulse rounded-xl bg-slate-100" />)}
@@ -179,21 +205,27 @@ export default function Files() {
                   <FileTile kind={k} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-brand-ink" title={f.name}>{f.name}</div>
-                    <button className="block max-w-full truncate text-left text-xs text-slate-500 hover:text-peacock-700 hover:underline"
-                      title={`Open the mail: ${f.subject || '(no subject)'}`}
-                      onClick={() => navigate(`/?view=${VIEW_OF[f.folder] || 'all'}&open=${f.messageId}`)}>
-                      <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: f.accountColor || '#0e7c86' }} />
-                      {f.folder === 'SENT' ? 'You sent' : senderName(f)} · {day(f.receivedAt)} · {formatSize(f.size)}
-                    </button>
+                    {f.messageId ? (
+                      <button className="block max-w-full truncate text-left text-xs text-slate-500 hover:text-peacock-700 hover:underline"
+                        title={`Open the mail: ${f.subject || '(no subject)'}`}
+                        onClick={() => navigate(`/?view=${VIEW_OF[f.folder] || 'all'}&open=${f.messageId}`)}>
+                        <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: f.accountColor || '#0e7c86' }} />
+                        {f.folder === 'SENT' ? 'You sent' : senderName(f)} · {day(f.receivedAt)} · {formatSize(f.size)}
+                      </button>
+                    ) : (
+                      <p className="truncate text-xs text-slate-500" title={f.folderPath}>
+                        In Box{f.folderPath ? ` › ${f.folderPath.replace(/\/$/, '').split('/').pop()}` : ''}{f.receivedAt ? ` · ${day(f.receivedAt)}` : ''} · {formatSize(f.size)}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
                     {k.viewable && (
                       <button className="icon-btn" title={`Open ${f.name}`} aria-label={`Open ${f.name}`} disabled={busy != null}
-                        onClick={() => run(`o${id}`, () => openFile(path(f), f.contentType))}>
-                        {busy === `o${id}` ? <span className="spinner" /> : <IconEye size={17} />}
+                        onClick={() => (f.boxFileId ? openInBox(f) : run(`o${id}`, () => openFile(path(f), f.contentType)))}>
+                        {busy === `o${id}` || (f.boxFileId && busy === `x${f.boxFileId}`) ? <span className="spinner" /> : <IconEye size={17} />}
                       </button>
                     )}
-                    {box?.configured && (saved ? (
+                    {box?.configured && !f.boxFileId && (saved ? (
                       <button className="icon-btn !text-emerald-600" title="In your Magizhchi Box" aria-label={`${f.name} is in Magizhchi Box`}
                         onClick={() => box.webUrl && window.open(box.webUrl, '_blank', 'noopener')}>
                         <IconCloudCheck size={18} />
@@ -205,7 +237,7 @@ export default function Files() {
                       </button>
                     ))}
                     <button className="icon-btn !text-brand-primary" title={`Download ${f.name}`} aria-label={`Download ${f.name}`} disabled={busy != null}
-                      onClick={() => run(`d${id}`, () => downloadFile(path(f), f.name))}>
+                      onClick={() => (f.boxFileId ? downloadFromBox(f) : run(`d${id}`, () => downloadFile(path(f), f.name)))}>
                       {busy === `d${id}` ? <span className="spinner" /> : <IconDownload size={17} />}
                     </button>
                   </div>
