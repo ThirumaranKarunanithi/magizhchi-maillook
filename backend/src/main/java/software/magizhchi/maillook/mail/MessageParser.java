@@ -33,9 +33,15 @@ public final class MessageParser {
     public static Parsed parse(Part message) throws MessagingException, IOException {
         Acc acc = new Acc();
         walk(message, acc, null);
-        String text = acc.text;
-        if (text == null && acc.html != null) text = htmlToText(acc.html);
-        return new Parsed(cap(text, MAX_TEXT), cap(acc.html, MAX_HTML), acc.attachments, cap(acc.calendar, 200_000));
+        String text = stripMimeLeftovers(acc.text);
+        String html = acc.html;
+        // Some senders (bank alerts among them) put an HTML page in the "plain text" part, headers and all.
+        if (text != null && looksLikeHtml(text)) {
+            if (html == null) html = text;
+            text = null;
+        }
+        if (text == null && html != null) text = htmlToText(stripMimeLeftovers(html));
+        return new Parsed(cap(text, MAX_TEXT), cap(html, MAX_HTML), acc.attachments, cap(acc.calendar, 200_000));
     }
 
     /** Returns the n-th attachment part, walking in the same order as {@link #parse}. */
@@ -126,12 +132,40 @@ public final class MessageParser {
         return t.trim();
     }
 
+    // MIME headers or boundaries left at the top of a body by a sender that built its mail by hand:
+    // "Content-Type: text/html; charset=utf-8", a bare "text/html; charset=utf-8", "--=_boundary".
+    private static final Pattern MIME_LINE = Pattern.compile(
+            "(?i)^\\s*(content-[a-z-]+\\s*:.*|mime-version\\s*:.*|text/(html|plain)\\s*;?\\s*(charset\\s*=\\s*\"?[\\w-]+\"?)?\\s*|--[\\w=._+-]{8,}(--)?\\s*)$");
+    private static final Pattern HTML_START = Pattern.compile("(?is)^\\s*(<!doctype|<html|<head|<body|<table|<div|<p[ >]|<meta|<style|<center|<span)");
+
+    /** The body without MIME header lines or boundaries at its top. */
+    public static String stripMimeLeftovers(String body) {
+        if (body == null) return null;
+        String[] lines = body.split("\\r?\\n", -1);
+        int i = 0;
+        while (i < lines.length && i < 12 && (lines[i].isBlank() || MIME_LINE.matcher(lines[i]).matches())) i++;
+        return i == 0 ? body : String.join("\n", java.util.Arrays.copyOfRange(lines, i, lines.length));
+    }
+
+    static boolean looksLikeHtml(String text) {
+        return HTML_START.matcher(text).find();
+    }
+
+    /** The preview line of a mail, from its text (or, failing that, its HTML). */
+    public static String snippet(String text, String html) {
+        String t = stripMimeLeftovers(text);
+        if ((t == null || t.isBlank() || looksLikeHtml(t)) && html != null) t = htmlToText(stripMimeLeftovers(html));
+        else if (t != null && looksLikeHtml(t)) t = htmlToText(t);
+        return snippet(t);
+    }
+
     public static String snippet(String text) {
         if (text == null) return "";
+        text = stripMimeLeftovers(text);
         StringBuilder sb = new StringBuilder();
         for (String line : text.split("\n")) {
             String l = line.trim();
-            if (l.startsWith(">")) continue;
+            if (l.startsWith(">") || MIME_LINE.matcher(l).matches()) continue;
             if (l.matches("(?i)^on .{5,200} wrote:$")) break;
             if (!l.isEmpty()) sb.append(l).append(' ');
             if (sb.length() > 240) break;
