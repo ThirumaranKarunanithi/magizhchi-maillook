@@ -203,13 +203,13 @@ class SuiteSendMailTest {
         token("read", "write");
         mailbox();
         when(box.get(7L, "/api/files/1/download-url")).thenReturn(boxReply(400, "{\"message\":\"This file is stored as chunks.\"}"));
-        when(box.get(7L, "/api/files/2/download-url")).thenReturn(boxReply(403, null));
+        when(box.get(7L, "/api/files/2/download-url")).thenReturn(boxReply(403, "{\"message\":\"This file lives in a view-only folder and cannot be downloaded.\"}"));
         when(box.get(7L, "/api/files/3/download-url")).thenReturn(boxReply(404, null));
         when(box.get(7L, "/api/files/4/download-url")).thenReturn(boxReply(200, "{\"url\":\"u\"}"));
         when(box.fetchBytes(eq("u"), anyLong())).thenReturn(null); // too big
 
         assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 1, "fileName", "a.pptx")))).getMessage().contains("desktop app"));
-        assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 2, "fileName", "b.pdf")))).getMessage().contains("view-only"));
+        assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 2, "fileName", "b.pdf")))).getMessage().contains("view-only folder"));
         assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 3, "fileName", "c.pdf")))).getMessage().contains("can't find"));
         assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 4, "fileName", "d.zip")))).getMessage().contains("too large"));
         verify(outbox, never()).queue(anyLong(), any(), any(), anyList(), any());

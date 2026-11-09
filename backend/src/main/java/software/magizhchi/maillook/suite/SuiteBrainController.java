@@ -454,7 +454,11 @@ public class SuiteBrainController {
             if (r.code() == 400 && said.contains("chunk")) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" was uploaded from the desktop app, which stores it encrypted, so it can't be attached. Share it from Magizhchi Box instead.");
             }
-            if (r.code() == 403) throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" is view-only in Box, so it can't be attached.");
+            if (r.code() == 403) {
+                // Box says exactly why (view-only file or folder, admins only, drive-only group): pass it on, never guess.
+                String why = r.message() == null || r.message().isBlank() ? "Box doesn't allow this file to be downloaded." : r.message().trim();
+                throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" can't be attached: " + why);
+            }
             if (r.code() == 404) throw new ApiException(HttpStatus.BAD_REQUEST, "I can't find \"" + name + "\" in your Magizhchi Box.");
             if (!r.ok() || r.json() == null) throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi Box couldn't give me \"" + name + "\" (" + r.code() + ").");
             byte[] bytes = box.fetchBytes(r.json().path("url").asText(""), MAX_ATTACH_BYTES - total);
