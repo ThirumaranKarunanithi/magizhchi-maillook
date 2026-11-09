@@ -6,7 +6,40 @@ import { whatsApp } from '../components/PersonCard.jsx'
 import { Avatar } from '../components/AddressSuggest.jsx'
 import { IconBook, IconCompose, IconMenu, IconPhone, IconPlus, IconSearch, IconUserPlus, IconX } from '../components/Icons.jsx'
 
-const SOURCE = { box: 'Box', both: 'Box · mail', mail: 'From mail' }
+const SOURCE = { box: 'Box', both: 'Box · mail', mail: 'From mail', team: 'Team' }
+
+/** What teammates have shared with you: a name, one email and a label, and a photo only if they allowed it. Read-only. */
+function TeamList({ q, write }) {
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let live = true
+    get('/api/contacts/team' + qs({ q })).then((d) => { if (live) setItems(d.items || []) }).catch((e) => { if (live) setError(e.message) })
+    return () => { live = false }
+  }, [q])
+  if (error) return <p className="py-6 text-center text-sm text-red-700">{error}</p>
+  if (!items) return <p className="flex items-center gap-2 py-6 text-sm text-slate-500"><span className="spinner" /> Gathering your team's people…</p>
+  if (!items.length) return <p className="py-10 text-center text-sm text-slate-500">{q ? `Nobody matches “${q}”.` : 'Nobody has shared contacts with you yet.'}</p>
+  return (
+    <ul className="divide-y divide-slate-200/70 overflow-hidden rounded-xl border border-slate-200 bg-white/70">
+      {items.map((p) => (
+        <li key={p.email} className="flex items-center gap-3 px-3 py-2.5">
+          {p.photo ? (
+            <Avatar photo={p.photo} label={p.name || p.email} size={36} />
+          ) : (
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: hue(p.email || p.name) }} aria-hidden="true">{initials(p.name, p.email)}</span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-brand-ink">{p.name || p.email}</span>
+            <span className="block truncate text-xs text-slate-500">{p.email}</span>
+            <span className="block truncate text-[11px] text-slate-400">{p.hint}</span>
+          </span>
+          <button className="icon-btn" title={`Write to ${p.name || p.email}`} onClick={() => write(p.email)}><IconCompose size={15} /></button>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 function initials(name, email) {
   const s = (name || email || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim()
@@ -119,6 +152,8 @@ export default function Contacts() {
   const [next, setNext] = useState(null)
   const [more, setMore] = useState(false)
   const [open, setOpen] = useState(null)
+  const [tab, setTab] = useState('mine')
+  const [teamCount, setTeamCount] = useState(0)
   const shown = useRef(PAGE)
   const stamp = useRef(null)
   const end = useRef(null)
@@ -185,6 +220,10 @@ export default function Contacts() {
     return () => { clearInterval(t); window.removeEventListener('focus', check) }
   }, [data?.box?.connected, load])
 
+  useEffect(() => {
+    get('/api/contacts/team').then((d) => setTeamCount(d?.total || 0)).catch(() => {})
+  }, [])
+
   async function connect() {
     setConnecting(true)
     try {
@@ -228,6 +267,14 @@ export default function Contacts() {
             <button className="btn-secondary !py-1.5 text-sm" onClick={() => setAdding(true)}><IconPlus size={15} /> <span className="hidden sm:inline">New contact</span></button>
           )}
         </div>
+        {teamCount > 0 && (
+          <div className="mt-2 flex gap-1" role="tablist">
+            {[['mine', 'My contacts'], ['team', `Team (${teamCount})`]].map(([k, label]) => (
+              <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${tab === k ? 'bg-brand-primary text-white' : 'bg-slate-100 text-slate-600'}`}>{label}</button>
+            ))}
+          </div>
+        )}
         <div className="relative mt-2">
           <IconSearch size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input className="input !py-1.5 !pl-8" type="search" placeholder="Search names, addresses, numbers…" value={qInput}
@@ -237,6 +284,8 @@ export default function Contacts() {
 
       <div ref={end} onScroll={nearEnd} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4">
         <div className="mx-auto max-w-3xl space-y-3">
+          {tab === 'team' && <TeamList q={q} write={write} />}
+          {tab === 'mine' && <>
           {box?.available && !box.connected && (
             <div className="flex flex-wrap items-center gap-3 rounded-xl border border-peacock-200 bg-peacock-50/70 px-3 py-2.5 text-sm">
               <IconBook size={18} className="text-peacock-700" />
@@ -306,6 +355,7 @@ export default function Contacts() {
           {items.length > 0 && next == null && (
             <p className="pb-6 text-center text-[11px] text-slate-400">Magizhchi Box keeps the master copy, so your phone and Magizhchi PA see the same people.</p>
           )}
+          </>}
         </div>
       </div>
     </section>

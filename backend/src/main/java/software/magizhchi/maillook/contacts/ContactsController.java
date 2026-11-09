@@ -130,7 +130,41 @@ public class ContactsController {
                 if (wanted.contains(k)) out.putIfAbsent(k, url);
             }
         }
+        for (BoxContacts.TeamPerson t : box.team(userId)) {
+            if (t.photo() != null && wanted.contains(t.email())) out.putIfAbsent(t.email(), teamPhoto(t.photo()));
+        }
         return Map.of("photos", out);
+    }
+
+    static String teamPhoto(String b64) {
+        return b64 == null || b64.isBlank() || b64.length() > 130_000 ? null : "data:image/jpeg;base64," + b64.replaceAll("\s", "");
+    }
+
+    /** Teammates' shared contacts: name, one email, a label, an owner and maybe a photo. No phone, address or note exists here. */
+    @GetMapping("/team")
+    public Map<String, Object> team(@RequestAttribute long userId, @RequestParam(defaultValue = "") String q) {
+        String query = q.trim().toLowerCase(Locale.ROOT);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (BoxContacts.TeamPerson t : box.team(userId)) {
+            if (!query.isEmpty() && match(query, t.email(), t.name()) == 0) continue;
+            items.add(teamJson(t));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("items", items);
+        out.put("total", items.size());
+        return out;
+    }
+
+    private static Map<String, Object> teamJson(BoxContacts.TeamPerson t) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("email", t.email());
+        m.put("name", t.name());
+        m.put("label", t.label());
+        m.put("owner", t.owner());
+        m.put("source", "team");
+        m.put("hint", (t.label() != null ? t.label() + " · " : "") + "Shared by " + (t.owner() == null ? "a teammate" : t.owner()));
+        m.put("photo", teamPhoto(t.photo()));
+        return m;
     }
 
     /** How well the typed text matches: 0 = not at all. */
@@ -195,6 +229,14 @@ public class ContactsController {
             Map<String, Object> m = json(s.e(), now);
             if (s.why() != null) m.put("why", s.why());
             items.add(m);
+        }
+        // Teammates' shared contacts, after the person's own (only when typing, and never someone already listed).
+        if (!query.isEmpty()) {
+            for (BoxContacts.TeamPerson t : box.team(userId)) {
+                if (items.size() >= n) break;
+                if (already.contains(t.email()) || all.containsKey(t.email()) || match(query, t.email(), t.name()) == 0) continue;
+                items.add(teamJson(t));
+            }
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("items", items);

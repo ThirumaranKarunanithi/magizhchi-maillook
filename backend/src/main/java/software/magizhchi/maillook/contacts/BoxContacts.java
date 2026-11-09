@@ -71,7 +71,34 @@ public class BoxContacts {
         return book(userId);
     }
 
+    /** A teammate's shared contact: name, one email, a small label and (only if allowed) a photo. Never a phone number. */
+    public record TeamPerson(String name, String email, String label, String photo, String owner) {}
+
+    private record CachedTeam(long at, List<TeamPerson> people) {}
+
+    private final Map<Long, CachedTeam> teams = new ConcurrentHashMap<>();
+
+    /** What teammates have shared with this person, read with their own Box key. Empty when none or Box is unreachable. */
+    public List<TeamPerson> team(long userId) {
+        CachedTeam c = teams.get(userId);
+        long now = System.currentTimeMillis();
+        if (c != null && now - c.at() < FRESH_MS) return c.people();
+        if (box.existing(userId).isEmpty()) return List.of();
+        BoxClient.Reply r = box.get(userId, "/api/contacts/team?photos=true");
+        if (!r.ok() || r.json() == null) return c != null ? c.people() : List.of();
+        List<TeamPerson> out = new ArrayList<>();
+        for (JsonNode n : r.json().path("contacts")) {
+            String email = n.path("email").asText("").trim().toLowerCase(Locale.ROOT);
+            if (email.isEmpty()) continue;
+            out.add(new TeamPerson(n.path("name").asText(null), email, n.path("label").asText(null),
+                    n.path("photo").isNull() ? null : n.path("photo").asText(null), n.path("owner").asText(null)));
+        }
+        teams.put(userId, new CachedTeam(now, List.copyOf(out)));
+        return out;
+    }
+
     public void forget(long userId) {
+        teams.remove(userId);
         books.remove(userId);
     }
 

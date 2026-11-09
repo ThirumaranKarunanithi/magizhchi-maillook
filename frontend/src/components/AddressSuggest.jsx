@@ -72,7 +72,7 @@ export function SuggestList({ items, active, onPick, onHover }) {
                 {s.name && <span className="text-slate-500"> {s.email}</span>}
               </span>
               <span className="block truncate text-[11px] text-slate-500">
-                {s.why || s.hint}{s.phone ? ` · ${s.phone}` : ''}{s.source !== 'mail' ? ' · Box' : ''}
+                {s.why || s.hint}{s.phone ? ` · ${s.phone}` : ''}{s.source === 'box' || s.source === 'both' ? ' · Box' : ''}
               </span>
             </span>
           </button>
