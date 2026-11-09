@@ -58,7 +58,13 @@ public class SuiteBrainController {
                     + "asks to send or mail a file that is in Box; never say you can't attach files.",
             "items", Map.of("type", "object", "properties", Map.of(
                     "fileId", Map.of("type", "integer"), "fileName", Map.of("type", "string"))));
-    static final long MAX_ATTACH_BYTES = 20L * 1024 * 1024;
+    /** Files made by other tools (a spreadsheet from Data, a photo from the camera), by id; PA swaps each id for the file. */
+    private static final Map<String, Object> FILES = Map.of(
+            "type", "array",
+            "description", "Optional. Files to attach that other tools made or that are attached to the chat: each item is "
+                    + "{\"ref\": \"<file id>\"}, for example the xlsx or pdf from data__export_document. Up to 5 files, 20 MB in all.",
+            "items", Map.of("type", "object", "properties", Map.of("ref", Map.of("type", "string"))));
+    public static final long MAX_ATTACH_BYTES = 20L * 1024 * 1024;
     static final int MAX_ATTACH_FILES = 5;
 
     private final SuiteDelegationVerifier verifier;
@@ -139,6 +145,7 @@ public class SuiteBrainController {
                                 "subject", prop("string", "Subject line."),
                                 "body", prop("string", "Plain-text body."),
                                 "boxFiles", BOX_FILES,
+                                "files", FILES,
                                 "sendAt", prop("string", "Optional. Send later at this exact time, ISO-8601 UTC like 2026-11-09T03:30:00Z (at least a minute away)."),
                                 "remindIfNoReplyDays", prop("integer", "Optional, 1-30. Remind the user if nobody has replied after this many days.")),
                         List.of("to", "subject", "body")),
@@ -153,6 +160,7 @@ public class SuiteBrainController {
                                 "subject", prop("string", "The original subject (Re: is added for you)."),
                                 "body", prop("string", "Plain-text reply, signed with the user's first name."),
                                 "boxFiles", BOX_FILES,
+                                "files", FILES,
                                 "remindIfNoReplyDays", prop("integer", "Optional, 1-30. Remind the user if there is no answer.")),
                         List.of("messageId", "to", "body")),
                 tool("mail_action", "write",
@@ -409,7 +417,8 @@ public class SuiteBrainController {
         ObjectNode payload = mapper.valueToTree(o);
         int days = clamp(input.get("remindIfNoReplyDays"), 0, 30, 0);
         if (days > 0) payload.put("remindAt", at.plus(Duration.ofDays(days)).toString());
-        List<MailActions.OutFile> files = boxAttachments(userId, input.get("boxFiles"));
+        List<MailActions.OutFile> files = new ArrayList<>(boxAttachments(userId, input.get("boxFiles")));
+        files.addAll(givenFiles(input.get("files"), files.stream().mapToLong(f -> f.bytes().length).sum()));
         var queued = outbox.queue(userId, payload, o, files, at);
 
         Map<String, Object> out = new LinkedHashMap<>();
@@ -470,6 +479,33 @@ public class SuiteBrainController {
             }
             total += bytes.length;
             String type = java.net.URLConnection.guessContentTypeFromName(name);
+            out.add(new MailActions.OutFile(name, type == null ? "application/octet-stream" : type, bytes));
+        }
+        return out;
+    }
+
+    /** Files PA handed over with the call (already swapped from their ids): name, mediaType and base64 data. */
+    static List<MailActions.OutFile> givenFiles(Object raw, long alreadyBytes) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) return List.of();
+        if (list.size() > MAX_ATTACH_FILES) throw new ApiException(HttpStatus.BAD_REQUEST, "You can attach up to " + MAX_ATTACH_FILES + " files to one email.");
+        List<MailActions.OutFile> out = new ArrayList<>();
+        long total = alreadyBytes;
+        for (Object o : list) {
+            if (!(o instanceof Map<?, ?> m) || m.get("data") == null) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "One of the files isn't available any more. Make it again and try once more.");
+            }
+            byte[] bytes;
+            try {
+                bytes = java.util.Base64.getDecoder().decode(String.valueOf(m.get("data")));
+            } catch (IllegalArgumentException e) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "One of the files could not be read.");
+            }
+            total += bytes.length;
+            if (bytes.length == 0 || total > MAX_ATTACH_BYTES) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "The files are too large to attach (emails can carry 20 MB of files).");
+            }
+            String name = cleanFileName(m.get("name") == null ? null : m.get("name").toString(), out.size() + 1);
+            String type = m.get("mediaType") == null ? java.net.URLConnection.guessContentTypeFromName(name) : m.get("mediaType").toString();
             out.add(new MailActions.OutFile(name, type == null ? "application/octet-stream" : type, bytes));
         }
         return out;

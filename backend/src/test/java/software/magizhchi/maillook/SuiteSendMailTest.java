@@ -233,6 +233,49 @@ class SuiteSendMailTest {
         assertTrue(SuiteBrainController.cleanFileName("x".repeat(300), 1).length() <= 120);
     }
 
+    // ------------------------------------------------------------------ files other products made
+
+    private Map<String, Object> sendWithFiles(Object files) {
+        Map<String, Object> input = new java.util.LinkedHashMap<>(Map.of("to", List.of("pugal@example.com"), "subject", "Bill", "body", "Attached."));
+        input.put("files", files);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> r = (Map<String, Object>) send(input);
+        return r;
+    }
+
+    @Test
+    void aSpreadsheetFromAnotherProductIsAttachedToTheMail() {
+        token("read", "write");
+        mailbox();
+        byte[] xlsx = {1, 2, 3, 4, 5};
+
+        Map<String, Object> r = sendWithFiles(List.of(Map.of("name", "bill.xlsx", "mediaType", "application/vnd.ms-excel",
+                "data", java.util.Base64.getEncoder().encodeToString(xlsx))));
+
+        assertEquals(List.of("bill.xlsx"), r.get("attached"));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MailActions.OutFile>> files = ArgumentCaptor.forClass(List.class);
+        verify(outbox).queue(eq(7L), any(ObjectNode.class), any(MailActions.Outgoing.class), files.capture(), any(Instant.class));
+        assertEquals(1, files.getValue().size());
+        assertEquals("application/vnd.ms-excel", files.getValue().get(0).contentType());
+        assertEquals(5, files.getValue().get(0).bytes().length);
+    }
+
+    @Test
+    void anUnresolvedFileOrTooManyOrTooBigAreRefused() {
+        token("read", "write");
+        mailbox();
+        // an id that was never swapped for the file (it expired): no data
+        assertThrows(ApiException.class, () -> sendWithFiles(List.of(Map.of("ref", "file_gone"))));
+        assertThrows(ApiException.class, () -> sendWithFiles(List.of(Map.of("name", "x", "data", "!!bad!!"))));
+        List<Object> six = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) six.add(Map.of("name", "f" + i, "data", java.util.Base64.getEncoder().encodeToString(new byte[]{1})));
+        assertThrows(ApiException.class, () -> sendWithFiles(six));
+        byte[] big = new byte[(int) SuiteBrainController.MAX_ATTACH_BYTES + 1];
+        assertThrows(ApiException.class, () -> sendWithFiles(List.of(Map.of("name", "big.zip", "data", java.util.Base64.getEncoder().encodeToString(big)))));
+        verify(outbox, never()).queue(anyLong(), any(), any(), anyList(), any());
+    }
+
     // ------------------------------------------------------------------ everyday mailbox actions
 
     @Test
