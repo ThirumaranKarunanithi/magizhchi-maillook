@@ -3,6 +3,7 @@ import { get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
 import { EMAIL_RE } from '../util.js'
 import { whatsApp } from '../components/PersonCard.jsx'
+import { Avatar } from '../components/AddressSuggest.jsx'
 import { IconBook, IconCompose, IconMenu, IconPhone, IconPlus, IconSearch, IconUserPlus, IconX } from '../components/Icons.jsx'
 
 const SOURCE = { box: 'Box', both: 'Box · mail', mail: 'From mail' }
@@ -264,9 +265,13 @@ export default function Contacts() {
                 <li key={`${key}-${i}`} className={`px-3 py-2.5 ${isOpen ? 'bg-white' : ''}`}>
                 <div className="flex items-center gap-3">
                   <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setOpen(isOpen ? null : key)} aria-expanded={isOpen}>
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: hue(p.email || p.name) }} aria-hidden="true">
-                    {initials(p.name, p.email)}
-                  </span>
+                  {p.photo ? (
+                    <Avatar photo={p.photo} label={p.name || p.email} size={36} />
+                  ) : (
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: hue(p.email || p.name) }} aria-hidden="true">
+                      {initials(p.name, p.email)}
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
                       <span className="truncate text-sm font-semibold text-brand-ink">{p.name || p.email || '(no name)'}</span>

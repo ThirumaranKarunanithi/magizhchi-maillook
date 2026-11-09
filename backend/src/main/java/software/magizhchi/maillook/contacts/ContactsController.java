@@ -106,6 +106,11 @@ public class ContactsController {
         return "data:image/jpeg;base64," + card.photo.replaceAll("\s", "");
     }
 
+    /** A card's photo for the address-book list: only a small one, so 200 rows stay light. */
+    static String listPhoto(Vcards.Card card) {
+        return card == null || card.photo == null || card.photo.length() > 40_000 ? null : photoUrl(card);
+    }
+
     /** Photos for addresses already on the mail (the chips): email to data URL, only for people who have one. */
     @GetMapping("/photos")
     public Map<String, Object> photos(@RequestAttribute long userId, @RequestParam List<String> emails) {
@@ -356,6 +361,7 @@ public class ContactsController {
             m.put("name", c.name);
             m.put("phone", c.tels.isEmpty() ? null : c.tels.get(0));
             m.put("org", c.org);
+            m.put("photo", listPhoto(c));
             details(m, c);
             m.put("source", e != null && e.person() != null ? "both" : "box");
             m.put("hint", e == null || e.person() == null ? "In your Magizhchi Box contacts" : hint(e.person(), now));
