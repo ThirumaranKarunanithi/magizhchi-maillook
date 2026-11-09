@@ -457,7 +457,10 @@ public class SuiteBrainController {
             if (r.code() == 403) {
                 // Box says exactly why (view-only file or folder, admins only, drive-only group): pass it on, never guess.
                 String why = r.message() == null || r.message().isBlank() ? "Box doesn't allow this file to be downloaded." : r.message().trim();
-                throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" can't be attached: " + why);
+                String hint = why.toLowerCase().contains("contained")
+                        ? " An admin of the group can allow their own assistant: in Magizhchi Box open the group, then Settings, Data protection, and turn on \"My assistant apps\"."
+                        : "";
+                throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" can't be attached: " + why + hint);
             }
             if (r.code() == 404) throw new ApiException(HttpStatus.BAD_REQUEST, "I can't find \"" + name + "\" in your Magizhchi Box.");
             if (!r.ok() || r.json() == null) throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi Box couldn't give me \"" + name + "\" (" + r.code() + ").");
