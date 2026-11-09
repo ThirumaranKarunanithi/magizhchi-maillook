@@ -194,7 +194,7 @@ public class SuiteBrainController {
                                 "description", "Email addresses to check.")),
                         List.of("to")), "hidden"),
                 tool("frequent_correspondents", "read",
-                        "The people the user writes to or hears from most (inbox senders and sent recipients over the last "
+                        "The people the user writes to or hears from most (only people the user has written to themselves, over the last "
                                 + "60 days, newsletters and no-reply addresses left out), with how many messages each. Use it to "
                                 + "suggest saving people who are not in the contacts yet.",
                         Map.of("minMessages", prop("integer", "Only people with at least this many messages (default 3)."),
@@ -628,6 +628,7 @@ public class SuiteBrainController {
         for (String e : jdbc.queryForList("SELECT LOWER(email) FROM accounts WHERE user_id = ?", String.class, userId)) mine.add(e);
         Map<String, int[]> counts = new LinkedHashMap<>();
         Map<String, String> names = new LinkedHashMap<>();
+        Set<String> wroteTo = new HashSet<>(); // people the user has written to: real correspondents, not automated senders
         jdbc.query("SELECT LOWER(m.from_email) AS e, MAX(m.from_name) AS n, COUNT(*) AS c FROM messages m "
                         + "JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = 'INBOX' "
                         + "AND m.received_at > NOW() - INTERVAL '60 days' AND m.from_email IS NOT NULL GROUP BY 1",
@@ -643,10 +644,14 @@ public class SuiteBrainController {
             java.util.regex.Matcher mt = FIND_ADDRESS.matcher(list);
             Set<String> once = new HashSet<>();
             while (mt.find()) once.add(mt.group().toLowerCase());
-            for (String e : once) counts.computeIfAbsent(e, k -> new int[1])[0]++;
+            for (String e : once) {
+                counts.computeIfAbsent(e, k -> new int[1])[0]++;
+                wroteTo.add(e);
+            }
         }
         List<Map<String, Object>> out = counts.entrySet().stream()
-                .filter(en -> en.getValue()[0] >= min && !mine.contains(en.getKey()) && !AUTOMATED.matcher(en.getKey()).find())
+                .filter(en -> en.getValue()[0] >= min && wroteTo.contains(en.getKey()) && !mine.contains(en.getKey())
+                        && !AUTOMATED.matcher(en.getKey()).find())
                 .sorted((x, y) -> Integer.compare(y.getValue()[0], x.getValue()[0]))
                 .limit(limit)
                 .map(en -> {
