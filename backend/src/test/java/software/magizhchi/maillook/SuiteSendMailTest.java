@@ -14,6 +14,8 @@ import software.magizhchi.maillook.mail.MailActions;
 import software.magizhchi.maillook.mail.MessageRepo;
 import software.magizhchi.maillook.mail.Outbox;
 import software.magizhchi.maillook.mail.Waiting;
+import software.magizhchi.maillook.suite.BoxClient;
+import software.magizhchi.maillook.suite.BoxController;
 import software.magizhchi.maillook.suite.SuiteBrainController;
 import software.magizhchi.maillook.suite.SuiteDelegationVerifier;
 
@@ -43,6 +45,8 @@ class SuiteSendMailTest {
     private AccountRepo accounts;
     private Outbox outbox;
     private MailActions mailActions;
+    private BoxClient box;
+    private BoxController boxController;
     private SuiteBrainController controller;
 
     @BeforeEach
@@ -52,8 +56,10 @@ class SuiteSendMailTest {
         accounts = mock(AccountRepo.class);
         outbox = mock(Outbox.class);
         mailActions = mock(MailActions.class);
+        box = mock(BoxClient.class);
+        boxController = mock(BoxController.class);
         controller = new SuiteBrainController(verifier, jdbc, mock(MessageRepo.class), mock(Waiting.class),
-                mock(DraftRepo.class), accounts, outbox, mailActions, new ObjectMapper().findAndRegisterModules(), "secret");
+                mock(DraftRepo.class), accounts, outbox, mailActions, box, boxController, new ObjectMapper().findAndRegisterModules(), "secret");
         when(jdbc.queryForList(anyString(), eq(Long.class), anyString())).thenReturn(List.of(7L));
     }
 
@@ -150,6 +156,135 @@ class SuiteSendMailTest {
         assertEquals(List.of("ravi@example.com"), o.getValue().to());
         assertEquals("Re: Quote for Friday", o.getValue().subject());
         assertEquals(99L, o.getValue().replyToMessageId());
+    }
+
+    // ------------------------------------------------------------------ Box files on an email
+
+    private void mailbox() {
+        Account a = mock(Account.class);
+        when(a.id()).thenReturn(3L);
+        when(accounts.forUser(7L)).thenReturn(List.of(a));
+        Outbox.Item item = new Outbox.Item(42L, 7L, 3L, new ObjectMapper().createObjectNode(), null, "queued", null, null);
+        when(outbox.queue(anyLong(), any(ObjectNode.class), any(MailActions.Outgoing.class), anyList(), any(Instant.class))).thenReturn(item);
+    }
+
+    private static BoxClient.Reply boxReply(int code, String json) throws Exception {
+        return new BoxClient.Reply(code, json == null ? null : new ObjectMapper().readTree(json), json);
+    }
+
+    private Map<String, Object> sendWithBox(Object boxFiles) {
+        Map<String, Object> input = new java.util.LinkedHashMap<>(Map.of("to", List.of("karnish@example.com"), "subject", "Inheritance PPT", "body", "Here it is."));
+        input.put("boxFiles", boxFiles);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> r = (Map<String, Object>) send(input);
+        return r;
+    }
+
+    @Test
+    void aBoxFileIsPulledFromTheUsersBoxAndAttachedToTheMail() throws Exception {
+        token("read", "write");
+        mailbox();
+        when(box.get(7L, "/api/files/11/download-url")).thenReturn(boxReply(200, "{\"url\":\"https://s3.example/x\"}"));
+        when(box.fetchBytes(eq("https://s3.example/x"), anyLong())).thenReturn(new byte[]{1, 2, 3, 4});
+
+        Map<String, Object> r = sendWithBox(List.of(Map.of("fileId", 11, "fileName", "Inheritance in java.pptx")));
+
+        assertEquals(List.of("Inheritance in java.pptx"), r.get("attached"));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MailActions.OutFile>> files = ArgumentCaptor.forClass(List.class);
+        verify(outbox).queue(eq(7L), any(ObjectNode.class), any(MailActions.Outgoing.class), files.capture(), any(Instant.class));
+        assertEquals(1, files.getValue().size());
+        assertEquals(4, files.getValue().get(0).bytes().length);
+        assertTrue(files.getValue().get(0).contentType().contains("presentation") || files.getValue().get(0).contentType().equals("application/octet-stream"));
+    }
+
+    @Test
+    void filesThatCannotBeAttachedAreRefusedWithTheReason() throws Exception {
+        token("read", "write");
+        mailbox();
+        when(box.get(7L, "/api/files/1/download-url")).thenReturn(boxReply(400, "{\"message\":\"This file is stored as chunks.\"}"));
+        when(box.get(7L, "/api/files/2/download-url")).thenReturn(boxReply(403, null));
+        when(box.get(7L, "/api/files/3/download-url")).thenReturn(boxReply(404, null));
+        when(box.get(7L, "/api/files/4/download-url")).thenReturn(boxReply(200, "{\"url\":\"u\"}"));
+        when(box.fetchBytes(eq("u"), anyLong())).thenReturn(null); // too big
+
+        assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 1, "fileName", "a.pptx")))).getMessage().contains("desktop app"));
+        assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 2, "fileName", "b.pdf")))).getMessage().contains("view-only"));
+        assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 3, "fileName", "c.pdf")))).getMessage().contains("can't find"));
+        assertTrue(assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", 4, "fileName", "d.zip")))).getMessage().contains("too large"));
+        verify(outbox, never()).queue(anyLong(), any(), any(), anyList(), any());
+    }
+
+    @Test
+    void moreThanFiveBoxFilesOrABadIdIsRefused() throws Exception {
+        token("read", "write");
+        mailbox();
+        List<Object> six = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) six.add(Map.of("fileId", i, "fileName", "f" + i));
+        assertThrows(ApiException.class, () -> sendWithBox(six));
+        assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileName", "no id"))));
+        assertThrows(ApiException.class, () -> sendWithBox(List.of(Map.of("fileId", "abc", "fileName", "x"))));
+    }
+
+    @Test
+    void fileNamesAreMadeSafe() {
+        assertEquals("a_b_c.pptx", SuiteBrainController.cleanFileName("a/b\\c.pptx", 1));
+        assertEquals("box-file-9", SuiteBrainController.cleanFileName("  ", 9));
+        assertTrue(SuiteBrainController.cleanFileName("x".repeat(300), 1).length() <= 120);
+    }
+
+    // ------------------------------------------------------------------ everyday mailbox actions
+
+    @Test
+    void archivingAMailIsDoneAndCanBeUndone() {
+        token("read", "write");
+        MessageRepo.Row row = mock(MessageRepo.Row.class);
+        when(row.fromEmail()).thenReturn("vinith@example.com");
+        when(row.subject()).thenReturn("Application for UI/UX Designer");
+        when(mailActions.owned(7L, 55L)).thenReturn(row);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> r = (Map<String, Object>) controller.run("mail_action",
+                Map.of("input", Map.of("messageId", 55, "action", "archive")), "Bearer t");
+
+        verify(mailActions).archive(7L, 55L);
+        assertTrue(String.valueOf(r.get("message")).startsWith("Archived"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> undo = (Map<String, Object>) r.get("undo");
+        assertEquals("mail_action", undo.get("tool"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> undoInput = (Map<String, Object>) undo.get("input");
+        assertEquals("inbox", undoInput.get("action"));
+    }
+
+    @Test
+    void flagAndReadStatesAreTogglesAndUnknownActionsAreRefused() {
+        token("read", "write");
+        MessageRepo.Row row = mock(MessageRepo.Row.class);
+        when(mailActions.owned(7L, 55L)).thenReturn(row);
+        controller.run("mail_action", Map.of("input", Map.of("messageId", 55, "action", "flag")), "Bearer t");
+        verify(mailActions).setFlagged(7L, 55L, true);
+        controller.run("mail_action", Map.of("input", Map.of("messageId", 55, "action", "unread")), "Bearer t");
+        verify(mailActions).setSeen(7L, 55L, false);
+        assertThrows(ApiException.class, () -> controller.run("mail_action", Map.of("input", Map.of("messageId", 55, "action", "shred")), "Bearer t"));
+    }
+
+    @Test
+    void mailboxChangesNeedAWriteToken() {
+        token("read");
+        assertThrows(ApiException.class, () -> controller.run("mail_action", Map.of("input", Map.of("messageId", 55, "action", "archive")), "Bearer t"));
+        assertThrows(ApiException.class, () -> controller.run("save_attachment_to_box", Map.of("input", Map.of("messageId", 55)), "Bearer t"));
+        verify(mailActions, never()).archive(anyLong(), anyLong());
+    }
+
+    @Test
+    void savingAttachmentsToBoxUsesTheExistingBoxSaver() {
+        token("read", "write");
+        when(boxController.saveAll(7L, 55L)).thenReturn(Map.of("message", "Saved 2 files."));
+        when(boxController.saveOne(7L, 55L, 1)).thenReturn(Map.of("message", "Saved one."));
+
+        assertEquals("Saved 2 files.", ((Map<?, ?>) controller.run("save_attachment_to_box", Map.of("input", Map.of("messageId", 55)), "Bearer t")).get("message"));
+        assertEquals("Saved one.", ((Map<?, ?>) controller.run("save_attachment_to_box", Map.of("input", Map.of("messageId", 55, "attachmentIndex", 1)), "Bearer t")).get("message"));
     }
 
     @Test

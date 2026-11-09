@@ -169,6 +169,36 @@ public class BoxClient {
         return r;
     }
 
+    /** Downloads a presigned file link Box handed out (needs no key), up to {@code maxBytes}. Null when it is bigger or can't be fetched. */
+    public byte[] fetchBytes(String url, long maxBytes) {
+        if (url == null || url.isBlank()) return null;
+        String full = url.startsWith("http") ? url : api + (url.startsWith("/") ? "" : "/") + url;
+        try {
+            HttpResponse<java.io.InputStream> res = http.send(HttpRequest.newBuilder(URI.create(full)).timeout(Duration.ofSeconds(60)).GET().build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+            if (res.statusCode() / 100 != 2) return null;
+            if (res.headers().firstValueAsLong("Content-Length").orElse(-1) > maxBytes) return null;
+            try (java.io.InputStream in = res.body()) {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[32 * 1024];
+                long total = 0;
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    total += n;
+                    if (total > maxBytes) return null;
+                    out.write(buf, 0, n);
+                }
+                return out.toByteArray();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            log.debug("Box download failed: {}", e.toString());
+            return null;
+        }
+    }
+
     /** Downloads a presigned file link Box handed out (needs no key). Null when it can't. */
     public String fetchText(String url) {
         if (url == null || url.isBlank()) return null;

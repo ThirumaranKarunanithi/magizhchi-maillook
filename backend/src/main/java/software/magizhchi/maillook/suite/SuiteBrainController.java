@@ -50,6 +50,17 @@ public class SuiteBrainController {
 
     private static final int MAX_ROWS = 15;
 
+    /** Files from the user's Magizhchi Box to attach to an email (found with PA's Box tools). */
+    private static final Map<String, Object> BOX_FILES = Map.of(
+            "type", "array",
+            "description", "Optional. Files from the user's Magizhchi Box to attach (up to 5, 20 MB in all). Each item is "
+                    + "{\"fileId\": <number from find_box_files>, \"fileName\": \"<its name>\"}. Use this whenever the user "
+                    + "asks to send or mail a file that is in Box; never say you can't attach files.",
+            "items", Map.of("type", "object", "properties", Map.of(
+                    "fileId", Map.of("type", "integer"), "fileName", Map.of("type", "string"))));
+    static final long MAX_ATTACH_BYTES = 20L * 1024 * 1024;
+    static final int MAX_ATTACH_FILES = 5;
+
     private final SuiteDelegationVerifier verifier;
     private final JdbcTemplate jdbc;
     private final MessageRepo messages;
@@ -58,12 +69,14 @@ public class SuiteBrainController {
     private final AccountRepo accounts;
     private final Outbox outbox;
     private final MailActions mailActions;
+    private final BoxClient box;
+    private final BoxController boxController;
     private final ObjectMapper mapper;
     private final String provisionSecret;
 
     public SuiteBrainController(SuiteDelegationVerifier verifier, JdbcTemplate jdbc, MessageRepo messages,
                                 Waiting waiting, DraftRepo drafts, AccountRepo accounts,
-                                Outbox outbox, MailActions mailActions, ObjectMapper mapper,
+                                Outbox outbox, MailActions mailActions, BoxClient box, BoxController boxController, ObjectMapper mapper,
                                 @Value("${magizhchi.provision-secret:}") String provisionSecret) {
         this.verifier = verifier;
         this.jdbc = jdbc;
@@ -73,6 +86,8 @@ public class SuiteBrainController {
         this.accounts = accounts;
         this.outbox = outbox;
         this.mailActions = mailActions;
+        this.box = box;
+        this.boxController = boxController;
         this.mapper = mapper;
         this.provisionSecret = provisionSecret == null ? "" : provisionSecret;
     }
@@ -123,6 +138,7 @@ public class SuiteBrainController {
                                         "description", "Recipient email addresses (1-5)."),
                                 "subject", prop("string", "Subject line."),
                                 "body", prop("string", "Plain-text body."),
+                                "boxFiles", BOX_FILES,
                                 "sendAt", prop("string", "Optional. Send later at this exact time, ISO-8601 UTC like 2026-11-09T03:30:00Z (at least a minute away)."),
                                 "remindIfNoReplyDays", prop("integer", "Optional, 1-30. Remind the user if nobody has replied after this many days.")),
                         List.of("to", "subject", "body")),
@@ -136,8 +152,26 @@ public class SuiteBrainController {
                                         "description", "Who the reply goes to; normally just the original sender."),
                                 "subject", prop("string", "The original subject (Re: is added for you)."),
                                 "body", prop("string", "Plain-text reply, signed with the user's first name."),
+                                "boxFiles", BOX_FILES,
                                 "remindIfNoReplyDays", prop("integer", "Optional, 1-30. Remind the user if there is no answer.")),
                         List.of("messageId", "to", "body")),
+                tool("mail_action", "write",
+                        "Do one everyday thing to one email in the inbox: archive it, move it to trash or spam, bring it back to "
+                                + "the inbox, flag or unflag it, or mark it read or unread. Get the message id from search_mail or "
+                                + "needs_reply. It can be undone.",
+                        Map.of(
+                                "messageId", prop("integer", "The email's id."),
+                                "action", Map.of("type", "string", "enum", List.of("archive", "trash", "spam", "inbox", "flag", "unflag", "read", "unread"),
+                                        "description", "What to do with it.")),
+                        List.of("messageId", "action")),
+                tool("save_attachment_to_box", "write",
+                        "Save the attachments of one email into the user's Magizhchi Box (in Magizhchi MailLook > Attachments > month). "
+                                + "Pass attachmentIndex (0, 1, ...) for one file, or leave it out to save them all. Get the message id "
+                                + "from search_mail; read_mail lists the attachment names.",
+                        Map.of(
+                                "messageId", prop("integer", "The email's id."),
+                                "attachmentIndex", prop("integer", "Optional: which attachment (0 is the first). Leave out to save all.")),
+                        List.of("messageId")),
                 tool("read_mail", "read",
                         "Read one email from the inbox (the first few paragraphs) so you can summarise it or write a reply.",
                         Map.of("id", prop("integer", "The message id from search_mail or needs_reply.")),
@@ -191,6 +225,14 @@ public class SuiteBrainController {
                 yield replyMail(userId, input);
             }
             case "read_mail" -> readMail(userId, input);
+            case "mail_action" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield mailAction(userId, input);
+            }
+            case "save_attachment_to_box" -> {
+                if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
+                yield saveAttachment(userId, input);
+            }
             case "cancel_send" -> {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield cancelSend(userId, input);
@@ -367,12 +409,14 @@ public class SuiteBrainController {
         ObjectNode payload = mapper.valueToTree(o);
         int days = clamp(input.get("remindIfNoReplyDays"), 0, 30, 0);
         if (days > 0) payload.put("remindAt", at.plus(Duration.ofDays(days)).toString());
-        var queued = outbox.queue(userId, payload, o, List.of(), at);
+        List<MailActions.OutFile> files = boxAttachments(userId, input.get("boxFiles"));
+        var queued = outbox.queue(userId, payload, o, files, at);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("outboxId", queued.id());
         out.put("to", to);
+        if (!files.isEmpty()) out.put("attached", files.stream().map(MailActions.OutFile::name).toList());
         out.put("undoSeconds", later ? 0 : UNDO_SECONDS);
         if (later) out.put("sendAt", at.toString());
         if (days > 0) out.put("remindInDays", days);
@@ -381,6 +425,101 @@ public class SuiteBrainController {
                 + (days > 0 ? " I'll remind you if there's no reply in " + days + " day" + (days == 1 ? "" : "s") + "." : ""));
         out.put("undo", Map.of("tool", "cancel_send", "input", Map.of("outboxId", queued.id())));
         return out;
+    }
+
+    /**
+     * Pulls the named files out of the person's own Magizhchi Box so they can go on the email. Straight from Box
+     * to MailLook, nothing passes through PA. Refuses, with the reason, what can't be attached.
+     */
+    List<MailActions.OutFile> boxAttachments(long userId, Object raw) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) return List.of();
+        if (list.size() > MAX_ATTACH_FILES) throw new ApiException(HttpStatus.BAD_REQUEST, "You can attach up to " + MAX_ATTACH_FILES + " Box files to one email.");
+        box.link(userId); // connects the person to their Box on first use
+        List<MailActions.OutFile> out = new ArrayList<>();
+        long total = 0;
+        for (Object o : list) {
+            if (!(o instanceof Map<?, ?> m) || m.get("fileId") == null) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Each Box file needs a fileId (from find_box_files).");
+            }
+            long id;
+            try {
+                id = (long) Double.parseDouble(String.valueOf(m.get("fileId")));
+            } catch (NumberFormatException e) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "A Box fileId must be a number.");
+            }
+            String name = cleanFileName(m.get("fileName") == null ? null : m.get("fileName").toString(), id);
+            BoxClient.Reply r = box.get(userId, "/api/files/" + id + "/download-url");
+            if (r.code() == 0) throw new ApiException(HttpStatus.BAD_GATEWAY, "I can't reach Magizhchi Box right now. Try again in a minute.");
+            String said = r.message() == null ? "" : r.message().toLowerCase();
+            if (r.code() == 400 && said.contains("chunk")) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" was uploaded from the desktop app, which stores it encrypted, so it can't be attached. Share it from Magizhchi Box instead.");
+            }
+            if (r.code() == 403) throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" is view-only in Box, so it can't be attached.");
+            if (r.code() == 404) throw new ApiException(HttpStatus.BAD_REQUEST, "I can't find \"" + name + "\" in your Magizhchi Box.");
+            if (!r.ok() || r.json() == null) throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi Box couldn't give me \"" + name + "\" (" + r.code() + ").");
+            byte[] bytes = box.fetchBytes(r.json().path("url").asText(""), MAX_ATTACH_BYTES - total);
+            if (bytes == null) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "\"" + name + "\" is too large to attach (emails can carry 20 MB of files). Share it from Magizhchi Box instead.");
+            }
+            total += bytes.length;
+            String type = java.net.URLConnection.guessContentTypeFromName(name);
+            out.add(new MailActions.OutFile(name, type == null ? "application/octet-stream" : type, bytes));
+        }
+        return out;
+    }
+
+    public static String cleanFileName(String raw, long id) {
+        String n = raw == null ? "" : raw.replaceAll("[\\p{Cntrl}\\\\/:*?\"<>|]", "_").strip();
+        if (n.isEmpty()) n = "box-file-" + id;
+        return n.length() > 120 ? n.substring(n.length() - 120) : n;
+    }
+
+    /** One everyday action on one email, with the opposite action offered as Undo. */
+    private Object mailAction(long userId, Map<String, Object> input) {
+        long id;
+        try {
+            id = (long) Double.parseDouble(String.valueOf(input.get("messageId")));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "messageId is required.");
+        }
+        String action = input.get("action") == null ? "" : input.get("action").toString().trim().toLowerCase(java.util.Locale.ROOT);
+        MessageRepo.Row r = mailActions.owned(userId, id);
+        String undo;
+        String done;
+        switch (action) {
+            case "archive" -> { mailActions.archive(userId, id); undo = "inbox"; done = "Archived"; }
+            case "trash" -> { mailActions.trash(userId, id); undo = "inbox"; done = "Moved to trash"; }
+            case "spam" -> { mailActions.moveTo(userId, id, "SPAM"); undo = "inbox"; done = "Moved to spam"; }
+            case "inbox" -> { mailActions.moveTo(userId, id, "INBOX"); undo = null; done = "Moved to the inbox"; }
+            case "flag" -> { mailActions.setFlagged(userId, id, true); undo = "unflag"; done = "Flagged"; }
+            case "unflag" -> { mailActions.setFlagged(userId, id, false); undo = "flag"; done = "Unflagged"; }
+            case "read" -> { mailActions.setSeen(userId, id, true); undo = "unread"; done = "Marked as read"; }
+            case "unread" -> { mailActions.setSeen(userId, id, false); undo = "read"; done = "Marked as unread"; }
+            default -> throw new ApiException(HttpStatus.BAD_REQUEST, "action must be archive, trash, spam, inbox, flag, unflag, read or unread.");
+        }
+        String who = r.fromName() == null || r.fromName().isBlank() ? r.fromEmail() : r.fromName();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("message", done + ": \"" + (r.subject() == null || r.subject().isBlank() ? "(no subject)" : cut(r.subject(), 60)) + "\" from " + who + ".");
+        if (undo != null) out.put("undo", Map.of("tool", "mail_action", "input", Map.of("messageId", id, "action", undo)));
+        return out;
+    }
+
+    /** Saves one attachment, or all of them, of an email into the person's Magizhchi Box. */
+    private Object saveAttachment(long userId, Map<String, Object> input) {
+        long id;
+        try {
+            id = (long) Double.parseDouble(String.valueOf(input.get("messageId")));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "messageId is required.");
+        }
+        Object idx = input.get("attachmentIndex");
+        if (idx == null || idx.toString().isBlank()) return boxController.saveAll(userId, id);
+        try {
+            return boxController.saveOne(userId, id, (int) Double.parseDouble(idx.toString()));
+        } catch (NumberFormatException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "attachmentIndex must be a number (0 is the first attachment).");
+        }
     }
 
     /** The start of one email, for summarising or writing a reply. Kept short: mail is private. */
