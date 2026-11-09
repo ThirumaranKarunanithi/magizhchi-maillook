@@ -27,12 +27,16 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BoxContacts {
 
     private static final Logger log = LoggerFactory.getLogger(BoxContacts.class);
-    /** How long a listing is trusted before asking Box again. */
-    private static final long FRESH_MS = 2 * 60_000;
+    /**
+     * How long a listing is trusted before asking Box again. Asking is cheap (one file list; only new
+     * backup files are read), so a contact added on the phone shows here within seconds.
+     */
+    private static final long FRESH_MS = 10_000;
 
-    public record Book(boolean connected, String error, List<Vcards.Card> cards, int files) {
+    /** stamp changes whenever the backup files in Box change, so the page knows to reload. */
+    public record Book(boolean connected, String error, List<Vcards.Card> cards, int files, String stamp) {
         static Book notConnected() {
-            return new Book(false, null, List.of(), 0);
+            return new Book(false, null, List.of(), 0, "");
         }
     }
 
@@ -82,7 +86,7 @@ public class BoxContacts {
             // Keep showing what we had; say why only when there is nothing.
             if (c != null) return c.book();
             String why = r.code() == 0 ? "Can't reach Magizhchi Box right now." : "Magizhchi Box answered " + r.code() + " for your contacts.";
-            return new Book(true, why, List.of(), 0);
+            return new Book(true, why, List.of(), 0, "");
         }
         JsonNode rows = r.json().isArray() ? r.json() : r.json().path("items");
         List<JsonNode> vcfs = new ArrayList<>();
@@ -115,7 +119,7 @@ public class BoxContacts {
         }
         List<Vcards.Card> cards = new ArrayList<>(Vcards.merge(all).values());
         cards.sort(Comparator.comparing(x -> x.name == null ? "~" : x.name.toLowerCase(Locale.ROOT)));
-        Book b = new Book(true, null, List.copyOf(cards), vcfs.size());
+        Book b = new Book(true, null, List.copyOf(cards), vcfs.size(), Integer.toHexString(sig.toString().hashCode()) + "-" + vcfs.size());
         books.put(userId, new Cached(now, sig.toString(), b));
         return b;
     }

@@ -287,10 +287,26 @@ public class ContactsController {
         return m;
     }
 
-    /** The address book: Box contacts and the people you write to most. */
+    /** Everything on a Box card, so the page can open it without asking again. */
+    private static void details(Map<String, Object> m, Vcards.Card c) {
+        m.put("phones", c.tels);
+        m.put("birthday", c.bday);
+        m.put("address", c.address);
+        m.put("note", c.note);
+    }
+
+    /** Changes when the Box book changes: the Contacts page asks every few seconds and reloads on a change. */
+    @GetMapping("/stamp")
+    public Map<String, Object> stamp(@RequestAttribute long userId) {
+        BoxContacts.Book book = box.book(userId);
+        return Map.of("stamp", book.stamp(), "contacts", book.cards().size());
+    }
+
+    /** The address book: Box contacts and the people you write to most, a page at a time. */
     @GetMapping
     public Map<String, Object> list(@RequestAttribute long userId, @RequestParam(defaultValue = "") String q,
-                                    @RequestParam(defaultValue = "200") int limit) {
+                                    @RequestParam(defaultValue = "200") int limit,
+                                    @RequestParam(defaultValue = "0") int offset) {
         String query = q.trim().toLowerCase(Locale.ROOT);
         BoxContacts.Book book = box.book(userId);
         Map<String, Entry> all = entries(userId, book);
@@ -310,6 +326,7 @@ public class ContactsController {
             m.put("name", c.name);
             m.put("phone", c.tels.isEmpty() ? null : c.tels.get(0));
             m.put("org", c.org);
+            details(m, c);
             m.put("source", e != null && e.person() != null ? "both" : "box");
             m.put("hint", e == null || e.person() == null ? "In your Magizhchi Box contacts" : hint(e.person(), now));
             m.put("score", e == null || e.person() == null ? 0 : e.person().score);
@@ -326,8 +343,13 @@ public class ContactsController {
             items.add(m);
         }
         int n = Math.max(1, Math.min(1000, limit));
+        int from = Math.max(0, Math.min(offset, items.size()));
+        int to = Math.min(items.size(), from + n);
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("items", items.size() > n ? items.subList(0, n) : items);
+        out.put("items", items.subList(from, to));
+        out.put("total", items.size());
+        out.put("nextOffset", to < items.size() ? to : null);
+        out.put("stamp", book.stamp());
         out.put("box", boxState(userId, book));
         return out;
     }

@@ -240,6 +240,21 @@ class ProductivityTest {
         List<String> names = new ArrayList<>();
         book.forEach(n -> names.add(n.path("name").asText()));
         assertThat(names).contains("Priya Raman", "Ravi Kumar", "Kumar").doesNotContain("Old Friend", "Ravi K");
+        // A page at a time, each Box row carrying its whole card, and a stamp that says when Box changed.
+        JsonNode whole = call(get("/api/contacts"), token, 200);
+        int total = whole.path("total").asInt();
+        assertThat(total).isEqualTo(book.size());
+        JsonNode first = call(get("/api/contacts?limit=1"), token, 200);
+        assertThat(first.path("items").size()).isEqualTo(1);
+        assertThat(first.path("nextOffset").asInt()).isEqualTo(1);
+        JsonNode rest = call(get("/api/contacts?limit=1000&offset=1"), token, 200);
+        assertThat(rest.path("items").size()).isEqualTo(total - 1);
+        assertThat(rest.path("nextOffset").isNull()).isTrue();
+        JsonNode priyaRow = null;
+        for (JsonNode n : book) if (n.path("name").asText().equals("Priya Raman") && n.path("source").asText().equals("box")) priyaRow = n;
+        assertThat(priyaRow.path("phones").path(0).asText()).isEqualTo("+91 98765 43210");
+        assertThat(whole.path("stamp").asText()).isNotBlank();
+        assertThat(call(get("/api/contacts/stamp"), token, 200).path("stamp").asText()).isEqualTo(whole.path("stamp").asText());
 
         // ── Before sending: typos and first-timers ──
         JsonNode check = call(get(URI.create("/api/contacts/check?emails=" + enc("priya@exmaple.com") + "&emails=" + enc("new@nowhere.example")
