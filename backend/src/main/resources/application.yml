@@ -82,7 +82,7 @@ magizhchi:
       # Magizhchi Box. Saving an attachment connects the person to their own Box drive by itself,
       # through Box's provisioning endpoint. A blank secret hides "Save to Box".
       api: ${MAGIZHCHI_BOX_URL:https://box.magizhchi.software}
-      web: ${MAGIZHCHI_BOX_WEB:https://box.magizhchi.software}
+      web: ${MAGIZHCHI_BOX_WEB:https://boxapp.magizhchi.software}
       provision-secret: ${MAGIZHCHI_BOX_PROVISION_SECRET:}
     data:
       # Magizhchi Data reads bills out of mail ("Bills"), on the person's own Data credits.

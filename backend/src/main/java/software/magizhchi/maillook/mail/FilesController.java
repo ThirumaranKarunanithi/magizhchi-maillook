@@ -155,78 +155,71 @@ public class FilesController {
         return out;
     }
 
-    /** The Files list from their Box: MailLook's attachment folders, or Box's name search. Null if Box failed. */
+    /**
+     * The Files list in Box mode: the attachments MailLook saved to their Box (its own record of them, not a
+     * Box listing, because their drive can also hold synced folders and other apps' files). A search matches
+     * the file name, sender or subject. Each page reads saved files in batches until it has enough of this kind.
+     */
     private Map<String, Object> fromBox(long userId, Long accountId, String kind, String q, String cursor) {
-        String needle = q == null ? "" : q.trim();
-        List<JsonNode> files = new ArrayList<>();
-        String next = null;
-        if (!needle.isEmpty()) {
-            software.magizhchi.maillook.suite.BoxClient.Reply r = box.searchNames(userId, needle);
-            if (!r.ok() || r.json() == null) return null;
-            long drive = box.existing(userId).map(software.magizhchi.maillook.suite.BoxClient.Link::driveId).orElse(0L);
-            for (JsonNode f : r.json()) if (f.path("conversationId").asLong() == drive) files.add(f);
-        } else {
-            int page = 0;
-            if (cursor != null && !cursor.isBlank()) {
-                try {
-                    page = Math.max(0, Integer.parseInt(cursor));
-                } catch (NumberFormatException e) {
-                    page = 0;
-                }
-            }
-            // Read Box pages until there are enough files of this kind to show.
-            for (int i = 0; i < 4; i++) {
-                software.magizhchi.maillook.suite.BoxClient.Reply r = box.listFiles(userId, BOX_ROOT, page, 60);
-                if (!r.ok() || r.json() == null) {
-                    if (i == 0) return null;
-                    break;
-                }
-                for (JsonNode f : r.json().path("content")) {
-                    if (kind == null || kind.isBlank() || kind.equals(kind(f.path("originalFileName").asText(""), f.path("contentType").asText("")))) files.add(f);
-                }
-                page++;
-                boolean last = r.json().path("last").asBoolean(true);
-                next = last ? null : String.valueOf(page);
-                if (last || files.size() >= 60) break;
+        String needle = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
+        int offset = 0;
+        if (cursor != null && !cursor.isBlank()) {
+            try {
+                offset = Math.max(0, Integer.parseInt(cursor));
+            } catch (NumberFormatException e) {
+                offset = 0;
             }
         }
-        List<Long> ids = files.stream().map(f -> f.path("id").asLong()).toList();
-        Map<Long, long[]> from = box.savedFrom(ids);
-        Map<Long, MessageRepo.Row> mails = new java.util.HashMap<>();
-        for (MessageRepo.Row m : messages.byIds(new java.util.LinkedHashSet<>(from.values().stream().map(v -> v[0]).toList()))) {
-            if (m.userId() == userId) mails.put(m.id(), m);
-        }
+        final int want = 60, batch = 200;
         List<Map<String, Object>> items = new ArrayList<>();
-        for (JsonNode f : files) {
-            long id = f.path("id").asLong();
-            String name = f.path("originalFileName").asText("file");
-            String type = f.path("contentType").asText("");
-            String k = kind(name, type);
-            if (kind != null && !kind.isBlank() && !kind.equals(k)) continue;
-            long[] src = from.get(id);
-            MessageRepo.Row mail = src == null ? null : mails.get(src[0]);
-            if (accountId != null && (mail == null || mail.accountId() != accountId)) continue;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("boxFileId", id);
-            m.put("name", name);
-            m.put("size", f.path("fileSizeBytes").asLong(0));
-            m.put("contentType", type);
-            m.put("kind", k);
-            m.put("folderPath", f.path("folderPath").asText(""));
-            m.put("receivedAt", f.path("sentAt").asText(null));
-            m.put("inBox", true);
-            if (mail != null) {
+        String next = null;
+        // At most 10 batches per page, so a rare search can't read everything at once.
+        for (int round = 0; round < 10 && items.size() < want; round++) {
+            List<software.magizhchi.maillook.suite.BoxClient.Saved> saved = box.savedPage(userId, accountId, batch, offset);
+            if (saved.isEmpty()) {
+                next = null;
+                break;
+            }
+            Map<Long, MessageRepo.Row> mails = new java.util.HashMap<>();
+            for (MessageRepo.Row m : messages.byIds(new java.util.LinkedHashSet<>(saved.stream().map(software.magizhchi.maillook.suite.BoxClient.Saved::messageId).toList()))) {
+                if (m.userId() == userId) mails.put(m.id(), m);
+            }
+            int used = 0;
+            for (software.magizhchi.maillook.suite.BoxClient.Saved s : saved) {
+                used++;
+                MessageRepo.Row mail = mails.get(s.messageId());
+                if (mail == null || mail.attachments() == null) continue;
+                Map<String, Object> att = mail.attachments().stream()
+                        .filter(a -> a.get("index") instanceof Number n && n.intValue() == s.index()).findFirst().orElse(null);
+                if (att == null) continue;
+                String name = String.valueOf(att.getOrDefault("name", "attachment"));
+                String type = String.valueOf(att.getOrDefault("contentType", ""));
+                String k = kind(name, type);
+                if (kind != null && !kind.isBlank() && !kind.equals(k)) continue;
+                if (!needle.isEmpty() && !(contains(name, needle) || contains(mail.subject(), needle)
+                        || contains(mail.fromName(), needle) || contains(mail.fromEmail(), needle))) continue;
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("boxFileId", s.boxFileId());
+                m.put("name", name);
+                m.put("size", att.get("size") instanceof Number n ? n.longValue() : 0L);
+                m.put("contentType", type);
+                m.put("kind", k);
+                m.put("folderPath", s.folderPath());
+                m.put("inBox", true);
                 m.put("messageId", mail.id());
-                m.put("index", (int) src[1]);
+                m.put("index", s.index());
                 m.put("accountId", mail.accountId());
                 m.put("accountColor", mail.accountColor());
                 m.put("folder", mail.folder());
                 m.put("fromName", mail.fromName());
                 m.put("fromEmail", mail.fromEmail());
                 m.put("subject", mail.subject());
-                if (mail.receivedAt() != null) m.put("receivedAt", mail.receivedAt().toInstant().toString());
+                m.put("receivedAt", mail.receivedAt() == null ? null : mail.receivedAt().toInstant().toString());
+                items.add(m);
+                if (items.size() >= want) break;
             }
-            items.add(m);
+            offset += used;
+            next = saved.size() < batch && used == saved.size() ? null : String.valueOf(offset);
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("source", "box");
@@ -234,6 +227,10 @@ public class FilesController {
         out.put("nextCursor", next);
         out.put("webUrl", box.existing(userId).map(l -> box.webUrl(l.driveId())).orElse(null));
         return out;
+    }
+
+    private static boolean contains(String hay, String needle) {
+        return hay != null && hay.toLowerCase(Locale.ROOT).contains(needle);
     }
 
     /** Downloads a file from Box: a short-lived download link from Box. */

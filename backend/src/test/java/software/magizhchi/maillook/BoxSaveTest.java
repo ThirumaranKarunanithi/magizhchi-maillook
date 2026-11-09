@@ -198,7 +198,8 @@ class BoxSaveTest {
         assertThat(files.path("source").asText()).isEqualTo("box");
         List<String> boxNames = new java.util.ArrayList<>();
         files.path("items").forEach(f -> boxNames.add(f.path("name").asText()));
-        assertThat(boxNames).contains("notes.txt", "report.pdf", "receipt.pdf").doesNotContain("big.bin");
+        assertThat(boxNames).contains("notes.txt", "report.pdf", "receipt.pdf").doesNotContain("big.bin", "FormsWatch.class", "notes-in-a-group.txt");
+        assertThat(files.path("webUrl").asText()).isEqualTo("http://box.test/?c=77");
         JsonNode receiptItem = null;
         for (JsonNode f : files.path("items")) if (f.path("name").asText().equals("receipt.pdf")) receiptItem = f;
         assertThat(receiptItem.path("messageId").asLong()).isEqualTo(receiptId);
@@ -288,6 +289,8 @@ class BoxSaveTest {
                 c.append("{\"id\":").append(f[0]).append(",\"conversationId\":77,\"originalFileName\":\"").append(f[1])
                         .append("\",\"contentType\":\"").append(type).append("\",\"fileSizeBytes\":12,\"folderPath\":\"Magizhchi MailLook/Attachments/2026-11/\",\"sentAt\":\"2026-11-08T05:00:00Z\"}");
             }
+            // Box ignores the folder filter here, so the drive's other files come back too (as it really does).
+            c.append(c.length() > 0 ? "," : "").append("{\"id\":4242,\"conversationId\":77,\"originalFileName\":\"FormsWatch.class\",\"contentType\":\"application/octet-stream\",\"fileSizeBytes\":2000,\"folderPath\":\"forms/\",\"sentAt\":\"2026-11-09T05:00:00Z\"}");
             reply(ex, 200, "{\"content\":[" + c + "],\"last\":true,\"number\":0}");
             return;
         }

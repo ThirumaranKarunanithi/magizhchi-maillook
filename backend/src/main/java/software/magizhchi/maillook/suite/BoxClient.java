@@ -356,6 +356,22 @@ public class BoxClient {
                 .stream().findFirst();
     }
 
+    /** One attachment MailLook saved to Box. */
+    public record Saved(long messageId, int index, long boxFileId, String folderPath) {}
+
+    /**
+     * The attachments MailLook saved to this person's Box, newest mail first. This, not a Box listing, is
+     * what the Files page shows: their Box drive can hold anything else too (synced folders, other apps).
+     */
+    public List<Saved> savedPage(long userId, Long accountId, int limit, int offset) {
+        String sql = "SELECT s.message_id, s.att_index, s.box_file_id, s.folder_path FROM box_saves s"
+                + " JOIN messages m ON m.id = s.message_id JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ?"
+                + (accountId == null ? "" : " AND m.account_id = ?")
+                + " ORDER BY m.received_at DESC, s.message_id DESC, s.att_index LIMIT ? OFFSET ?";
+        Object[] args = accountId == null ? new Object[]{userId, limit, offset} : new Object[]{userId, accountId, limit, offset};
+        return jdbc.query(sql, (rs, i) -> new Saved(rs.getLong(1), rs.getInt(2), rs.getLong(3), rs.getString(4)), args);
+    }
+
     public void recordSave(long messageId, int index, long fileId, String folderPath) {
         jdbc.update("INSERT INTO box_saves (message_id, att_index, box_file_id, folder_path) VALUES (?, ?, ?, ?)",
                 messageId, index, fileId, folderPath);
