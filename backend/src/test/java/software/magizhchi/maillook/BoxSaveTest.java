@@ -272,7 +272,13 @@ class BoxSaveTest {
             return;
         }
         if (method.equals("GET") && path.equals("/api/conversations/77/content-search")) {
-            String q = java.net.URLDecoder.decode(ex.getRequestURI().getRawQuery().replaceFirst("^q=", ""), StandardCharsets.UTF_8);
+            String raw = ex.getRequestURI().getRawQuery();
+            // MailLook searches only its own attachments folder; the whole drive is too slow.
+            if (!raw.contains("&folderPrefix=Magizhchi+MailLook%2FAttachments%2F")) {
+                reply(ex, 500, "{}");
+                return;
+            }
+            String q = java.net.URLDecoder.decode(raw.replaceFirst("^q=", "").replaceFirst("&.*$", ""), StandardCharsets.UTF_8);
             reply(ex, 200, "{\"mode\":\"EVERYONE\",\"enabled\":true,\"pending\":0,\"terms\":" + JSON.writeValueAsString(List.of(q.split(" ")))
                     + ",\"results\":[{\"file\":{\"id\":1001,\"originalFileName\":\"notes.txt\",\"contentType\":\"text/plain\",\"fileSizeBytes\":20,\"folderPath\":\"Attachments/\",\"sentAt\":\"2026-11-07T10:00:00Z\"},"
                     + "\"matches\":[{\"page\":1,\"kind\":\"text\",\"snippet\":\"the inheritance deed for the house\"}]},"

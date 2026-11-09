@@ -158,9 +158,13 @@ public class BoxClient {
 
     /** A GET on Box with this person's stored key (no connecting). Code 0 = not connected or unreachable. */
     public Reply get(long userId, String path) {
+        return get(userId, path, Duration.ofSeconds(20));
+    }
+
+    private Reply get(long userId, String path, Duration wait) {
         Optional<Link> link = existing(userId);
         if (link.isEmpty()) return new Reply(0, null, "not connected");
-        Reply r = send("GET", path, link.get().apiKey(), null, null);
+        Reply r = send("GET", path, link.get().apiKey(), null, null, wait);
         if (r.code() == 401) forget(userId);
         return r;
     }
@@ -260,9 +264,13 @@ public class BoxClient {
     }
 
     private Reply send(String method, String path, String apiKey, Map<String, String> headers, Object body) {
+        return send(method, path, apiKey, headers, body, Duration.ofSeconds(20));
+    }
+
+    private Reply send(String method, String path, String apiKey, Map<String, String> headers, Object body, Duration wait) {
         try {
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(api + path))
-                    .timeout(Duration.ofSeconds(20))
+                    .timeout(wait)
                     .header("Accept", "application/json");
             if (apiKey != null) b.header("X-Api-Key", apiKey);
             if (headers != null) headers.forEach(b::header);
@@ -296,11 +304,14 @@ public class BoxClient {
      * scans and keeps their words): GET /api/conversations/{drive}/content-search. Code 0 = not connected
      * to Box, or Box unreachable.
      */
-    public Reply searchInside(long userId, String q) {
+    public Reply searchInside(long userId, String q, String folderPrefix) {
         Optional<Link> link = existing(userId);
         if (link.isEmpty()) return new Reply(0, null, "not connected");
+        // Reading the words of a big drive takes Box a while, so this one waits longer.
         return get(userId, "/api/conversations/" + link.get().driveId() + "/content-search?q="
-                + java.net.URLEncoder.encode(q, StandardCharsets.UTF_8));
+                + java.net.URLEncoder.encode(q, StandardCharsets.UTF_8)
+                + (folderPrefix == null ? "" : "&folderPrefix=" + java.net.URLEncoder.encode(folderPrefix, StandardCharsets.UTF_8)),
+                Duration.ofSeconds(45));
     }
 
     /** One page of the files in a folder of their Box drive, newest first (Box's Spring page: content, last). */

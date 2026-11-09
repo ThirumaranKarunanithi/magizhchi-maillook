@@ -242,7 +242,8 @@ public class FilesController {
     }
 
     /**
-     * Words inside documents, found by Magizhchi Box's own content search over the person's Box drive.
+     * Words inside documents, found by Magizhchi Box's own content search over the attachments MailLook saved
+     * to their Box (the whole drive is too slow to read, and holds files that aren't mail).
      * Files MailLook saved there are tied back to their mail. Not connected to Box: connected=false.
      */
     @GetMapping("/inside")
@@ -254,7 +255,7 @@ public class FilesController {
         out.put("results", List.of());
         if (needle.length() < 2 || !(Boolean) out.get("connected")) return out;
         if (needle.length() > 200) throw ApiException.bad("That's a long search. Try a few words.");
-        software.magizhchi.maillook.suite.BoxClient.Reply r = box.searchInside(userId, needle);
+        software.magizhchi.maillook.suite.BoxClient.Reply r = box.searchInside(userId, needle, BOX_ROOT);
         if (r.code() == 0) {
             out.put("connected", box.existing(userId).isPresent());
             out.put("unreachable", box.existing(userId).isPresent());
