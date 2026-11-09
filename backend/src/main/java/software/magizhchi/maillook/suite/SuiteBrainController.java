@@ -193,6 +193,13 @@ public class SuiteBrainController {
                         Map.of("to", Map.of("type", "array", "items", Map.of("type", "string"),
                                 "description", "Email addresses to check.")),
                         List.of("to")), "hidden"),
+                tool("frequent_correspondents", "read",
+                        "The people the user writes to or hears from most (inbox senders and sent recipients over the last "
+                                + "60 days, newsletters and no-reply addresses left out), with how many messages each. Use it to "
+                                + "suggest saving people who are not in the contacts yet.",
+                        Map.of("minMessages", prop("integer", "Only people with at least this many messages (default 3)."),
+                                "limit", prop("integer", "How many to return, 1-30 (default 15).")),
+                        List.of()),
                 flag(tool("discard_draft", "write",
                         "Delete a draft this assistant saved. Used by Undo.",
                         Map.of("draftId", prop("integer", "The draft's id.")),
@@ -246,6 +253,7 @@ public class SuiteBrainController {
                 yield cancelSend(userId, input);
             }
             case "known_recipients" -> knownRecipients(userId, input);
+            case "frequent_correspondents" -> frequentCorrespondents(userId, input);
             case "discard_draft" -> {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield discardDraft(userId, input);
@@ -605,6 +613,58 @@ public class SuiteBrainController {
             (n != null && n > 0 ? known : unknown).add(a);
         }
         return Map.of("known", known, "unknown", unknown);
+    }
+
+    private static final java.util.regex.Pattern FIND_ADDRESS =
+            java.util.regex.Pattern.compile("[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
+    private static final java.util.regex.Pattern AUTOMATED = java.util.regex.Pattern.compile(
+            "(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|notifications?|newsletter|alerts?|updates?|"
+                    + "billing|support|info|news|offers?|marketing|bounce|system)[@+.-]", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private Object frequentCorrespondents(long userId, Map<String, Object> input) {
+        int min = clampInt(input.get("minMessages"), 1, 50, 3);
+        int limit = clampInt(input.get("limit"), 1, 30, 15);
+        Set<String> mine = new HashSet<>();
+        for (String e : jdbc.queryForList("SELECT LOWER(email) FROM accounts WHERE user_id = ?", String.class, userId)) mine.add(e);
+        Map<String, int[]> counts = new LinkedHashMap<>();
+        Map<String, String> names = new LinkedHashMap<>();
+        jdbc.query("SELECT LOWER(m.from_email) AS e, MAX(m.from_name) AS n, COUNT(*) AS c FROM messages m "
+                        + "JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ? AND m.folder = 'INBOX' "
+                        + "AND m.received_at > NOW() - INTERVAL '60 days' AND m.from_email IS NOT NULL GROUP BY 1",
+                rs -> {
+                    String e = rs.getString("e");
+                    counts.computeIfAbsent(e, k -> new int[1])[0] += rs.getInt("c");
+                    String n = rs.getString("n");
+                    if (n != null && !n.isBlank()) names.putIfAbsent(e, n.trim());
+                }, userId);
+        for (String list : jdbc.queryForList("SELECT m.to_list FROM messages m JOIN accounts a ON a.id = m.account_id "
+                + "WHERE a.user_id = ? AND m.folder = 'SENT' AND m.received_at > NOW() - INTERVAL '60 days' "
+                + "AND m.to_list IS NOT NULL LIMIT 3000", String.class, userId)) {
+            java.util.regex.Matcher mt = FIND_ADDRESS.matcher(list);
+            Set<String> once = new HashSet<>();
+            while (mt.find()) once.add(mt.group().toLowerCase());
+            for (String e : once) counts.computeIfAbsent(e, k -> new int[1])[0]++;
+        }
+        List<Map<String, Object>> out = counts.entrySet().stream()
+                .filter(en -> en.getValue()[0] >= min && !mine.contains(en.getKey()) && !AUTOMATED.matcher(en.getKey()).find())
+                .sorted((x, y) -> Integer.compare(y.getValue()[0], x.getValue()[0]))
+                .limit(limit)
+                .map(en -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("email", en.getKey());
+                    m.put("name", names.get(en.getKey()));
+                    m.put("messages", en.getValue()[0]);
+                    return m;
+                }).toList();
+        return Map.of("count", out.size(), "people", out);
+    }
+
+    private static int clampInt(Object v, int lo, int hi, int dflt) {
+        try {
+            return Math.max(lo, Math.min(hi, (int) Double.parseDouble(String.valueOf(v))));
+        } catch (Exception e) {
+            return dflt;
+        }
     }
 
     private Object discardDraft(long userId, Map<String, Object> input) {
