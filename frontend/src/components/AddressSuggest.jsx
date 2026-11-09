@@ -1,6 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, qs } from '../api.js'
 
+/** A round picture of the person: their photo when there is one, else their first letter. */
+export function Avatar({ photo, label, size = 28, className = '' }) {
+  const box = { width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.4)) }
+  if (photo) return <img src={photo} alt="" className={`shrink-0 rounded-full object-cover ${className}`} style={box} />
+  return (
+    <span className={`flex shrink-0 items-center justify-center rounded-full bg-peacock-50 font-bold text-peacock-800 ${className}`} style={box}>
+      {(label || '?')[0].toUpperCase()}
+    </span>
+  )
+}
+
+/** Photos of the people already on the mail (the chips): email to picture, asked for once per address. */
+export function usePhotos(emails) {
+  const [photos, setPhotos] = useState({})
+  const asked = useRef(new Set())
+  const key = emails.join(',')
+  useEffect(() => {
+    const fresh = emails.map((e) => e.toLowerCase()).filter((e) => e.includes('@') && !asked.current.has(e)).slice(0, 40)
+    if (!fresh.length) return undefined
+    fresh.forEach((e) => asked.current.add(e))
+    let cancelled = false
+    const params = new URLSearchParams()
+    fresh.forEach((e) => params.append('emails', e))
+    get(`/api/contacts/photos?${params}`)
+      .then((res) => { if (!cancelled && res?.photos) setPhotos((cur) => ({ ...cur, ...res.photos })) })
+      .catch(() => { fresh.forEach((e) => asked.current.delete(e)) }) // try again next time
+    return () => { cancelled = true }
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  return photos
+}
+
 /** Suggestions for the half-typed address: people from your mail and your Magizhchi Box contacts. */
 export function useSuggestions(text, accountId, others) {
   const [items, setItems] = useState([])
@@ -34,9 +65,7 @@ export function SuggestList({ items, active, onPick, onHover }) {
         <li key={s.email} role="option" aria-selected={i === active}>
           <button type="button" className={`menu-item !items-start !py-1.5 ${i === active ? '!bg-[var(--hover-strong)]' : ''}`}
             onMouseDown={(e) => { e.preventDefault(); onPick(s) }} onMouseEnter={() => onHover(i)}>
-            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-peacock-50 text-[11px] font-bold text-peacock-800">
-              {(s.name || s.email)[0].toUpperCase()}
-            </span>
+            <Avatar photo={s.photo} label={s.name || s.email} size={28} className="mt-0.5" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm">
                 <span className="font-semibold">{s.name || s.email}</span>

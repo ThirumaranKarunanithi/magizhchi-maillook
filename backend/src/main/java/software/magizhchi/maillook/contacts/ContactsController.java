@@ -96,7 +96,36 @@ public class ContactsController {
         m.put("hint", hint(e.person(), now));
         m.put("phone", e.card() == null || e.card().tels.isEmpty() ? null : e.card().tels.get(0));
         m.put("org", e.card() == null ? null : e.card().org);
+        m.put("photo", e.card() == null ? null : photoUrl(e.card()));
         return m;
+    }
+
+    /** The contact's photo as a data URL for an <img>, or null when there is none (or it is oversized). */
+    static String photoUrl(Vcards.Card card) {
+        if (card == null || card.photo == null || card.photo.isBlank() || card.photo.length() > 130_000) return null;
+        return "data:image/jpeg;base64," + card.photo.replaceAll("\s", "");
+    }
+
+    /** Photos for addresses already on the mail (the chips): email to data URL, only for people who have one. */
+    @GetMapping("/photos")
+    public Map<String, Object> photos(@RequestAttribute long userId, @RequestParam List<String> emails) {
+        if (emails.size() > 40) throw ApiException.bad("Ask for up to 40 addresses at a time.");
+        Set<String> wanted = new HashSet<>();
+        for (String raw : emails) {
+            String[] ne = PeopleService.split(raw);
+            String e = ne[1] != null ? ne[1] : raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+            if (!e.isEmpty()) wanted.add(e);
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Vcards.Card c : box.book(userId).cards()) {
+            String url = photoUrl(c);
+            if (url == null) continue;
+            for (String mail : c.emails) {
+                String k = mail.trim().toLowerCase(Locale.ROOT);
+                if (wanted.contains(k)) out.putIfAbsent(k, url);
+            }
+        }
+        return Map.of("photos", out);
     }
 
     /** How well the typed text matches: 0 = not at all. */
@@ -279,6 +308,7 @@ public class ContactsController {
         m.put("birthday", card == null ? null : card.bday);
         m.put("address", card == null ? null : card.address);
         m.put("note", card == null ? null : card.note);
+        m.put("photo", photoUrl(card));
         // Who they usually appear with, for "Often with".
         List<String> together = person == null ? List.of() : person.together().entrySet().stream()
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(3).map(Map.Entry::getKey).toList();

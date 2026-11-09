@@ -8,7 +8,7 @@ import { FormButton, FormChip } from './FormsBits.jsx'
 import { IconAlert, IconBell, IconCalendar, IconChevron, IconClock, IconPaperclip, IconPlus, IconSend, IconTrash, IconX } from './Icons.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import ComposerAi from './ComposerAi.jsx'
-import { SuggestList, useAddressCheck, useOftenWith, useSuggestions } from './AddressSuggest.jsx'
+import { Avatar, SuggestList, useAddressCheck, useOftenWith, usePhotos, useSuggestions } from './AddressSuggest.jsx'
 import { FOLLOW_UP, followUpAt, localInput, sendLaterChoices, whenLabel } from '../when.js'
 
 /** How long a sent mail can still be taken back. */
@@ -155,6 +155,7 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, cc: ccOverr
 /** To/Cc/Bcc: chips plus the half-typed text, both owned by the parent so Send never loses a typed address. */
 function RecipientField({ label, chips, setChips, text, setText, autoFocus, accountId, others = [], names, onName, children }) {
   const suggestions = useSuggestions(text, accountId, [...others, ...chips])
+  const photos = usePhotos(chips)
   const [active, setActive] = useState(0)
   const [hidden, setHidden] = useState(false)
   useEffect(() => { setActive(0); setHidden(false) }, [suggestions])
@@ -179,6 +180,7 @@ function RecipientField({ label, chips, setChips, text, setText, autoFocus, acco
           const name = names?.[c.toLowerCase()]
           return (
             <span key={c} className={`chip ${ok ? '' : '!bg-red-50 !text-red-700'}`} title={ok ? (name ? `${name} <${c}>` : c) : 'This does not look like an email address'}>
+              {ok && photos[c.toLowerCase()] && <Avatar photo={photos[c.toLowerCase()]} label={name || c} size={18} />}
               {name || c}
               <button type="button" onClick={() => setChips(chips.filter((x) => x !== c))} aria-label={`Remove ${c}`} className="opacity-60 hover:opacity-100">
                 <IconX size={11} />

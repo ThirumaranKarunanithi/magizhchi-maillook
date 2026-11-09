@@ -1,3 +1,4 @@
+import { Avatar } from './AddressSuggest.jsx'
 import { useEffect, useState } from 'react'
 import { get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
@@ -51,6 +52,7 @@ export default function PersonCard({ email, name }) {
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs">
+      {card.photo && <Avatar photo={card.photo} label={card.name || email} size={36} />}
       <span className="min-w-0 text-slate-600">
         {card.org && <span className="font-semibold text-brand-ink">{card.org} · </span>}
         {card.hint || 'First mail from them'}
