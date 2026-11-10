@@ -106,7 +106,7 @@ public class ImapClient {
         try {
             s = connect(host, port, email, accessToken, true);
         } catch (AuthenticationFailedException e) {
-            throw new ApiException(HttpStatus.UNAUTHORIZED, providerLabel + " signed you in, but the mailbox " + email
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, providerLabel + " signed you in, but the mailbox " + email
                     + " didn't accept it. Check that IMAP is turned on for this mailbox" + said(e) + ".");
         } catch (MessagingException e) {
             throw friendly(e, host);
@@ -119,7 +119,7 @@ public class ImapClient {
         Throwable t = e;
         while (t != null) {
             if (t instanceof AuthenticationFailedException af) {
-                return new ApiException(HttpStatus.UNAUTHORIZED, loginRefused(host, af.getMessage()));
+                return new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, loginRefused(host, af.getMessage()));
             }
             if (t instanceof UnknownHostException) {
                 return new ApiException(HttpStatus.BAD_REQUEST, "Can't find the mail server " + host + ". Check the server name.");
@@ -173,6 +173,10 @@ public class ImapClient {
         }
         if (h.contains("fastmail")) {
             return "Fastmail refused this password. Make an app password under Settings → Privacy & Security → App passwords, and paste it here.";
+        }
+        if (h.contains("hostinger")) {
+            return "Hostinger refused this password. Use the password of this mailbox itself, not your Hostinger account's. "
+                    + "If you're not sure of it, set a new one in hPanel → Emails → Email accounts → Change password, and paste it here.";
         }
         if (h.contains("zoho")) {
             return "Zoho refused this password. Turn on IMAP access in Zoho Mail settings; if you use two-factor sign-in, make an App Password and paste it here.";

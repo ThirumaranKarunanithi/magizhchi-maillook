@@ -89,7 +89,7 @@ public class FormMail implements MailActions.FormSender {
                     if (first == null) first = row;
                 }
             } catch (ApiException e) {
-                if (first == null && e.status() == HttpStatus.UNAUTHORIZED) throw e;
+                if (first == null && e.status() == HttpStatus.UNPROCESSABLE_ENTITY) throw e;   // the mailbox refused its password
                 failed.add(p.getKey());
             }
         }

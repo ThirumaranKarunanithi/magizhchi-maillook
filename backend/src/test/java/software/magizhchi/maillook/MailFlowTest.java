@@ -76,7 +76,7 @@ class MailFlowTest {
 
         // Then add the mailbox (its own password checked live over IMAP); a wrong password is refused.
         call(post("/api/accounts").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"owner@magizhchi.test\",\"password\":\"nope\"," + SERVERS + "}"), token, 401);
+                .content("{\"email\":\"owner@magizhchi.test\",\"password\":\"nope\"," + SERVERS + "}"), token, 422);   // wrong mailbox password: not a MailLook sign-out
         call(post("/api/accounts").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"owner@magizhchi.test\",\"password\":\"pw-owner\"," + SERVERS + "}"), token, 200);
 

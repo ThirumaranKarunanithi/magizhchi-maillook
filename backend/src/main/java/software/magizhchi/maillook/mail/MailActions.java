@@ -454,7 +454,7 @@ public class MailActions {
         } catch (ApiException e) {
             throw e;
         } catch (jakarta.mail.AuthenticationFailedException e) {
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "The mail server refused the password for " + a.email() + " when sending.");
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The mail server refused the password for " + a.email() + " when sending.");
         } catch (Exception e) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "Couldn't send: " + e.getMessage());
         }
@@ -493,7 +493,7 @@ public class MailActions {
         } catch (ApiException e) {
             throw e;
         } catch (jakarta.mail.AuthenticationFailedException e) {
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "The mail server refused the password for " + a.email() + " when sending.");
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "The mail server refused the password for " + a.email() + " when sending.");
         } catch (Exception e) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "Couldn't send your answer: " + e.getMessage());
         }

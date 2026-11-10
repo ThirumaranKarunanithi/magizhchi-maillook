@@ -22,6 +22,8 @@ class LoginRefusedTest {
     @Test
     void otherServersSayWhatTheyWereTold() {
         assertThat(ImapClient.loginRefused("imap.hostinger.com", "authentication failed"))
+                .startsWith("Hostinger refused this password.").contains("hPanel → Emails");
+        assertThat(ImapClient.loginRefused("mail.example.org", "authentication failed"))
                 .isEqualTo("Wrong email or password, or IMAP access is turned off for this mailbox.");
         assertThat(ImapClient.loginRefused("mail.example.org", "Account suspended for unpaid invoice"))
                 .endsWith("(the server said: Account suspended for unpaid invoice).");

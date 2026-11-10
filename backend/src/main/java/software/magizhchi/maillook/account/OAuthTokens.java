@@ -165,7 +165,7 @@ public class OAuthTokens {
         try {
             r = post(p, f);
         } catch (ApiException e) {
-            if (e.status() == HttpStatus.UNAUTHORIZED) throw signInAgain(p, a);
+            if (e.status() == HttpStatus.UNPROCESSABLE_ENTITY) throw signInAgain(p, a);
             throw e;
         }
         String access = r.path("access_token").asText("");
@@ -179,7 +179,7 @@ public class OAuthTokens {
     }
 
     private static ApiException signInAgain(Provider p, Account a) {
-        return new ApiException(HttpStatus.UNAUTHORIZED, p.label() + " needs you to sign in again for " + a.email()
+        return new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, p.label() + " needs you to sign in again for " + a.email()
                 + ". Open Manage accounts and choose Sign in again.");
     }
 
@@ -207,7 +207,7 @@ public class OAuthTokens {
             String err = body.path("error").asText("");
             log.warn("{} token endpoint said {} {} {}", p.label(), res.statusCode(), err, body.path("error_description").asText(""));
             if ("invalid_grant".equals(err) || res.statusCode() == 401) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, p.label() + " sign-in has expired or was taken back.");
+                throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, p.label() + " sign-in has expired or was taken back.");
             }
             throw new ApiException(HttpStatus.BAD_GATEWAY, p.label() + " sign-in failed (" + (err.isEmpty() ? res.statusCode() : err) + "). Please try again.");
         }
