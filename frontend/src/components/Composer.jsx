@@ -119,9 +119,9 @@ function initialDraft({ mode, message: m, draftBody, to: toOverride, cc: ccOverr
       ...(m.cc?.length ? [`Cc: ${m.cc.join(', ')}`] : []),
     ].join('\n')
     return {
-      accountId, to: [], cc: [], bcc: [],
+      accountId, to: uniq(toOverride || [], own), cc: [], bcc: [],
       subject: prefixed(m.subject, 'Fwd:', /^\s*(fwd?|fw)\s*:/i),
-      text: `${sig(accountId)}\n\n${header}\n\n${bodyAsText(m)}`,
+      text: `${draftBody || ''}${sig(accountId)}\n\n${header}\n\n${bodyAsText(m)}`,
       replyToMessageId: null,
       invite: null, draftId: null, anchor: `\n\n${header}`,
     }

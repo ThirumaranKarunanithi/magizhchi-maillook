@@ -396,6 +396,11 @@ public class AiService {
                 """.formatted(today, zone), cut(question, 500), 0.0, 500);
     }
 
+    /** PA chat inside MailLook: turns what the person said into app actions ({"say", "actions", "askPa"}). */
+    public JsonNode appPlan(long userId, String system, String prompt) {
+        return llm(userId, system, prompt, 0.2, 1500);
+    }
+
     /** Answers a question from the mails found, citing them by id. Returns {"answer", "sources": [ids]}. */
     public JsonNode answer(long userId, String question, List<MessageRepo.Row> rows) {
         StringBuilder sb = new StringBuilder("Question: ").append(cut(question, 500)).append("\n\nEmails:\n");

@@ -4,6 +4,7 @@ import { MailProvider, useMail } from './state.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Composer from './components/Composer.jsx'
 import Toast from './components/Toast.jsx'
+import PaChat from './components/PaChat.jsx'
 import Login, { SsoCallback } from './pages/Login.jsx'
 import Mail from './pages/Mail.jsx'
 import Accounts from './pages/Accounts.jsx'
@@ -46,6 +47,7 @@ function Shell() {
         <Outlet />
       </main>
       {composer && <Composer key={composer.key} />}
+      <PaChat />
       <Toast />
       <DesktopBridge />
       <AlertsPrompt />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { PA_DONE, PA_SEARCH, setScreen } from '../pabus.js'
 import { del, get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
 import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
@@ -514,6 +515,21 @@ export default function Mail() {
     }
     setItems((prev) => prev.filter((m) => m.id !== id))
   }
+
+  // Magizhchi PA's chat: tell it what's on screen, and follow what it did.
+  useEffect(() => { setScreen({ page: 'mail', view: cfg.title, openMessageId: selectedId }) }, [cfg.title, selectedId])
+  useEffect(() => () => setScreen({ page: null, view: null, openMessageId: null }), [])
+  useEffect(() => {
+    const done = (e) => {
+      const { id, gone, patch } = e.detail || {}
+      if (gone) removeLocal(id)
+      else if (patch) patchLocal(id, patch)
+    }
+    const search = (e) => setQInput(e.detail?.q || '')
+    window.addEventListener(PA_DONE, done)
+    window.addEventListener(PA_SEARCH, search)
+    return () => { window.removeEventListener(PA_DONE, done); window.removeEventListener(PA_SEARCH, search) }
+  })
 
   async function onSeen(id) {
     patchLocal(id, { seen: true })
