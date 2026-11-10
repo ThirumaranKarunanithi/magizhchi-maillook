@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMail } from '../state.jsx'
 import { IconArchive, IconCheck, IconFolder, IconInbox, IconMove, IconSpam, IconTrash } from './Icons.jsx'
 
-const PLACES = [
+export const PLACES = [
   { code: 'INBOX', label: 'Inbox', Icon: IconInbox },
   { code: 'ARCHIVE', label: 'Archive', Icon: IconArchive },
   { code: 'SPAM', label: 'Spam', Icon: IconSpam },

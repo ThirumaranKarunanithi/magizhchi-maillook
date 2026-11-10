@@ -379,10 +379,15 @@
     .msg-row:not(.picking) .pick-check { opacity: 0; pointer-events: none; }
     .msg-row:not(.picking) .pick-dot { opacity: 1; }
   }
+  /* every row action sits behind one ⋯ button: it shows on hover with a mouse, and stays (quietly) on touch screens */
   .row-actions { opacity: 0; transition: opacity 0.15s; }
-  .msg-row:hover .row-actions, .msg-row:focus-within .row-actions { opacity: 1; }
-  /* touch screens: tapping opens the mail, which has the same actions, so the row stays clean */
-  @media (hover: none) { .row-actions { display: none; } }
+  .msg-row:hover .row-actions, .msg-row:focus-within .row-actions, .row-actions:has(.is-open) { opacity: 1; }
+  .row-more { border-radius: 9999px; }
+  .row-more.is-open { background: var(--hover-strong); }
+  @media (hover: none) {
+    .row-actions { opacity: 1; }
+    .row-more { width: 2.25rem; height: 2.25rem; }
+  }
 
   .fab {
     position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom));

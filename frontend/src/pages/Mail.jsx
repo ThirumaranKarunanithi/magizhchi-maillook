@@ -531,10 +531,10 @@ export default function Mail() {
     return () => { window.removeEventListener(PA_DONE, done); window.removeEventListener(PA_SEARCH, search) }
   })
 
-  async function onSeen(id) {
-    patchLocal(id, { seen: true })
+  async function onSeen(id, seen = true) {
+    patchLocal(id, { seen })
     try {
-      await post(`/api/messages/${id}/seen`, { seen: true })
+      await post(`/api/messages/${id}/seen`, { seen })
       refreshCounts()
     } catch {
       /* not worth bothering anyone about */
@@ -552,11 +552,29 @@ export default function Mail() {
     }
   }
 
+  /** Puts a mail back where it was after an archive or trash, from the toast's Undo. */
+  function undoTo(id, folder) {
+    return {
+      label: 'Undo',
+      run: async () => {
+        try {
+          await post(`/api/messages/${id}/move`, { folder })
+          notify('Put back ✓', 'success')
+          refreshCounts()
+          load({ silent: true })
+        } catch (e) {
+          notify(e.message, 'error')
+        }
+      },
+    }
+  }
+
   async function onArchive(id) {
+    const from = items.find((x) => x.id === id)?.folder || cfg.folder || 'INBOX'
     removeLocal(id)
     try {
       await post(`/api/messages/${id}/archive`)
-      notify('Done. One less thing on your plate ✓', 'success')
+      notify('Done. One less thing on your plate ✓', 'success', { action: undoTo(id, from) })
       refreshCounts()
     } catch (e) {
       notify(e.message, 'error')
@@ -565,10 +583,11 @@ export default function Mail() {
   }
 
   async function onTrash(id) {
+    const from = items.find((x) => x.id === id)?.folder || cfg.folder || 'INBOX'
     removeLocal(id)
     try {
       await post(`/api/messages/${id}/trash`)
-      notify('Moved to Trash', 'info')
+      notify('Moved to Trash', 'info', { action: undoTo(id, from) })
       refreshCounts()
     } catch (e) {
       notify(e.message, 'error')
@@ -750,6 +769,8 @@ export default function Mail() {
             onMoveLane={onMoveLane}
             onMove={onMove}
             onSnooze={onSnooze}
+            onFlag={onFlag}
+            onSeen={onSeen}
             empty={asked ? (asked.error ? <span /> : <EmptyState q={asked.q} />) : <EmptyState view={view} q={q} filtered={filtered} accountChosen={accountId != null} />}
           />
           )}
@@ -794,7 +815,7 @@ export default function Mail() {
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
             <img src="/brand/maillook-mark.svg" alt="" width="112" height="112" className="reflect float-slow" style={{ filter: "drop-shadow(0 18px 30px rgba(0,0,0,.55))" }} />
             <p className="mt-14 text-lg font-bold text-brand-ink">Pick a message to read</p>
-            <p className="mt-1 text-sm text-slate-500">Hover a message to mark it Done, move it, or trash it. Tick several to handle them together.</p>
+            <p className="mt-1 text-sm text-slate-500">Use the ⋯ on a message to mark it Done, move it, or trash it. Tick several to handle them together.</p>
           </div>
         )}
       </section>

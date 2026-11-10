@@ -1,10 +1,8 @@
 import { useRef } from 'react'
 import { senderName, shortTime } from '../util.js'
-import { IconArchive, IconBell, IconCheck, IconClock, IconFlag, IconNote, IconPaperclip, IconSnooze, IconTrash, IconVideo } from './Icons.jsx'
-import MoveMenu from './MoveMenu.jsx'
-import SnoozeMenu from './SnoozeMenu.jsx'
+import { IconBell, IconCheck, IconClock, IconFlag, IconNote, IconPaperclip, IconSnooze, IconVideo } from './Icons.jsx'
 import { whenLabel } from '../when.js'
-import LaneMenu from './LaneMenu.jsx'
+import MailActionsMenu from './MailActionsMenu.jsx'
 
 /** "Starts in 12 min" for mail whose Magizhchi Meet meeting is close; the server pins these first. */
 function startsBadge(at) {
@@ -28,7 +26,7 @@ export function PickBox({ checked, mixed = false, onClick, label, className = ''
   )
 }
 
-function Row({ m, selected, picked, picking, sentView, onSelect, onPick, onDone, onTrash, onMoveLane, onMove, onSnooze }) {
+function Row({ m, selected, picked, picking, sentView, onSelect, onPick, onDone, onTrash, onMoveLane, onMove, onSnooze, onFlag, onSeen }) {
   const press = useRef({ timer: null, fired: false })
   const unread = !m.seen
   const toLine = `To: ${(m.to || []).join(', ') || '(no recipients)'}`
@@ -106,9 +104,9 @@ function Row({ m, selected, picked, picking, sentView, onSelect, onPick, onDone,
         )}
         {m.subject || '(no subject)'}
       </div>
-      <div className="mt-0.5 truncate text-[15px] text-slate-600 sm:mt-0 sm:pr-24 sm:text-xs sm:text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : m.snippet}</div>
+      <div className="mt-0.5 truncate text-[15px] text-slate-600 pr-9 sm:mt-0 sm:text-xs sm:text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : m.snippet}</div>
       {m.attachmentNames?.length > 0 && (
-        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 sm:pr-24">
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 pr-9">
           {m.attachmentNames.slice(0, 2).map((n, i) => (
             <span key={i} className="inline-flex min-w-0 max-w-[60%] items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[13px] sm:text-[11px] font-medium text-amber-700 ring-1 ring-amber-200/70" title={n}>
               <IconPaperclip size={11} className="shrink-0" /><span className="truncate">{n}</span>
@@ -118,16 +116,9 @@ function Row({ m, selected, picked, picking, sentView, onSelect, onPick, onDone,
         </div>
       )}
 
-      {!picking && <div className="row-actions absolute bottom-1.5 right-2 flex items-center gap-0.5 rounded-lg bg-white/95 shadow-sm ring-1 ring-slate-200">
-        <button className="icon-btn" title="Done (archive)" onClick={(e) => { e.stopPropagation(); onDone(m.id) }}>
-          <IconArchive size={16} />
-        </button>
-        {m.folder === 'INBOX' && onSnooze && <SnoozeMenu compact message={m} onSnooze={onSnooze} />}
-        {m.folder === 'INBOX' && <LaneMenu compact currentLane={m.lane} sender={m.fromEmail} onMove={(lane, remember) => onMoveLane(m.id, lane, remember)} />}
-        {onMove && !sentView && <MoveMenu compact message={m} onMove={onMove} />}
-        <button className="icon-btn hover:!text-red-700" title="Move to Trash" onClick={(e) => { e.stopPropagation(); onTrash(m.id) }}>
-          <IconTrash size={16} />
-        </button>
+      {!picking && <div className="row-actions absolute bottom-1 right-1.5 sm:bottom-1.5 sm:right-2">
+        <MailActionsMenu message={m} sentView={sentView} className="row-more" label="Actions for this mail"
+          onArchive={onDone} onTrash={onTrash} onSnooze={onSnooze} onMove={onMove} onMoveLane={onMoveLane} onFlag={onFlag} onSeen={onSeen} />
       </div>}
     </div>
   )

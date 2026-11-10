@@ -12,6 +12,7 @@ import { ClassroomCard, FindTimeCard, JoinCard } from './MeetCards.jsx'
 import { DigestCard, EventCard } from './AcademyCards.jsx'
 import MailFrame from './MailFrame.jsx'
 import SnoozeMenu from './SnoozeMenu.jsx'
+import MailActionsMenu from './MailActionsMenu.jsx'
 import NoteCard from './NoteCard.jsx'
 import FollowUpCard from './FollowUpCard.jsx'
 import PersonCard from './PersonCard.jsx'
@@ -185,18 +186,26 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
             <IconInbox size={16} />{detail.folder === 'SPAM' ? 'Not spam' : 'Restore'}
           </button>
         )}
-        <button className="btn-ghost" onClick={() => onArchive(detail.id)} title="Done: archive it">
-          <IconArchive size={17} /><span className="hidden xl:inline">Done</span>
-        </button>
-        <button className="btn-ghost hover:!text-red-700" onClick={() => onTrash(detail.id)} title="Move to Trash">
-          <IconTrash size={17} /><span className="hidden xl:inline">Trash</span>
-        </button>
-        <button className={`btn-ghost ${detail.flagged ? '!text-red-600' : ''}`} onClick={toggleFlag} title={detail.flagged ? 'Unflag' : 'Flag'}>
-          <IconFlag filled={detail.flagged} size={17} /><span className="hidden xl:inline">{detail.flagged ? 'Flagged' : 'Flag'}</span>
-        </button>
-        {detail.folder === 'INBOX' && onSnooze && <SnoozeMenu message={detail} onSnooze={onSnooze} />}
-        {detail.folder === 'INBOX' && <LaneMenu currentLane={detail.lane} onMove={moveLane} sender={detail.fromEmail} />}
-        {onMove && detail.folder !== 'SENT' && <MoveMenu message={detail} onMove={onMove} />}
+        {/* phones: Done, Trash and the rest wait behind ⋯, away from the Back button and the thumb */}
+        <span className="hidden md:contents">
+          <button className="btn-ghost" onClick={() => onArchive(detail.id)} title="Done: archive it">
+            <IconArchive size={17} /><span className="hidden xl:inline">Done</span>
+          </button>
+          <button className="btn-ghost hover:!text-red-700" onClick={() => onTrash(detail.id)} title="Move to Trash">
+            <IconTrash size={17} /><span className="hidden xl:inline">Trash</span>
+          </button>
+          <button className={`btn-ghost ${detail.flagged ? '!text-red-600' : ''}`} onClick={toggleFlag} title={detail.flagged ? 'Unflag' : 'Flag'}>
+            <IconFlag filled={detail.flagged} size={17} /><span className="hidden xl:inline">{detail.flagged ? 'Flagged' : 'Flag'}</span>
+          </button>
+          {detail.folder === 'INBOX' && onSnooze && <SnoozeMenu message={detail} onSnooze={onSnooze} />}
+          {detail.folder === 'INBOX' && <LaneMenu currentLane={detail.lane} onMove={moveLane} sender={detail.fromEmail} />}
+          {onMove && detail.folder !== 'SENT' && <MoveMenu message={detail} onMove={onMove} />}
+        </span>
+        <span className="md:hidden">
+          <MailActionsMenu message={detail} size={18} label="More: Done, Trash, Snooze, Move…"
+            onArchive={onArchive} onTrash={onTrash} onSnooze={onSnooze} onMove={detail.folder !== 'SENT' ? onMove : undefined}
+            onMoveLane={(_, lane, remember) => moveLane(lane, remember)} onFlag={() => toggleFlag()} />
+        </span>
         <button className={`btn-ghost ${noteOpen || detail.note?.body ? '!text-amber-700' : ''}`} onClick={() => setNoteOpen(true)} title="A private note on this conversation">
           <IconNote size={17} /><span className="hidden xl:inline">Note</span>
         </button>
