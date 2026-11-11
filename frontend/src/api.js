@@ -127,6 +127,17 @@ export async function downloadFile(path, fallbackName = 'attachment') {
   setTimeout(() => URL.revokeObjectURL(url), 10000)
 }
 
+/** Fetches a protected file's bytes, for a caller that shows or saves them itself. */
+export async function fileBlob(path, contentType) {
+  const res = await request(path)
+  if (!res.ok) {
+    const data = await readJson(res)
+    throw new ApiError(res.status, (data && data.error) || `Could not open the file (${res.status})`, data)
+  }
+  const raw = await res.blob()
+  return contentType ? new Blob([raw], { type: contentType }) : raw
+}
+
 /**
  * Opens a file in a new tab (PDFs, pictures, text). The tab is opened first, inside the click, so pop-up
  * blockers allow it; the file is fetched with the sign-in token and then shown there.

@@ -7,9 +7,11 @@ import './index.css'
 import { installTilt } from './tilt.js'
 import './install.js'
 import { installNative } from './native.js'
+import { warmViewer } from './viewer.js'
 
 installTilt()
 installNative()
+warmViewer()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

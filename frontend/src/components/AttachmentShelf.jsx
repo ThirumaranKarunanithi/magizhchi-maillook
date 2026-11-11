@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { downloadFile, openFile, post } from '../api.js'
+import { showsInViewer, viewAttachment } from '../viewer.js'
 import { refreshBox, useBox } from '../box.js'
 import { formatSize } from '../util.js'
 import { IconCloudCheck, IconCloudUp, IconDownload, IconEye, IconPaperclip } from './Icons.jsx'
@@ -140,9 +141,9 @@ export default function AttachmentShelf({ messageId, attachments, notify, compac
                 <div className="text-xs text-slate-500">{kind.label} · {formatSize(a.size)}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {kind.viewable && (
+                {(kind.viewable || showsInViewer(a)) && (
                   <button className="icon-btn" title={`Open ${a.name}`} aria-label={`Open ${a.name}`} disabled={busy != null}
-                    onClick={() => run(`o${a.index}`, () => openFile(path(a), a.contentType))}>
+                    onClick={() => run(`o${a.index}`, () => (showsInViewer(a) ? viewAttachment(a, path(a)) : openFile(path(a), a.contentType)))}>
                     {busy === `o${a.index}` ? <span className="spinner" /> : <IconEye size={17} />}
                   </button>
                 )}

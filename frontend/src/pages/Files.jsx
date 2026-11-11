@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { downloadFile, get, openFile, post, qs } from '../api.js'
+import { showsInViewer, viewAttachment, viewLink } from '../viewer.js'
 import { refreshBox, useBox } from '../box.js'
 import { useMail } from '../state.jsx'
 import { formatSize, senderName } from '../util.js'
@@ -117,6 +118,19 @@ export default function Files() {
   })
   const path = (f) => `/api/messages/${f.messageId}/attachments/${f.index}`
 
+  // Open: Magizhchi Viewer when it can show the file, otherwise the old way (a new tab).
+  // A Box file can only be handed over as a link, which works for pictures, video and audio.
+  const openIt = (f, id) => {
+    if (f.boxFileId) {
+      if (!showsInViewer(f, { linkOnly: true })) return openInBox(f)
+      return run(`x${f.boxFileId}`, async () => {
+        const { url } = await get(`/api/files/box/${f.boxFileId}/open`)
+        viewLink(f, url, { onDownload: () => downloadFromBox(f) })
+      })
+    }
+    return run(`o${id}`, () => (showsInViewer(f) ? viewAttachment(f, path(f)) : openFile(path(f), f.contentType)))
+  }
+
   async function run(k, fn) {
     setBusy(k)
     try {
@@ -219,9 +233,9 @@ export default function Files() {
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
-                    {k.viewable && (
+                    {(k.viewable || showsInViewer(f, { linkOnly: !!f.boxFileId })) && (
                       <button className="icon-btn" title={`Open ${f.name}`} aria-label={`Open ${f.name}`} disabled={busy != null}
-                        onClick={() => (f.boxFileId ? openInBox(f) : run(`o${id}`, () => openFile(path(f), f.contentType)))}>
+                        onClick={() => openIt(f, id)}>
                         {busy === `o${id}` || (f.boxFileId && busy === `x${f.boxFileId}`) ? <span className="spinner" /> : <IconEye size={17} />}
                       </button>
                     )}
