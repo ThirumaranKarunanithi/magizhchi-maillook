@@ -173,10 +173,47 @@ public class PaClient {
         }
         if (!r.ok()) throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi PA's AI answered " + r.code() + (r.message() == null ? "." : ": " + r.message()));
         String text = r.json() == null ? "" : r.json().path("text").asText("");
+        JsonNode parsed = readLoose(mapper, text);
+        if (parsed == null) {
+            log.info("PA's AI answer wasn't JSON ({} chars)", text.length());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, UNREADABLE);
+        }
+        return parsed;
+    }
+
+    public static final String UNREADABLE = "Magizhchi PA's AI sent an answer MailLook couldn't read.";
+
+    /**
+     * Models asked for JSON still sometimes wrap it in ```json fences or put a sentence before or after it.
+     * Takes the object (or array) out of such an answer; null when there is none.
+     */
+    static JsonNode readLoose(com.fasterxml.jackson.databind.ObjectMapper mapper, String text) {
+        if (text == null) return null;
+        String s = text.strip();
+        if (s.isEmpty()) return null;
+        JsonNode direct = tryRead(mapper, s);
+        if (direct != null && (direct.isObject() || direct.isArray())) return direct;
+        java.util.regex.Matcher fence = java.util.regex.Pattern.compile("```(?:json|JSON)?\\s*(.*?)```", java.util.regex.Pattern.DOTALL).matcher(s);
+        while (fence.find()) {
+            JsonNode n = tryRead(mapper, fence.group(1).strip());
+            if (n != null && (n.isObject() || n.isArray())) return n;
+        }
+        for (char[] pair : new char[][]{{'{', '}'}, {'[', ']'}}) {
+            int a = s.indexOf(pair[0]);
+            int b = s.lastIndexOf(pair[1]);
+            if (a >= 0 && b > a) {
+                JsonNode n = tryRead(mapper, s.substring(a, b + 1));
+                if (n != null) return n;
+            }
+        }
+        return null;
+    }
+
+    private static JsonNode tryRead(com.fasterxml.jackson.databind.ObjectMapper mapper, String s) {
         try {
-            return mapper.readTree(text);
+            return mapper.readTree(s);
         } catch (Exception e) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "Magizhchi PA's AI sent an answer MailLook couldn't read.");
+            return null;
         }
     }
 

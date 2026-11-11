@@ -160,6 +160,16 @@ class PaChatTest {
         assertThat(heard.path("text").asText()).isEqualTo("open my bills");
         call(post("/api/assistant/transcribe").contentType(MediaType.APPLICATION_JSON).content("{\"audio\":\"\"}"), token, 400);
         call(post("/api/assistant/chat").contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"  \"}"), token, 400);
+
+        // ── the AI's JSON wrapped in words and ```json fences still reads
+        JsonNode fenced = chat(token, "i fixed the hall thing so mark it as read", null);
+        assertThat(fenced.path("reply").asText()).isEqualTo("Marked it read.");
+        assertThat(fenced.path("actions").get(0).path("act").asText()).isEqualTo("read");
+        assertThat(fenced.path("actions").get(0).path("messageId").asLong()).isEqualTo(hall);
+        // ── an answer with no JSON at all gets one more go, asking for the JSON only
+        JsonNode prose = chat(token, "flag the hall mail", null);
+        assertThat(prose.path("reply").asText()).isEqualTo("Flagged it.");
+        assertThat(prose.path("actions").get(0).path("act").asText()).isEqualTo("flag");
     }
 
     private JsonNode chat(String token, String message, Long open) throws Exception {
@@ -205,6 +215,22 @@ class PaChatTest {
             String text = "{\"say\":\"\",\"actions\":[],\"askPa\":false}";
             if (system.contains("working inside Magizhchi MailLook")) {
                 String said = prompt.substring(prompt.indexOf("The person says: ") + 17);
+                int again = said.indexOf("\n\nAnswer with the JSON object only");
+                boolean retried = again >= 0;
+                if (retried) said = said.substring(0, again);
+                String hallRead = "{\"say\":\"Marked it read.\",\"actions\":[{\"type\":\"mail\",\"act\":\"read\",\"find\":{\"words\":[\"hall\"],"
+                        + "\"from\":null,\"folder\":\"ALL\"}}],\"askPa\":false}";
+                if (said.equals("i fixed the hall thing so mark it as read")) {
+                    // the model wrapped its JSON in a sentence and code fences
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", "Sure, here's the plan:\n```json\n" + hallRead + "\n```\nDone.")));
+                    return;
+                }
+                if (said.equals("flag the hall mail")) {
+                    // prose first, the JSON only when asked again
+                    String flag = hallRead.replace("\"read\"", "\"flag\"").replace("Marked it read.", "Flagged it.");
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", retried ? flag : "I'll flag the hall mail for you.")));
+                    return;
+                }
                 String tomorrow = LocalDate.now(ZoneId.of("Asia/Kolkata")).plusDays(1) + "T09:00";
                 text = switch (said) {
                     case "open the livekit invoice and archive it" -> "{\"say\":\"Opened it and archived it.\",\"actions\":["

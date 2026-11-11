@@ -398,7 +398,13 @@ public class AiService {
 
     /** PA chat inside MailLook: turns what the person said into app actions ({"say", "actions", "askPa"}). */
     public JsonNode appPlan(long userId, String system, String prompt) {
-        return llm(userId, system, prompt, 0.2, 1500);
+        try {
+            return llm(userId, system, prompt, 0.2, 1500);
+        } catch (ApiException e) {
+            // one more go when the answer came back as prose instead of the JSON plan
+            if (!software.magizhchi.maillook.suite.PaClient.UNREADABLE.equals(e.getMessage())) throw e;
+            return llm(userId, system, prompt + "\n\nAnswer with the JSON object only: no words before or after it, no code fences.", 0.0, 1500);
+        }
     }
 
     /** Answers a question from the mails found, citing them by id. Returns {"answer", "sources": [ids]}. */
