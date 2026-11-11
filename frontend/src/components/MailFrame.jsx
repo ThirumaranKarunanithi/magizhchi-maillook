@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { looksLikeUrl, shortUrl, splitLinks } from './LinkedText.jsx'
 
 // HTML mail goes into a sandboxed iframe. Scripts can never run (no allow-scripts, plus a CSP that forbids
 // them), links open in a new tab. allow-same-origin is there only so this page can measure the letter and
@@ -11,6 +12,46 @@ const INJECT =
   'body{padding:28px clamp(18px,4vw,40px) 32px;font:15px/1.65 "Plus Jakarta Sans",system-ui,"Segoe UI","Noto Sans Tamil",sans-serif;' +
   'color:#16323a;overflow-wrap:anywhere}img{max-width:100%;height:auto}pre{white-space:pre-wrap}' +
   'table{max-width:100%}a{color:#0b6b74}blockquote{margin:12px 0;padding-left:12px;border-left:3px solid #e6d8bd;color:#4f6d71}</style>'
+
+/**
+ * Long web addresses in HTML mail: bare ones in the text become links, and links whose text is just a long address
+ * show a short label ("signin.aws.amazon.com/resetpassword…") with the full address on hover.
+ */
+export function tidyLinks(doc) {
+  const body = doc?.body
+  if (!body) return
+  for (const a of body.querySelectorAll('a[href]')) {
+    if (a.children.length === 0 && looksLikeUrl(a.textContent)) {
+      a.title = a.href
+      a.textContent = shortUrl(a.textContent.trim())
+    }
+  }
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (/https?:\/\/|www\./i.test(n.nodeValue) && !n.parentElement?.closest('a,script,style,textarea,title')
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+  })
+  const nodes = []
+  while (walker.nextNode()) nodes.push(walker.currentNode)
+  for (const node of nodes) {
+    const parts = splitLinks(node.nodeValue)
+    if (!parts.some((p) => typeof p !== 'string')) continue
+    const frag = doc.createDocumentFragment()
+    for (const p of parts) {
+      if (typeof p === 'string') {
+        frag.appendChild(doc.createTextNode(p))
+        continue
+      }
+      const a = doc.createElement('a')
+      a.href = p.href
+      a.title = p.href
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      a.textContent = p.label
+      frag.appendChild(a)
+    }
+    node.replaceWith(frag)
+  }
+}
 
 export function buildSrcDoc(html) {
   const src = String(html || '')
@@ -34,6 +75,11 @@ export default function MailFrame({ html, title = 'Message body' }) {
       setHeight(Math.min(Math.max(h, 120), 20000))
     }
     function onLoad() {
+      try {
+        tidyLinks(frame.contentDocument)
+      } catch {
+        // an odd letter never stops it from showing
+      }
       fit()
       const doc = frame.contentDocument
       if (doc?.body && 'ResizeObserver' in window) {
