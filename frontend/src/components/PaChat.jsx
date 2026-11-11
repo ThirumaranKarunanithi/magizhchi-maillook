@@ -360,11 +360,53 @@ export default function PaChat() {
     const parts = []
     mr.ondataavailable = (e) => e.data.size && parts.push(e.data)
     const limit = setTimeout(() => mr.state === 'recording' && mr.stop(), 45000)
+    // Stop by itself once they've spoken and then gone quiet, like a phone assistant.
+    // It learns the room's own noise in the first moment, so a fan or traffic doesn't keep it open.
+    let heardSpeech = false
+    let ctx = null
+    let tick = null
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext
+      ctx = new AC()
+      const an = ctx.createAnalyser()
+      an.fftSize = 1024
+      ctx.createMediaStreamSource(stream).connect(an)
+      const buf = new Float32Array(an.fftSize)
+      const began = performance.now()
+      let floor = 0
+      let samples = 0
+      let lastLoud = began
+      tick = setInterval(() => {
+        an.getFloatTimeDomainData(buf)
+        let sum = 0
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+        const level = Math.sqrt(sum / buf.length)
+        const now = performance.now()
+        if (now - began < 350) {
+          floor = (floor * samples + level) / ++samples
+          return
+        }
+        if (level > Math.max(floor * 2.5, 0.015)) {
+          heardSpeech = true
+          lastLoud = now
+        }
+        if (heardSpeech && now - lastLoud > 1500) mr.state === 'recording' && mr.stop()
+        else if (!heardSpeech && now - began > 8000) mr.state === 'recording' && mr.stop()
+      }, 60)
+    } catch {
+      heardSpeech = true // no audio analysis here: they stop it with the button, as before
+    }
     mr.onstop = async () => {
       clearTimeout(limit)
+      clearInterval(tick)
+      ctx?.close().catch(() => {})
       stream.getTracks().forEach((t) => t.stop())
       setRec(null)
       const blob = new Blob(parts, { type: mr.mimeType || type || 'audio/webm' })
+      if (!heardSpeech) {
+        notify('I didn’t hear anything. Tap the mic and speak.', 'info')
+        return
+      }
       if (blob.size < 1200) return
       setHearing(true)
       try {
@@ -409,7 +451,7 @@ export default function PaChat() {
         <div className="min-w-0 flex-1">
           <h2 className="text-[15px] font-bold leading-tight">Magizhchi PA</h2>
           <p className="truncate text-[11px] opacity-75">
-            {rec ? 'Listening… tap the mic when you’re done' : hearing ? 'Working out what you said…' : busy ? 'On it…' : 'Type or speak. I can work MailLook for you.'}
+            {rec ? 'Listening… I’ll stop when you pause' : hearing ? 'Working out what you said…' : busy ? 'On it…' : 'Type or speak. I can work MailLook for you.'}
           </p>
         </div>
         <button className={`pa-chip ${speak ? 'on' : ''}`} onClick={() => setSpeak((s) => !s)} title={speak ? 'Replies are read aloud' : 'Read replies aloud'}>
