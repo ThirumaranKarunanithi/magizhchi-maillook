@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
 import { PA_DONE, PA_SEARCH, emit, screen } from '../pabus.js'
-import { IconMic, IconSend, IconSparkle, IconX } from './Icons.jsx'
+import { IconMic, IconSend, IconX } from './Icons.jsx'
 
 const STORE = 'mlook.pa.chat'
 const SPEAK = 'mlook.pa.speak'
@@ -56,11 +56,11 @@ function toBase64(blob) {
   })
 }
 
-/** PA's orb: a small lit sphere that breathes while it listens or thinks. */
-function Orb({ size = 40, state = 'idle' }) {
+/** PA's own logo (the lamp and its smiling sun): it floats and glows, pulses while listening, and a ring turns while it thinks. */
+function Orb({ size = 40, state = 'idle', still = false }) {
   return (
-    <span className={`pa-orb pa-orb-${state}`} style={{ width: size, height: size }} aria-hidden="true">
-      <IconSparkle size={Math.round(size * 0.46)} />
+    <span className={`pa-logo pa-orb-${state} ${still ? 'still' : ''}`} style={{ width: size, height: size }} aria-hidden="true">
+      <img src="/brand/pa-logo-128.webp" alt="" width={size} height={size} decoding="async" />
     </span>
   )
 }
@@ -75,7 +75,7 @@ function Bubble({ m, onRun, onOpenMail, onDecide, onUndo }) {
   }
   return (
     <div className="flex gap-2">
-      <Orb size={26} />
+      <Orb size={26} still />
       <div className="min-w-0 max-w-[88%] space-y-1.5">
         {m.content && <div className={`pa-bubble whitespace-pre-wrap rounded-2xl rounded-tl-md px-3.5 py-2 text-sm ${m.error ? 'pa-bubble-error' : ''}`}>{m.content}</div>}
         {m.done?.map((d, i) => (
@@ -160,18 +160,33 @@ export default function PaChat() {
   useEffect(() => { if (open) setTimeout(() => input.current?.focus(), 60) }, [open])
   useEffect(() => { try { localStorage.setItem(SPEAK, speak ? '1' : '0') } catch { /* fine */ } }, [speak])
 
+  // Closing folds the panel down like a laptop lid, then takes it away.
+  const [closing, setClosing] = useState(false)
+  const closeTimer = useRef(null)
+  const close = useCallback(() => {
+    if (closeTimer.current) return
+    setClosing(true)
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null
+      setClosing(false)
+      setOpen(false)
+    }, 280)
+  }, [])
+  useEffect(() => () => clearTimeout(closeTimer.current), [])
+
   useEffect(() => {
     const key = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault()
-        setOpen((o) => !o)
+        if (open) close()
+        else setOpen(true)
       } else if (e.key === 'Escape' && open && !composer) {
-        setOpen(false)
+        close()
       }
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [open, composer])
+  }, [open, composer, close])
 
   const goMail = useCallback((params) => {
     const here = locRef.current
@@ -182,8 +197,8 @@ export default function PaChat() {
 
   const openMail = useCallback((id) => {
     goMail({ open: id })
-    if (window.matchMedia('(max-width: 767px)').matches) setOpen(false)
-  }, [goMail])
+    if (window.matchMedia('(max-width: 767px)').matches) close()
+  }, [goMail, close])
 
   /** Carries out one action from PA the same way the page's own buttons do. Returns a line for the chat. */
   const run = useCallback(async (a) => {
@@ -380,16 +395,14 @@ export default function PaChat() {
     return (
       <button className="pa-launch fixed bottom-24 right-4 z-40 flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-4 lg:bottom-5 lg:right-5"
         onClick={() => setOpen(true)} title="Ask Magizhchi PA (Ctrl+J)" aria-label="Open Magizhchi PA chat">
-        <span className={`pa-logo pa-orb-${state}`} style={{ width: 34, height: 34 }} aria-hidden="true">
-          <img src="/brand/pa-logo-128.webp" alt="" width={34} height={34} decoding="async" />
-        </span>
+        <Orb size={34} state={state} />
         <span className="text-sm font-bold">Ask PA</span>
       </button>
     )
   }
 
   return (
-    <aside className="pa-panel slide-in-right fixed inset-0 z-40 flex flex-col sm:inset-y-2.5 sm:left-auto sm:right-2.5 sm:w-[420px] sm:rounded-2xl"
+    <aside className={`pa-panel ${closing ? 'pa-lid-close' : 'pa-lid-open'} fixed inset-0 z-40 flex flex-col sm:inset-y-2.5 sm:left-auto sm:right-2.5 sm:w-[420px] sm:rounded-2xl`}
       role="dialog" aria-label="Magizhchi PA">
       <header className="pa-head flex items-center gap-3 px-4 py-3">
         <Orb size={38} state={state} />
@@ -403,7 +416,7 @@ export default function PaChat() {
           {speak ? 'Voice on' : 'Voice off'}
         </button>
         {msgs.length > 0 && <button className="pa-chip" onClick={clear} title="Start a new chat">New</button>}
-        <button className="icon-btn !h-8 !w-8" onClick={() => setOpen(false)} aria-label="Close"><IconX size={16} /></button>
+        <button className="icon-btn !h-8 !w-8" onClick={close} aria-label="Close"><IconX size={16} /></button>
       </header>
 
       <div className="scroll-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">

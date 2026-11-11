@@ -470,6 +470,32 @@
     border: 2px solid transparent; border-top-color: #f5b320; border-right-color: rgba(245, 179, 32, 0.4);
     animation: spin 0.9s linear infinite;
   }
+  .pa-logo.still, .pa-logo.still::before { animation: none; }
+  .pa-logo.still::before { opacity: 0.5; }
+
+  /* The chat opens like a laptop lid: it swings up from its bottom edge, settles, and the screen wakes */
+  .pa-lid-open {
+    transform-origin: 50% 100%;
+    animation: pa-lid-open 0.62s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  }
+  .pa-lid-open > * { animation: pa-wake 0.45s ease-out 0.28s both; }
+  .pa-lid-close {
+    transform-origin: 50% 100%;
+    animation: pa-lid-close 0.28s cubic-bezier(0.5, 0, 0.75, 0.2) both;
+    pointer-events: none;
+  }
+  @keyframes pa-lid-open {
+    0% { transform: perspective(1200px) rotateX(-88deg); opacity: 0; filter: brightness(0.6); }
+    18% { opacity: 1; }
+    62% { transform: perspective(1200px) rotateX(7deg); filter: brightness(1); }
+    82% { transform: perspective(1200px) rotateX(-2deg); }
+    100% { transform: none; opacity: 1; }
+  }
+  @keyframes pa-lid-close {
+    0% { transform: perspective(1200px) rotateX(0); opacity: 1; filter: brightness(1); }
+    100% { transform: perspective(1200px) rotateX(-88deg); opacity: 0; filter: brightness(0.6); }
+  }
+  @keyframes pa-wake { from { opacity: 0; filter: blur(2px); } to { opacity: 1; filter: none; } }
   @keyframes pa-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
   @keyframes pa-glow { 0%, 100% { opacity: 0.35; transform: scale(0.96); } 50% { opacity: 0.9; transform: scale(1.12); } }
   @keyframes pa-nod { 0% { transform: rotate(0); } 35% { transform: rotate(-8deg); } 70% { transform: rotate(5deg); } 100% { transform: rotate(0); } }
@@ -550,7 +576,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .rise-3d, .modal-back > .card, .slide-in, .float-slow, .slide-in-right, .pa-orb-listening, .pa-mic.on,
-  .pa-logo, .pa-logo::before, .pa-launch:hover .pa-logo img { animation: none; }
+  .pa-logo, .pa-logo::before, .pa-launch:hover .pa-logo img,
+  .pa-lid-open, .pa-lid-open > *, .pa-lid-close { animation: none; }
   [data-tilt] { transform: none !important; }
   .royal-card { transform: none !important; }
   .royal-card-wait { animation: none; }
