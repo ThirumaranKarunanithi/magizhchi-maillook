@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { LANES } from '../util.js'
+import { useLanes } from '../state.jsx'
 import { IconCheck, IconLanes } from './Icons.jsx'
 
 /** "Move to lane" button with a small menu and an "always for this sender" checkbox. */
 export default function LaneMenu({ currentLane, onMove, compact = false, align = 'right', sender, noRemember = false }) {
+  const LANES = useLanes()
   const [open, setOpen] = useState(false)
   const [remember, setRemember] = useState(false)
   const ref = useRef(null)

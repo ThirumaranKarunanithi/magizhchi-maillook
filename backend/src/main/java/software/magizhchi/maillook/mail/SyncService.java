@@ -58,11 +58,15 @@ public class SyncService {
 
     private final software.magizhchi.maillook.notify.MailAlerts alerts;
 
+    private final Sorting sorting;
+
     public SyncService(AccountRepo accounts, MessageRepo messages, ImapClient imap, AiService ai, FolderCursors cursors,
                        software.magizhchi.maillook.notify.MailAlerts alerts,
                        @Value("${maillook.sync.initial-inbox}") int initialInbox,
                        @Value("${maillook.sync.initial-sent}") int initialSent,
-                       @Value("${maillook.sync.threads}") int threads) {
+                       @Value("${maillook.sync.threads}") int threads,
+                       @org.springframework.context.annotation.Lazy Sorting sorting) {
+        this.sorting = sorting;
         this.accounts = accounts;
         this.cursors = cursors;
         this.alerts = alerts;
@@ -114,6 +118,8 @@ public class SyncService {
                         (v, last) -> accounts.setSentCursor(a.id(), v, last));
             }
             syncExtras(store, a, own, rules);
+            // The person's own rules file new inbox mail before alerts ring and before the AI sorts it.
+            sorting.applyNew(a.userId(), newInbox);
             accounts.syncDone(a.id());
             // Ring their browsers and phones, but not for the first fill of a mailbox just added.
             if (a.inboxLastUid() != null && !newInbox.isEmpty()) {

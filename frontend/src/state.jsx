@@ -2,12 +2,20 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { get, post } from './api.js'
 import { clearBackup, readBackup } from './backup.js'
 import { desktopCounts } from './desktop.js'
+import { LANES, SECTIONS } from './util.js'
 
 // App-wide mail state shared by the sidebar, pages and the composer.
 const MailCtx = createContext(null)
 
 export function useMail() {
   return useContext(MailCtx)
+}
+
+/** The three lanes, then the person's own sections: what every "Move to lane" menu lists. */
+export function useLanes() {
+  const { counts } = useMail()
+  const own = (counts?.sections || []).map((s) => ({ key: s.lane, label: `${s.icon} ${s.name}`, hint: 'Your section', section: s }))
+  return [...LANES, ...own]
 }
 
 const COUNTS_POLL_MS = 60_000
@@ -71,6 +79,8 @@ export function MailProvider({ children }) {
   const refreshCounts = useCallback(async () => {
     try {
       const c = await get('/api/counts')
+      for (const k of Object.keys(SECTIONS)) delete SECTIONS[k]
+      for (const sec of c?.sections || []) SECTIONS[sec.lane] = sec
       setCounts(c)
       desktopCounts(c)
     } catch {

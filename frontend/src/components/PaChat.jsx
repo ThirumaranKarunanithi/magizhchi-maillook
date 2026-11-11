@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
+import { laneName } from '../util.js'
 import { PA_DONE, PA_SEARCH, emit, screen } from '../pabus.js'
 import { IconMic, IconSend, IconX } from './Icons.jsx'
 
@@ -17,7 +18,6 @@ const ACT_LABEL = {
   archive: 'Archived', trash: 'Moved to Trash', spam: 'Moved to Spam', flag: 'Flagged', unflag: 'Unflagged', read: 'Marked read',
   unread: 'Marked unread', snooze: 'Snoozed', lane: 'Moved',
 }
-const LANE_LABEL = { needs_me: 'Needs me', fyi: 'For my info', can_wait: 'Can wait' }
 const IDEAS = [
   'What needs me today?',
   'Open the latest invoice',
@@ -204,8 +204,23 @@ export default function PaChat() {
   const run = useCallback(async (a) => {
     switch (a.type) {
       case 'go':
+        if (/^s\d+$/.test(a.to)) {
+          await refreshCounts()
+          navigate(`/?view=${a.to}`)
+          return { text: `Opened ${laneName(a.to)}` }
+        }
         navigate(MAIL_VIEWS.has(a.to) ? `/?view=${a.to}` : `/${a.to}`)
         return { text: `Opened ${PLACE_LABEL[a.to] || a.to}` }
+      case 'section':
+        // Made on the server already: show it in the sidebar.
+        await refreshCounts()
+        return { text: `New section: ${a.icon} ${a.name}` }
+      case 'rule': {
+        await refreshCounts()
+        bumpMail()
+        const moved = a.applied ? ` Filed ${a.applied} ${a.applied === 1 ? 'mail' : 'mails'} already here.` : ''
+        return { text: `Automation on: ${a.summary}${moved}`, lane: a.lane }
+      }
       case 'search':
         if (locRef.current.pathname !== '/') navigate('/?view=all')
         setTimeout(() => emit(PA_SEARCH, { q: a.q }), 80)
@@ -233,7 +248,7 @@ export default function PaChat() {
         if (a.act === 'lane') bumpMail()
         refreshCounts()
         const when = a.act === 'snooze' ? ` until ${new Date(a.at).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''
-        const where = a.act === 'lane' ? ` to ${LANE_LABEL[a.lane]}` : ''
+        const where = a.act === 'lane' ? ` to ${laneName(a.lane)}` : ''
         const undo = gone ? { kind: a.act, id } : null
         return { text: `${ACT_LABEL[a.act]}${where}${when}: “${a.subject || '(no subject)'}”`, undo }
       }

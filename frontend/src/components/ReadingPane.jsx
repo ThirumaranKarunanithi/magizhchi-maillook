@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, post } from '../api.js'
 import { useMail } from '../state.jsx'
-import { formatSize, fullDate, LANE_LABEL, safeHttpUrl, senderName, shortTime } from '../util.js'
+import { formatSize, fullDate, laneName, safeHttpUrl, senderName, shortTime } from '../util.js'
 import AiCard from './AiCard.jsx'
 import AttachmentShelf from './AttachmentShelf.jsx'
 import LaneMenu from './LaneMenu.jsx'
@@ -240,7 +240,7 @@ export default function ReadingPane({ id, onBack, onSeen, onFlag, onArchive, onT
             {detail.snoozedUntil && <span className="chip !bg-amber-50 !text-amber-800 !ring-amber-200">Snoozed until {whenLabel(detail.snoozedUntil)}</span>}
             {detail.lane && (
               <span className="chip" title={SOURCE_LABEL[detail.laneSource] || ''}>
-                {LANE_LABEL[detail.lane] || detail.lane}{detail.laneSource && <span className="font-normal text-peacock-600"> · {SOURCE_LABEL[detail.laneSource] || detail.laneSource}</span>}
+                {laneName(detail.lane)}{detail.laneSource && <span className="font-normal text-peacock-600"> · {SOURCE_LABEL[detail.laneSource] || detail.laneSource}</span>}
               </span>
             )}
           </div>

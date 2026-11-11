@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMail } from '../state.jsx'
-import { LANES } from '../util.js'
+import { useLanes } from '../state.jsx'
 import { localInput, snoozeChoices, whenLabel } from '../when.js'
 import { PLACES, folderLabel } from './MoveMenu.jsx'
 import {
@@ -17,6 +17,7 @@ export default function MailActionsMenu({
   message: m, sentView = false, onArchive, onTrash, onSnooze, onMoveLane, onMove, onFlag, onSeen, className = '', size = 16, label,
 }) {
   const { folders, refreshFolders } = useMail()
+  const LANES = useLanes()
   const [open, setOpen] = useState(false)
   const [panel, setPanel] = useState('main')
   const [pos, setPos] = useState(null)

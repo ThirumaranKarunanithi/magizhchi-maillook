@@ -48,7 +48,10 @@ public class BulkController {
     private final MailActions actions;
     private final FolderCursors cursors;
 
-    public BulkController(MessageRepo messages, MailActions actions, FolderCursors cursors) {
+    private final Sorting sorting;
+
+    public BulkController(MessageRepo messages, MailActions actions, FolderCursors cursors, Sorting sorting) {
+        this.sorting = sorting;
         this.messages = messages;
         this.actions = actions;
         this.cursors = cursors;
@@ -57,8 +60,8 @@ public class BulkController {
     /** Archives every Inbox mail in the lane (snoozed mail stays put). Returns the ids, for Undo. */
     @PostMapping("/archive-lane")
     public Map<String, Object> archiveLane(@RequestAttribute long userId, @RequestBody LaneRequest req) {
-        if (req.lane() == null || !LaneClassifier.isLane(req.lane()) || LaneClassifier.NEEDS_ME.equals(req.lane())) {
-            throw ApiException.bad("Only For my info and Can wait can be archived in one go.");
+        if (req.lane() == null || !sorting.isTarget(userId, req.lane()) || LaneClassifier.NEEDS_ME.equals(req.lane())) {
+            throw ApiException.bad("Only For my info, Can wait and your own sections can be archived in one go.");
         }
         List<Long> ids = messages.laneIds(userId, req.accountId(), req.lane(), MAX);
         List<Long> moved = actions.moveMany(userId, ids, "ARCHIVE");
@@ -153,7 +156,7 @@ public class BulkController {
                 if (!done.isEmpty()) undo.add(step(on ? "unflag" : "flag", null, null, done));
             }
             case "lane" -> {
-                if (!LaneClassifier.isLane(req.lane())) throw ApiException.bad("Unknown lane.");
+                if (!sorting.isTarget(userId, req.lane())) throw ApiException.bad("Unknown lane.");
                 Map<String, List<Long>> before = new LinkedHashMap<>();
                 done = new ArrayList<>();
                 for (MessageRepo.Row r : rows) {
@@ -214,7 +217,7 @@ public class BulkController {
             if (!VIEWS.contains(folder)) throw ApiException.bad("Select all works in your mail folders and lanes.");
         }
         String lane = f.lane() == null || "all".equals(f.lane()) ? null : f.lane();
-        if (lane != null && !LaneClassifier.isLane(lane)) throw ApiException.bad("Unknown lane.");
+        if (lane != null && !sorting.isTarget(userId, lane)) throw ApiException.bad("Unknown lane.");
         MailSearch search = MailSearch.parse(f.q(), MessageController.zone(f.tz()), Instant.now())
                 .with(f.from(), f.hasAttachment(), f.unread(), f.flagged(), instant(f.after()), instant(f.before()));
         return new View(folder, lane, search);

@@ -6,6 +6,14 @@ export const LANES = [
 
 export const LANE_LABEL = Object.fromEntries(LANES.map((l) => [l.key, l.label]))
 
+/** The person's own sections by lane ("s12"), kept current by the app state: {name, icon, color}. */
+export const SECTIONS = {}
+
+/** A lane's or a section's name, for messages like "Moved to …". */
+export function laneName(key) {
+  return LANE_LABEL[key] || (SECTIONS[key] ? `${SECTIONS[key].icon} ${SECTIONS[key].name}` : key)
+}
+
 /** Mailbox views the list can show: a lane of the inbox, or a folder. */
 export const VIEWS = {
   needs_me: { title: 'Needs me', lane: 'needs_me', folder: 'INBOX' },

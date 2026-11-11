@@ -6,6 +6,7 @@ import { useMail } from '../state.jsx'
 import HappinessGauge from './HappinessGauge.jsx'
 import Logo from './Logo.jsx'
 import Badge3D from './Badge3D.jsx'
+import { SidebarSections } from './Sections.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import { useInstall } from '../install.js'
@@ -277,6 +278,7 @@ export default function Sidebar({ onNavigate }) {
             <Count unread={lanes[view]?.unread} total={lanes[view]?.total} />
           </button>
         ))}
+        <SidebarSections go={go} active={onMail ? currentView : null} Count={Count} />
       </div>
 
       <div>
@@ -306,6 +308,10 @@ export default function Sidebar({ onNavigate }) {
         <button className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`} onClick={() => go('/subscriptions')}>
           <IconNews size={17} className="text-slate-500" />
           <span>Subscriptions</span>
+        </button>
+        <button className={`nav-item ${location.pathname === '/automations' ? 'active' : ''}`} onClick={() => go('/automations')}>
+          <IconSparkle size={17} className="text-slate-500" />
+          <span>Automations</span>
         </button>
       </div>
 

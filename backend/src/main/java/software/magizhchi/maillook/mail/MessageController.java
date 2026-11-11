@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,10 +61,13 @@ public class MessageController {
     private final Outbox outbox;
     private final MailFiles mailFiles;
 
+    private final Sorting sorting;
+
     public MessageController(MessageRepo messages, MailActions actions, AiService ai, ObjectMapper mapper, BoxClient box,
                              software.magizhchi.maillook.suite.MeetSoon meetSoon, FolderCursors cursors, DraftRepo drafts,
                              FollowUps followUps, NoteRepo notes, software.magizhchi.maillook.contacts.PeopleService people,
-                             Waiting waiting, Outbox outbox, MailFiles mailFiles) {
+                             Waiting waiting, Outbox outbox, MailFiles mailFiles, Sorting sorting) {
+        this.sorting = sorting;
         this.waiting = waiting;
         this.outbox = outbox;
         this.mailFiles = mailFiles;
@@ -112,7 +116,7 @@ public class MessageController {
         MailSearch search = MailSearch.parse(q, zone(tz), now)
                 .with(from, hasAttachment, unread, flagged, instant(after), instant(before));
         String l = "all".equals(lane) ? null : lane;
-        if (l != null && !LaneClassifier.isLane(l)) throw ApiException.bad("Unknown lane.");
+        if (l != null && !sorting.isTarget(userId, l)) throw ApiException.bad("Unknown lane.");
         OffsetDateTime cAt = null;
         Long cId = null;
         if (cursor != null && !cursor.isBlank()) {
@@ -221,6 +225,20 @@ public class MessageController {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("lanes", laneOut);
+        List<Map<String, Object>> secOut = new ArrayList<>();
+        for (Sorting.Section s : sorting.sections(userId)) {
+            long[] c = lanes.getOrDefault(s.lane(), new long[]{0, 0});
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("id", s.id());
+            one.put("lane", s.lane());
+            one.put("name", s.name());
+            one.put("icon", s.icon());
+            one.put("color", s.color());
+            one.put("total", c[0]);
+            one.put("unread", c[1]);
+            secOut.add(one);
+        }
+        out.put("sections", secOut);
         out.put("accounts", acc);
         out.put("happiness", happiness);
         out.put("scheduled", outbox.count(userId));
@@ -335,7 +353,7 @@ public class MessageController {
 
     @PostMapping("/messages/{id}/lane")
     public ResponseEntity<Void> lane(@RequestAttribute long userId, @PathVariable long id, @RequestBody LaneRequest req) {
-        if (!LaneClassifier.isLane(req.lane())) throw ApiException.bad("Unknown lane.");
+        if (!sorting.isTarget(userId, req.lane())) throw ApiException.bad("Unknown lane.");
         MessageRepo.Row r = actions.owned(userId, id);
         if (Boolean.TRUE.equals(req.rememberSender()) && r.fromEmail() != null) {
             messages.putSenderRule(userId, r.fromEmail(), req.lane());

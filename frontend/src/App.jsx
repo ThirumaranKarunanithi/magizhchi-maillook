@@ -9,6 +9,7 @@ import Login, { SsoCallback } from './pages/Login.jsx'
 import Mail from './pages/Mail.jsx'
 import Accounts from './pages/Accounts.jsx'
 import Subscriptions from './pages/Subscriptions.jsx'
+import Automations from './pages/Automations.jsx'
 import Calendar from './pages/Calendar.jsx'
 import Contacts from './pages/Contacts.jsx'
 import Today from './pages/Today.jsx'
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/" element={<Mail />} />
         <Route path="/accounts" element={<Accounts />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
+        <Route path="/automations" element={<Automations />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/contacts" element={<Contacts />} />
         <Route path="/today" element={<Today />} />

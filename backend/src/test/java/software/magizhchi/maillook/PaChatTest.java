@@ -36,8 +36,10 @@ import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
  * Magizhchi PA's chat inside MailLook: words become app actions (find and open a mail, archive it, snooze
@@ -193,6 +195,69 @@ class PaChatTest {
         JsonNode none = chat(token, "archive the unicorn mail", null);
         assertThat(none.path("actions").size()).isZero();
         assertThat(none.path("reply").asText()).isEqualTo("I couldn't find that mail.");
+
+        // ── "always put mail from no-reply@... in a separate section": PA makes the section and the rule,
+        //    files the mail already here, and new mail from them lands there by itself
+        deliver("\u201cJ54\u201d is starting", "MAGIZHCHI MEET J54 IS OPEN", "no-reply@magizhchi.software", "<meet-1@magizhchi.software>");
+        call(post("/api/sync"), token, 202);
+        long j54 = waitForMessage(token, "\u201cJ54\u201d is starting");
+        JsonNode made = chat(token, "always place the mail from no-reply@magizhchi.software in a separate section", null);
+        JsonNode rule = made.path("actions").get(0);
+        assertThat(rule.path("type").asText()).isEqualTo("rule");
+        assertThat(rule.path("section").asText()).isEqualTo("Meet notices");
+        assertThat(rule.path("applied").asInt()).isEqualTo(1);
+        assertThat(rule.path("summary").asText()).isEqualTo("Mail from no-reply@magizhchi.software goes to Meet notices.");
+        String lane = rule.path("lane").asText();
+        assertThat(lane).matches("s\\d+");
+        JsonNode counts = call(get("/api/counts"), token, 200);
+        assertThat(counts.path("sections").get(0).path("name").asText()).isEqualTo("Meet notices");
+        assertThat(counts.path("sections").get(0).path("icon").asText()).isEqualTo("🎥");
+        assertThat(counts.path("sections").get(0).path("total").asInt()).isEqualTo(1);
+        JsonNode inSection = call(get("/api/messages").param("lane", lane), token, 200);
+        assertThat(inSection.path("items").get(0).path("id").asLong()).isEqualTo(j54);
+        // Next time PA is asked, it knows the section and the automation.
+        chat(token, "go to meet notices", null);
+        assertThat(last()).contains("Their own sections: 🎥 Meet notices")
+                .contains("Mail from no-reply@magizhchi.software goes to Meet notices.");
+
+        // New mail from them is filed on arrival (and marked read once the rule says so).
+        call(put("/api/rules/" + rule.path("ruleId").asLong()).contentType(MediaType.APPLICATION_JSON).content("{\"markRead\":true}"), token, 200);
+        deliver("\u201cJ56\u201d is starting", "MAGIZHCHI MEET J56 IS OPEN", "No Reply <no-reply@magizhchi.software>", "<meet-2@magizhchi.software>");
+        call(post("/api/sync"), token, 202);
+        long j56 = waitForMessage(token, "\u201cJ56\u201d is starting");
+        JsonNode filed = null;
+        for (int i = 0; i < 50; i++) {
+            filed = call(get("/api/messages/" + j56), token, 200);
+            if (lane.equals(filed.path("lane").asText()) && filed.path("seen").asBoolean()) break;
+            Thread.sleep(100);
+        }
+        assertThat(filed.path("lane").asText()).isEqualTo(lane);
+        assertThat(filed.path("seen").asBoolean()).isTrue();
+
+        // ── the rules page: preview, a rule by domain into a built-in lane, wrong input, delete
+        JsonNode pre = call(post("/api/rules/preview").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"from\":\"livekit.io\",\"lane\":\"can_wait\"}"), token, 200);
+        assertThat(pre.path("count").asInt()).isEqualTo(1);
+        assertThat(pre.path("sample").get(0).path("subject").asText()).isEqualTo("Action needed: LiveKit usage invoice");
+        call(post("/api/rules").contentType(MediaType.APPLICATION_JSON).content("{\"lane\":\"can_wait\"}"), token, 400);
+        call(post("/api/rules").contentType(MediaType.APPLICATION_JSON).content("{\"from\":\"x\",\"lane\":\"s999999\"}"), token, 400);
+        JsonNode byHall = call(post("/api/rules").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"subject\":\"hall, auditorium\",\"lane\":\"can_wait\"}"), token, 200);
+        assertThat(byHall.path("applied").asInt()).isEqualTo(1);
+        assertThat(call(get("/api/messages/" + hall), token, 200).path("lane").asText()).isEqualTo("can_wait");
+        assertThat(call(get("/api/rules"), token, 200).path("rules").size()).isEqualTo(2);
+        call(delete("/api/rules/" + byHall.path("rule").path("id").asLong()), token, 204);
+
+        // ── sections: rename with an icon, and deleting one hands its mail back to the usual sorting
+        long sectionId = Long.parseLong(lane.substring(1));
+        JsonNode renamed = call(put("/api/sections/" + sectionId).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Class alerts\",\"icon\":\"🎓\"}"), token, 200);
+        assertThat(renamed.path("name").asText()).isEqualTo("Class alerts");
+        assertThat(renamed.path("icon").asText()).isEqualTo("🎓");
+        call(delete("/api/sections/" + sectionId), token, 204);
+        assertThat(call(get("/api/messages/" + j54), token, 200).path("lane").asText()).isEqualTo("fyi");
+        assertThat(call(get("/api/rules"), token, 200).path("rules").size()).isZero();
+        assertThat(call(get("/api/counts"), token, 200).path("sections").size()).isZero();
     }
 
     private JsonNode chat(String token, String message, Long open) throws Exception {
@@ -267,6 +332,16 @@ class PaChatTest {
                 if (said.equals("archive the unicorn mail")) {
                     reply(ex, 200, JSON.writeValueAsString(Map.of("text", "{\"say\":\"Archived the unicorn mail.\",\"actions\":[{\"type\":\"mail\","
                             + "\"act\":\"archive\",\"find\":{\"words\":[\"unicorn\"],\"from\":null}}],\"askPa\":false}")));
+                    return;
+                }
+                if (said.equals("always place the mail from no-reply@magizhchi.software in a separate section")) {
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", "{\"say\":\"Done: Meet mail now goes to Meet notices.\",\"actions\":["
+                            + "{\"type\":\"rule\",\"from\":\"no-reply@magizhchi.software\",\"section\":\"Meet notices\",\"icon\":\"🎥\","
+                            + "\"markRead\":false,\"archive\":false,\"applyNow\":true}],\"askPa\":false}")));
+                    return;
+                }
+                if (said.equals("go to meet notices")) {
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", "{\"say\":\"Here.\",\"actions\":[{\"type\":\"go\",\"to\":\"Meet notices\"}],\"askPa\":false}")));
                     return;
                 }
                 if (said.equals("flag the hall mail")) {

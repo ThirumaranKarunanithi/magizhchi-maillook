@@ -13,6 +13,7 @@ import software.magizhchi.maillook.ai.AiService;
 import software.magizhchi.maillook.common.ApiException;
 import software.magizhchi.maillook.contacts.ContactsController;
 import software.magizhchi.maillook.mail.MessageRepo;
+import software.magizhchi.maillook.mail.Sorting;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -58,8 +59,11 @@ public class PaChatController {
     private final MessageRepo messages;
     private final ContactsController contacts;
     private final JdbcTemplate jdbc;
+    private final Sorting sorting;
 
-    public PaChatController(AiService ai, PaClient pa, MessageRepo messages, ContactsController contacts, JdbcTemplate jdbc) {
+    public PaChatController(AiService ai, PaClient pa, MessageRepo messages, ContactsController contacts, JdbcTemplate jdbc,
+                            Sorting sorting) {
+        this.sorting = sorting;
         this.ai = ai;
         this.pa = pa;
         this.messages = messages;
@@ -119,7 +123,9 @@ public class PaChatController {
         switch (type) {
             case "go" -> {
                 String to = lower(text(a, "to"));
-                if (to == null || !PLACES.contains(to)) return null;
+                String sec = sectionLane(userId, text(a, "to"));
+                if (sec != null) to = sec;
+                else if (to == null || !PLACES.contains(to)) return null;
                 m.put("to", to);
             }
             case "search" -> {
@@ -148,7 +154,9 @@ public class PaChatController {
                 mail(m, row);
                 if (act.equals("lane")) {
                     String lane = lower(text(a, "lane"));
-                    if (lane == null || !LANES.contains(lane)) return null;
+                    String sec = sectionLane(userId, text(a, "lane"));
+                    if (sec != null) lane = sec;
+                    else if (lane == null || !LANES.contains(lane)) return null;
                     m.put("lane", lane);
                 }
                 if (act.equals("snooze")) {
@@ -182,11 +190,80 @@ public class PaChatController {
                 if (q == null) return null;
                 m.put("q", cut(q, 500));
             }
+            case "section" -> {
+                // Done here, not by the page: the sidebar shows it on its next refresh.
+                try {
+                    Sorting.Section sec = sorting.createSection(userId, text(a, "name"), text(a, "icon"), null);
+                    m.put("lane", sec.lane());
+                    m.put("name", sec.name());
+                    m.put("icon", sec.icon());
+                } catch (ApiException e) {
+                    notes.add(e.getMessage());
+                    return null;
+                }
+            }
+            case "rule" -> {
+                try {
+                    String lane = null;
+                    String name = text(a, "section");
+                    if (name != null) {
+                        lane = sectionLane(userId, name);
+                        if (lane == null && LANES.contains(lower(name))) lane = lower(name);
+                        if (lane == null) lane = sorting.createSection(userId, name, text(a, "icon"), null).lane();
+                    }
+                    Sorting.Rule r = sorting.createRule(userId, new Sorting.RuleIn(text(a, "from"), text(a, "subject"), text(a, "to"),
+                            text(a, "words"), lane, a.path("markRead").asBoolean(false), a.path("archive").asBoolean(false), true), "pa");
+                    int applied = a.path("applyNow").asBoolean(true) ? sorting.applyExisting(userId, r.id()) : 0;
+                    m.put("ruleId", r.id());
+                    m.put("lane", r.lane());
+                    m.put("section", lane == null ? null : sectionName(userId, lane));
+                    m.put("applied", applied);
+                    m.put("summary", describe(r, lane == null ? null : sectionName(userId, lane)));
+                } catch (ApiException e) {
+                    notes.add(e.getMessage());
+                    return null;
+                }
+            }
             default -> {
                 return null;
             }
         }
         return m;
+    }
+
+    /** "Meet notices", "s12" or a built-in lane's own name -> the person's section's lane, or null. */
+    private String sectionLane(long userId, String name) {
+        if (name == null) return null;
+        String n = name.trim();
+        if (Sorting.isSectionLane(n.toLowerCase(Locale.ROOT))) return sorting.isTarget(userId, n.toLowerCase(Locale.ROOT)) ? n.toLowerCase(Locale.ROOT) : null;
+        Sorting.Section s = sorting.byName(userId, n);
+        return s == null ? null : s.lane();
+    }
+
+    private String sectionName(long userId, String lane) {
+        if (lane == null) return null;
+        switch (lane) {
+            case "needs_me": return "Needs me";
+            case "fyi": return "For my info";
+            case "can_wait": return "Can wait";
+            default:
+                for (Sorting.Section s : sorting.sections(userId)) if (s.lane().equals(lane)) return s.name();
+                return lane;
+        }
+    }
+
+    /** "Mail from no-reply@magizhchi.software goes to Meet notices, marked read." */
+    static String describe(Sorting.Rule r, String section) {
+        List<String> when = new ArrayList<>();
+        if (r.from() != null) when.add("from " + r.from());
+        if (r.subject() != null) when.add("with \"" + r.subject() + "\" in the subject");
+        if (r.to() != null) when.add("sent to " + r.to());
+        if (r.words() != null) when.add("mentioning \"" + r.words() + "\"");
+        List<String> what = new ArrayList<>();
+        if (section != null) what.add("goes to " + section);
+        if (r.markRead()) what.add("is marked read");
+        if (r.archive()) what.add("is archived");
+        return "Mail " + String.join(", ", when) + " " + String.join(" and ", what) + ".";
     }
 
     private static void mail(Map<String, Object> m, MessageRepo.Row row) {
@@ -359,6 +436,12 @@ public class PaChatController {
                 {"type":"reply","id":123 (or "which"/"find"),"all":false,"body":"the reply text, no signature"}
                 {"type":"forward","id":123 (or "which"/"find"),"to":["..."],"body":"a short note or empty"}
                 {"type":"ask","q":"the question"}  a question to answer from the person's mail (amounts, dates, who said what)
+                {"type":"section","name":"Meet notices","icon":"🎥"}  make a new section in the sidebar (icon: one of %s)
+                {"type":"rule","from":"sender address, @domain or name, or null","subject":"words in the subject or null",
+                   "to":"recipient or null","words":"words anywhere in the mail or null","section":"a section's name (new ones are made),
+                   or needs_me|fyi|can_wait, or null","icon":"for a new section","markRead":false,"archive":false,"applyNow":true}
+                   an automation: from now on, mail that fits goes there by itself. applyNow also files the mail already here.
+                   Commas in a condition mean "any of" (from:"amazon.in, flipkart.com").
 
                 Rules:
                 - "this mail", "it", "this one" mean the open mail (which:"open"); after you open a mail, "it" is that mail.
@@ -375,7 +458,12 @@ public class PaChatController {
                   notes, phone calls, WhatsApp, contacts' numbers, files in Magizhchi Box, or when the person wants a mail SENT
                   right away without seeing a draft first, or anything that isn't about operating this mail app.
                 - Only when two or more mails fit equally well, ask one short question in "say" that names them, with no actions.
-                """.formatted(now.toLocalDate(), now.toLocalTime(), now.getDayOfWeek());
+                - "always put mail from X in a separate folder/section", "move all Y mails to Z from now on", "auto-archive",
+                  "mark X as read automatically": make a rule (with a new section when they name one or none fits; name it
+                  after what the mail is, e.g. "Meet notices", with a fitting icon). Never say you can't; say what the rule
+                  does and how many mails it moved. The person can change it under Automations.
+                - "go to <their section>" = {"type":"go","to":"<section name>"}; moving one mail there = act "lane" with "lane":"<section name>".
+                """.formatted(now.toLocalDate(), now.toLocalTime(), now.getDayOfWeek(), String.join(" ", Sorting.ICONS));
     }
 
     /** The mails PA can point at by id: the list on screen, and the newest few in each lane. */
@@ -410,6 +498,17 @@ public class PaChatController {
         StringBuilder p = new StringBuilder();
         List<String> mine = jdbc.queryForList("SELECT email FROM accounts WHERE user_id = ? ORDER BY id", String.class, userId);
         p.append("Their mailboxes: ").append(String.join(", ", mine)).append('\n');
+        List<Sorting.Section> secs = sorting.sections(userId);
+        if (!secs.isEmpty()) {
+            p.append("Their own sections: ").append(String.join(", ", secs.stream().map(s -> s.icon() + " " + s.name()).toList())).append('\n');
+        }
+        List<Sorting.Rule> rules = sorting.rules(userId);
+        if (!rules.isEmpty()) {
+            p.append("Their automations:\n");
+            for (Sorting.Rule r : rules.subList(0, Math.min(rules.size(), 15))) {
+                p.append("  ").append(r.enabled() ? "" : "(off) ").append(describe(r, sectionName(userId, r.lane()))).append('\n');
+            }
+        }
         p.append("On screen: ").append(ctx.page() == null ? "mail" : cut(ctx.page(), 40));
         if (ctx.view() != null) p.append(" · ").append(cut(ctx.view(), 60));
         p.append('\n');

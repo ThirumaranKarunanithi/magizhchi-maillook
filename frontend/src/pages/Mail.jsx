@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { PA_DONE, PA_SEARCH, setScreen } from '../pabus.js'
 import { del, get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
-import { LANE_LABEL, shortTime, VIEWS } from '../util.js'
+import { laneName, SECTIONS, shortTime, VIEWS } from '../util.js'
 import MessageList, { PickBox } from '../components/MessageList.jsx'
 import { BulkBar, BulkPane, SelectAllStrip, bulkAbilities } from '../components/BulkBar.jsx'
 import ReadingPane from '../components/ReadingPane.jsx'
@@ -27,6 +27,7 @@ const EMPTY = {
   archive: { emoji: '📦', title: 'The archive is empty', text: 'Press Done on a message and it rests here.' },
   spam: { emoji: '🛡️', title: 'No spam', text: 'Your mail server catches junk and puts it here. Nothing caught lately.' },
   trash: { emoji: '🧺', title: 'Trash is empty', text: 'Mail you trash waits here. Restore puts it back in the Inbox.' },
+  section: { emoji: '🗂️', title: 'Nothing here yet', text: 'Mail lands here when you move it here, or when one of your automations sends it here.' },
   folder: { emoji: '📁', title: 'Nothing in this folder', text: 'Mail you move here, or that your other mail apps file here, shows up after the next sync.' },
   drafts: { emoji: '📝', title: 'No drafts', text: 'Close the composer before sending and what you wrote waits here.' },
   snoozed: { emoji: '⏰', title: 'Nothing snoozed', text: 'Snooze a mail and it waits here, then comes back on top when you said, with a ping on your phone.' },
@@ -124,9 +125,13 @@ function EmptyState({ view, q, accountChosen, filtered }) {
 export default function Mail() {
   const [params, setParams] = useSearchParams()
   const folderCode = params.get('view') === 'folder' && params.get('f')?.startsWith('F:') ? params.get('f') : null
-  const view = folderCode ? 'folder' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
-  const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode } : VIEWS[view]
+  const sectionLane = /^s\d+$/.test(params.get('view') || '') ? params.get('view') : null
+  const view = folderCode ? 'folder' : sectionLane ? 'section' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
   const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled, counts, bumpMail } = useMail()
+  const section = sectionLane ? (counts?.sections || []).find((x) => x.lane === sectionLane) || SECTIONS[sectionLane] : null
+  const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode }
+    : sectionLane ? { title: section ? `${section.icon} ${section.name}` : 'Section', lane: sectionLane, folder: 'INBOX' }
+    : VIEWS[view]
   const [sweep, setSweep] = useState(null) // null | 'ask' | 'busy': "Archive all" of a lane
   const [asked, setAsked] = useState(null) // { q, loading } | { q, error } | { q, result }
   const askSeq = useRef(0)
@@ -357,7 +362,7 @@ export default function Mail() {
       case 'unseen': return `Marked ${plural(n)} as unread`
       case 'flag': return `Flagged ${plural(n)}`
       case 'unflag': return `Unflagged ${plural(n)}`
-      case 'lane': return `Moved ${plural(n)} to ${LANE_LABEL[extra.lane]}`
+      case 'lane': return `Moved ${plural(n)} to ${laneName(extra.lane)}`
       case 'snooze': return extra.at ? `Snoozed ${plural(n)} until ${whenLabel(extra.at)}` : `${plural(n)} back in your inbox`
       default: return `${plural(n)} done`
     }
@@ -451,10 +456,10 @@ export default function Mail() {
   }) // bound afresh each render so it sees the current list
 
   // Archive all of "Can wait" (or "For my info") in one go, with Undo.
-  const sweepable = !folderCode && (cfg.lane === 'can_wait' || cfg.lane === 'fyi')
+  const sweepable = !folderCode && (cfg.lane === 'can_wait' || cfg.lane === 'fyi' || !!sectionLane)
   const laneTotal = (() => {
     if (!sweepable) return 0
-    if (accountId == null) return counts?.lanes?.[cfg.lane]?.total ?? 0
+    if (accountId == null) return (sectionLane ? section?.total : counts?.lanes?.[cfg.lane]?.total) ?? 0
     return null // per-mailbox totals aren't counted; the dialog says "everything"
   })()
   async function archiveLane() {
@@ -633,7 +638,7 @@ export default function Mail() {
     }
     if (cfg.lane !== 'all' && cfg.lane !== lane) removeLocal(id)
     else patchLocal(id, { lane, laneSource: 'user' })
-    notify(`Moved to ${LANE_LABEL[lane]}${rememberSender ? ', and future mail from this sender will go there too' : ''}`, 'success')
+    notify(`Moved to ${laneName(lane)}${rememberSender ? ', and future mail from this sender will go there too' : ''}`, 'success')
     refreshCounts()
     return true
   }
