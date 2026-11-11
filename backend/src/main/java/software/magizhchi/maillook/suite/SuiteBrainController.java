@@ -615,7 +615,9 @@ public class SuiteBrainController {
         Instant from = Instant.ofEpochMilli(Math.max(since, Instant.now().minus(java.time.Duration.ofDays(60)).toEpochMilli()));
         int limit = clamp(input.get("limit"), 1, 200, 100);
         List<Map<String, Object>> out = jdbc.query(
-                "SELECT m.id, m.from_name, m.from_email, m.subject, m.body_text, m.body_html, m.snippet, m.received_at "
+                "SELECT m.id, m.from_name, m.from_email, m.subject, m.body_text, "
+                        // the HTML only when there is no plain text, and never more than 100 KB of it
+                        + "CASE WHEN coalesce(m.body_text, '') = '' THEN left(m.body_html, 100000) END AS body_html, m.snippet, m.received_at "
                         + "FROM messages m JOIN accounts a ON a.id = m.account_id "
                         + "WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.received_at > ? "
                         + "AND (m.from_email ~* ? OR m.subject ~* ?) "
@@ -631,7 +633,7 @@ public class SuiteBrainController {
                     if (text == null || text.isBlank()) {
                         String html = rs.getString("body_html");
                         text = html == null ? rs.getString("snippet")
-                                : html.replaceAll("(?is)<(script|style)[^>]*>.*?</\\1>", " ").replaceAll("<[^>]+>", " ").replace("&nbsp;", " ").replace("&amp;", "&");
+                                : html.replaceAll("(?is)<script.*?</script>|<style.*?</style>", " ").replaceAll("<[^>]+>", " ").replace("&nbsp;", " ").replace("&amp;", "&");
                     }
                     m.put("body", cut(text, 1500));
                     m.put("at", rs.getTimestamp("received_at").toInstant().toEpochMilli());
