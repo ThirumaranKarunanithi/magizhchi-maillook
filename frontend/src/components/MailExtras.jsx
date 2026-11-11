@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
 import { IconReply, IconSparkle } from './Icons.jsx'
+import LinkedText from './LinkedText.jsx'
 
 const TAMIL = /[஀-௿]/
 
@@ -102,7 +103,7 @@ export function Translate({ detail, children }) {
       {shown ? (
         <div className="paper px-[clamp(18px,4vw,40px)] pb-8 pt-7">
           {shown.subject && <p className="mb-3 text-[15px] font-bold text-brand-ink">{shown.subject}</p>}
-          <pre className="whitespace-pre-wrap break-words font-sans text-[15px] leading-[1.65]">{shown.body}</pre>
+          <pre className="whitespace-pre-wrap break-words font-sans text-[15px] leading-[1.65]"><LinkedText text={shown.body} /></pre>
         </div>
       ) : children}
     </div>
