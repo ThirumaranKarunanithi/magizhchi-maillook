@@ -295,7 +295,8 @@ export default function PaChat() {
       const page = location.pathname === '/' ? 'mail' : location.pathname.slice(1)
       const res = await post('/api/assistant/chat', {
         message, history, voice,
-        context: { page, view: page === 'mail' ? s.view : PLACE_LABEL[page] || page, openMessageId: page === 'mail' ? s.openMessageId : null },
+        context: { page, view: page === 'mail' ? s.view : PLACE_LABEL[page] || page, openMessageId: page === 'mail' ? s.openMessageId : null,
+          listIds: page === 'mail' ? s.listIds || [] : [] },
         tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       })
       const done = []

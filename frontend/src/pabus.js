@@ -1,7 +1,7 @@
 // What's on screen right now, for Magizhchi PA's chat ("archive this", "reply to it"), and the
 // events the chat sends back to the mail page after it acts.
 
-const now = { page: 'mail', view: null, openMessageId: null }
+const now = { page: 'mail', view: null, openMessageId: null, listIds: [] }
 
 /** The mail page tells the chat what it shows. */
 export function setScreen(patch) {

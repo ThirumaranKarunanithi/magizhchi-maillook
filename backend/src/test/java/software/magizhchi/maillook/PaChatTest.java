@@ -170,6 +170,29 @@ class PaChatTest {
         JsonNode prose = chat(token, "flag the hall mail", null);
         assertThat(prose.path("reply").asText()).isEqualTo("Flagged it.");
         assertThat(prose.path("actions").get(0).path("act").asText()).isEqualTo("flag");
+
+        // ── PA sees the list on screen and the newest mail in each lane, and points at mails by id
+        Map<String, Object> ctx = new java.util.HashMap<>();
+        ctx.put("page", "mail");
+        ctx.put("view", "All mail");
+        ctx.put("listIds", List.of(hall, invoice, 999_999L));
+        JsonNode byId = call(post("/api/assistant/chat").contentType(MediaType.APPLICATION_JSON).content(JSON.writeValueAsString(Map.of(
+                "message", "mark as read that hall mail in the list", "context", ctx, "tz", "Asia/Kolkata"))), token, 200);
+        String shown = last();
+        assertThat(shown).contains("The list on screen").contains("id " + hall + " ").contains("Hall booking for Saturday").doesNotContain("999999");
+        assertThat(shown).contains("Newest in ");
+        assertThat(byId.path("reply").asText()).isEqualTo("Marked the hall mail read.");
+        assertThat(byId.path("actions").get(0).path("act").asText()).isEqualTo("read");
+        assertThat(byId.path("actions").get(0).path("messageId").asLong()).isEqualTo(hall);
+        // "the last mail in <lane>": the newest one in that lane, as listed
+        JsonNode latest = chat(token, "open the last mail in my top lane", null);
+        java.util.regex.Matcher top = java.util.regex.Pattern.compile("\\(lane \\w+\\), newest first:\\n  id (\\d+) ").matcher(last());
+        assertThat(top.find()).isTrue();
+        assertThat(latest.path("actions").get(0).path("messageId").asLong()).isEqualTo(Long.parseLong(top.group(1)));
+        // nothing found: say so, without the AI's "Archived it" and without blaming "no mail open"
+        JsonNode none = chat(token, "archive the unicorn mail", null);
+        assertThat(none.path("actions").size()).isZero();
+        assertThat(none.path("reply").asText()).isEqualTo("I couldn't find that mail.");
     }
 
     private JsonNode chat(String token, String message, Long open) throws Exception {
@@ -223,6 +246,27 @@ class PaChatTest {
                 if (said.equals("i fixed the hall thing so mark it as read")) {
                     // the model wrapped its JSON in a sentence and code fences
                     reply(ex, 200, JSON.writeValueAsString(Map.of("text", "Sure, here's the plan:\n```json\n" + hallRead + "\n```\nDone.")));
+                    return;
+                }
+                if (said.equals("mark as read that hall mail in the list")) {
+                    // the model points at the mail by the id it was shown in the list
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?m)^The list on screen.*\\n(?:  id .*\\n)*?  id (\\d+) [^\\n]*Hall booking").matcher(prompt);
+                    String id = m.find() ? m.group(1) : "0";
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", "{\"say\":\"Marked the hall mail read.\",\"actions\":[{\"type\":\"mail\","
+                            + "\"act\":\"read\",\"id\":" + id + "}],\"askPa\":false}")));
+                    return;
+                }
+                if (said.equals("open the last mail in my top lane")) {
+                    // no words, just a lane: the newest mail there
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\(lane (\\w+)\\)").matcher(prompt);
+                    String lane = m.find() ? m.group(1) : "needs_me";
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", "{\"say\":\"Opened it.\",\"actions\":[{\"type\":\"open\","
+                            + "\"find\":{\"words\":[],\"from\":null,\"lane\":\"" + lane + "\"}}],\"askPa\":false}")));
+                    return;
+                }
+                if (said.equals("archive the unicorn mail")) {
+                    reply(ex, 200, JSON.writeValueAsString(Map.of("text", "{\"say\":\"Archived the unicorn mail.\",\"actions\":[{\"type\":\"mail\","
+                            + "\"act\":\"archive\",\"find\":{\"words\":[\"unicorn\"],\"from\":null}}],\"askPa\":false}")));
                     return;
                 }
                 if (said.equals("flag the hall mail")) {

@@ -517,8 +517,11 @@ export default function Mail() {
   }
 
   // Magizhchi PA's chat: tell it what's on screen, and follow what it did.
-  useEffect(() => { setScreen({ page: 'mail', view: cfg.title, openMessageId: selectedId }) }, [cfg.title, selectedId])
-  useEffect(() => () => setScreen({ page: null, view: null, openMessageId: null }), [])
+  const listKey = shown.slice(0, 20).map((m) => m.id).join(",")
+  useEffect(() => {
+    setScreen({ page: 'mail', view: cfg.title, openMessageId: selectedId, listIds: listKey ? listKey.split(",").map(Number) : [] })
+  }, [cfg.title, selectedId, listKey])
+  useEffect(() => () => setScreen({ page: null, view: null, openMessageId: null, listIds: [] }), [])
   useEffect(() => {
     const done = (e) => {
       const { id, gone, patch } = e.detail || {}
