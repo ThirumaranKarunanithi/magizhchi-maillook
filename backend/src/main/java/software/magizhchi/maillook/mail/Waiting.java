@@ -1,5 +1,7 @@
 package software.magizhchi.maillook.mail;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import java.util.regex.Pattern;
 public class Waiting {
 
     private static final Logger log = LoggerFactory.getLogger(Waiting.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
     static final Duration MIN_AGE = Duration.ofHours(48);
     static final Duration MAX_AGE = Duration.ofDays(21);
     private static final Pattern ASKS = Pattern.compile(
@@ -60,30 +63,30 @@ public class Waiting {
                 .filter(r -> r.to().stream().noneMatch(t -> ROBOT.matcher(t).find()))
                 .toList();
         if (sent.isEmpty()) return List.of();
-        Map<Long, String> expects = null;
         if (askAi && ai.enabled(userId)) {
             try {
-                expects = ai.expectsReply(userId, sent);
+                ai.expectsReply(userId, sent); // only to save AI's verdict on each mail; read back below
             } catch (ApiException e) {
                 log.info("Waiting-on-others AI check skipped: {}", e.getMessage());
             }
         }
+        // One rule for the list and for the sidebar count, so they always agree: AI's saved verdict when there
+        // is one, otherwise the simple "it asked something" check.
         List<Item> out = new ArrayList<>();
         for (MessageRepo.Row r : sent) {
-            String why;
-            if (expects != null) {
-                if (!expects.containsKey(r.id())) continue;
-                why = expects.get(r.id());
-            } else {
-                var cached = messages.aiCache(r.id(), "expects_reply");
-                if (cached.isPresent()) {
-                    if (!cached.get().contains("\"expects\":true")) continue;
-                    why = null;
-                } else if (ASKS.matcher(MessageParser.ownText(r.bodyText())).find()) {
-                    why = null;
-                } else {
-                    continue;
+            String why = null;
+            var cached = messages.aiCache(r.id(), "expects_reply");
+            if (cached.isPresent()) {
+                JsonNode j;
+                try {
+                    j = JSON.readTree(cached.get());
+                } catch (Exception e) {
+                    j = JSON.createObjectNode();
                 }
+                if (!j.path("expects").asBoolean(false)) continue;
+                why = j.path("why").isTextual() ? j.path("why").asText() : null;
+            } else if (!ASKS.matcher(MessageParser.ownText(r.bodyText())).find()) {
+                continue;
             }
             long days = Math.max(2, Duration.between(r.receivedAt().toInstant(), now).toDays());
             out.add(new Item(r, days, why));

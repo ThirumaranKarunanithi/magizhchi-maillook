@@ -194,6 +194,9 @@ export default function Mail() {
 
   useEffect(() => () => clearTimeout(syncTimer.current), [])
 
+  // Waiting and Snoozed are short worked-out lists; search and filters don't apply to them, so don't offer them.
+  const fixedList = cfg.folder === 'WAITING' || cfg.folder === 'SNOOZED'
+
   const baseQuery = useCallback(
     (extra = {}) => qs({
       lane: cfg.lane, folder: cfg.folder, accountId: accountId ?? '', q, limit: PAGE,
@@ -218,6 +221,8 @@ export default function Mail() {
         if (seq !== reqSeq.current) return
         setItems(res?.items || [])
         setNextCursor(res?.nextCursor || null)
+        // The list has just been checked properly (AI may have dropped some), so the sidebar number follows it.
+        if (cfg.folder === 'WAITING') refreshCounts()
       } catch (e) {
         if (seq !== reqSeq.current) return
         setError(e.message)
@@ -226,7 +231,7 @@ export default function Mail() {
         if (seq === reqSeq.current) setLoading(false)
       }
     },
-    [baseQuery, cfg.drafts],
+    [baseQuery, cfg.drafts, cfg.folder, refreshCounts],
   )
 
   useEffect(() => {
@@ -696,7 +701,7 @@ export default function Mail() {
               {pickAll ? `Every mail in ${cfg.title}` : 'Every ticked mail'} moves. You can undo it right after{bulkAsk.action === 'trash' ? ', and mail in Trash can be restored later' : ''}.
             </ConfirmDialog>
           )}
-          <div className="relative mt-2">
+          {!fixedList && <div className="relative mt-2">
             <IconSearch size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className="input !py-1.5 !pl-8 !pr-8" type="search" placeholder={cfg.drafts ? 'Search works in your mail folders' : 'Search people, subjects, words…'}
               value={qInput} onChange={(e) => setQInput(e.target.value)} aria-label="Search mail" disabled={!!cfg.drafts}
@@ -707,15 +712,15 @@ export default function Mail() {
                 <IconX size={14} />
               </button>
             )}
-          </div>
-          {!cfg.drafts && aiEnabled && qInput.trim().length >= 3 && !asked && (
+          </div>}
+          {!cfg.drafts && !fixedList && aiEnabled && qInput.trim().length >= 3 && !asked && (
             <button type="button" className="mt-1.5 flex w-full items-center gap-1.5 truncate rounded-lg border border-dashed border-peacock-300 bg-peacock-50/50 px-2 py-1 text-left text-xs font-semibold text-peacock-800 hover:bg-peacock-50"
               onClick={() => askAi()} title="AI turns your question into a search and answers it from your mail">
               <IconSparkle size={13} className="shrink-0" /><span className="truncate">Ask AI: “{qInput.trim()}”</span>
               {QUESTION.test(qInput.trim()) && <span className="ml-auto shrink-0 font-normal text-slate-500">Enter</span>}
             </button>
           )}
-          {!cfg.drafts && (
+          {!cfg.drafts && !fixedList && (
             <div className="mt-2 flex flex-wrap items-center gap-1" role="group" aria-label="Filters">
               <Toggle on={filters.unread} onClick={() => setFilter('unread', !filters.unread)}>Unread</Toggle>
               <Toggle on={filters.flagged} onClick={() => setFilter('flagged', !filters.flagged)}><IconFlag size={11} />Flagged</Toggle>
