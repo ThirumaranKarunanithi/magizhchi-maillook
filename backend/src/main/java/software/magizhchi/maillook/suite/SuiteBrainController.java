@@ -180,6 +180,12 @@ public class SuiteBrainController {
                                 "messageId", prop("integer", "The email's id."),
                                 "attachmentIndex", prop("integer", "Optional: which attachment (0 is the first). Leave out to save all.")),
                         List.of("messageId")),
+                flag(tool("alert_mail", "read",
+                        "Bank, card, UPI, bill, ticket and delivery alert emails received after a moment, oldest first, with their text. "
+                                + "Used by PA to keep the person's money and bills up to date.",
+                        Map.of("since", prop("integer", "Only mail received after this moment (epoch milliseconds)."),
+                                "limit", prop("integer", "How many, 1-200 (default 100).")),
+                        List.of()), "hidden"),
                 tool("read_mail", "read",
                         "Read one email from the inbox (the first few paragraphs) so you can summarise it or write a reply.",
                         Map.of("id", prop("integer", "The message id from search_mail or needs_reply.")),
@@ -240,6 +246,7 @@ public class SuiteBrainController {
                 yield replyMail(userId, input);
             }
             case "read_mail" -> readMail(userId, input);
+            case "alert_mail" -> alertMail(userId, input);
             case "mail_action" -> {
                 if (!who.canWrite()) throw new ApiException(HttpStatus.FORBIDDEN, "This token is read-only.");
                 yield mailAction(userId, input);
@@ -587,6 +594,50 @@ public class SuiteBrainController {
         String text = r.bodyText() == null || r.bodyText().isBlank() ? r.snippet() : r.bodyText();
         m.put("body", cut(text, 2500));
         return m;
+    }
+
+    // Who sends money, bill, ticket and parcel alerts, and the subjects they use. Matched in the database, case-insensitive.
+    static final String ALERT_SENDERS = "(alert|bank|hdfc|icici|sbi|axis|kotak|yesbank|idfc|indusind|pnb|canara|bankofbaroda|unionbank|federal|rbl|aubank|"
+            + "paytm|phonepe|amazonpay|mobikwik|cred|irctc|redbus|makemytrip|goibibo|cleartrip|ixigo|easemytrip|indigo|airindia|akasaair|spicejet|"
+            + "amazon|flipkart|myntra|meesho|swiggy|zomato|delhivery|bluedart|ekart|shadowfax|xpressbees|dtdc|"
+            + "tneb|tangedco|bescom|airtel|jio|vodafone|bsnl|tatapower|adani|lic|apollo|practo)";
+    static final String ALERT_SUBJECTS = "(debit|credit|transaction|txn|upi|imps|neft|rtgs|spent|payment|paid|received|refund|bill|statement|due|"
+            + "pnr|ticket|booking|boarding|order|shipped|dispatched|out for delivery|delivered|appointment|e-mandate|autopay)";
+
+    /** Alert mail since a moment, oldest first, for PA's money and bills. Never OTP mail. */
+    private Object alertMail(long userId, Map<String, Object> input) {
+        long since;
+        try {
+            since = input.get("since") == null ? 0 : (long) Double.parseDouble(String.valueOf(input.get("since")));
+        } catch (NumberFormatException e) {
+            since = 0;
+        }
+        Instant from = Instant.ofEpochMilli(Math.max(since, Instant.now().minus(java.time.Duration.ofDays(60)).toEpochMilli()));
+        int limit = clamp(input.get("limit"), 1, 200, 100);
+        List<Map<String, Object>> out = jdbc.query(
+                "SELECT m.id, m.from_name, m.from_email, m.subject, m.body_text, m.body_html, m.snippet, m.received_at "
+                        + "FROM messages m JOIN accounts a ON a.id = m.account_id "
+                        + "WHERE a.user_id = ? AND m.folder = 'INBOX' AND m.received_at > ? "
+                        + "AND (m.from_email ~* ? OR m.subject ~* ?) "
+                        + "AND NOT (coalesce(m.subject, '') ~* '(otp|one[- ]time password|verification code)') "
+                        + "ORDER BY m.received_at LIMIT ?",
+                (rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", rs.getLong("id"));
+                    m.put("fromName", rs.getString("from_name"));
+                    m.put("from", rs.getString("from_email"));
+                    m.put("subject", rs.getString("subject"));
+                    String text = rs.getString("body_text");
+                    if (text == null || text.isBlank()) {
+                        String html = rs.getString("body_html");
+                        text = html == null ? rs.getString("snippet")
+                                : html.replaceAll("(?is)<(script|style)[^>]*>.*?</\\1>", " ").replaceAll("<[^>]+>", " ").replace("&nbsp;", " ").replace("&amp;", "&");
+                    }
+                    m.put("body", cut(text, 1500));
+                    m.put("at", rs.getTimestamp("received_at").toInstant().toEpochMilli());
+                    return m;
+                }, userId, java.sql.Timestamp.from(from), ALERT_SENDERS, ALERT_SUBJECTS, limit);
+        return Map.of("count", out.size(), "messages", out);
     }
 
     private Object cancelSend(long userId, Map<String, Object> input) {
