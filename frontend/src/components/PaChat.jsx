@@ -380,7 +380,9 @@ export default function PaChat() {
     return (
       <button className="pa-launch fixed bottom-24 right-4 z-40 flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-4 lg:bottom-5 lg:right-5"
         onClick={() => setOpen(true)} title="Ask Magizhchi PA (Ctrl+J)" aria-label="Open Magizhchi PA chat">
-        <Orb size={34} state={state} />
+        <span className={`pa-logo pa-orb-${state}`} style={{ width: 34, height: 34 }} aria-hidden="true">
+          <img src="/brand/pa-logo-128.webp" alt="" width={34} height={34} decoding="async" />
+        </span>
         <span className="text-sm font-bold">Ask PA</span>
       </button>
     )

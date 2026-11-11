@@ -451,6 +451,29 @@
   }
   .pa-launch:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 1px rgba(245, 179, 32, 0.6), 0 20px 40px -14px rgba(11, 85, 99, 0.7); }
 
+  /* PA's own logo on the launch pill: it floats a little and its lamp-light glows softly */
+  .pa-logo {
+    @apply relative inline-flex shrink-0 rounded-full;
+    animation: pa-float 4.2s ease-in-out infinite;
+  }
+  .pa-logo::before {
+    content: ''; position: absolute; inset: -3px; border-radius: 9999px; z-index: 0;
+    background: radial-gradient(circle, rgba(255, 170, 40, 0.55) 0%, rgba(255, 150, 20, 0) 70%);
+    animation: pa-glow 4.2s ease-in-out infinite;
+  }
+  .pa-logo img { position: relative; z-index: 1; width: 100%; height: 100%; border-radius: 9999px; object-fit: cover;
+    box-shadow: 0 4px 12px -4px rgba(180, 90, 0, 0.55); }
+  .pa-launch:hover .pa-logo img { animation: pa-nod 0.7s var(--ease-out); }
+  .pa-logo.pa-orb-listening::before { animation: pa-glow 1.1s ease-in-out infinite; }
+  .pa-logo.pa-orb-thinking::after {
+    content: ''; position: absolute; inset: -3px; border-radius: 9999px; z-index: 2;
+    border: 2px solid transparent; border-top-color: #f5b320; border-right-color: rgba(245, 179, 32, 0.4);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes pa-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes pa-glow { 0%, 100% { opacity: 0.35; transform: scale(0.96); } 50% { opacity: 0.9; transform: scale(1.12); } }
+  @keyframes pa-nod { 0% { transform: rotate(0); } 35% { transform: rotate(-8deg); } 70% { transform: rotate(5deg); } 100% { transform: rotate(0); } }
+
   .pa-panel {
     color: var(--pa-ink);
     background: var(--pa-panel);
@@ -526,7 +549,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise-3d, .modal-back > .card, .slide-in, .float-slow, .slide-in-right, .pa-orb-listening, .pa-mic.on { animation: none; }
+  .rise-3d, .modal-back > .card, .slide-in, .float-slow, .slide-in-right, .pa-orb-listening, .pa-mic.on,
+  .pa-logo, .pa-logo::before, .pa-launch:hover .pa-logo img { animation: none; }
   [data-tilt] { transform: none !important; }
   .royal-card { transform: none !important; }
   .royal-card-wait { animation: none; }
