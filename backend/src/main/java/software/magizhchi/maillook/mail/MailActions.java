@@ -408,10 +408,19 @@ public class MailActions {
         MessageRepo.Row original = o.replyToMessageId() == null ? null : owned(userId, o.replyToMessageId());
         MeetInvites.Booking booking = o.inviteCardId() == null || o.inviteCardId().isBlank() ? null
                 : invites.booking(a.id(), o.inviteCardId()).orElseThrow(() -> ApiException.bad("That meeting wasn't booked from this mailbox, so its invite can't go with this mail."));
+        // Pictures pasted into the text go in its HTML version at their spot (not with an invite: that mail has its own shape).
+        InlineImages.Split split = booking == null ? InlineImages.split(o.text(), files) : new InlineImages.Split(files == null ? List.of() : files, List.of());
+        List<InlineImages.Img> pictures = split.images();
+        String keptHtml = html;
+        if (!pictures.isEmpty()) {
+            files = split.attachments();
+            keptHtml = InlineImages.html(html, o.text(), pictures, true);
+            html = InlineImages.html(html, o.text(), pictures, false);
+        }
         try {
             var session = imap.smtpSession(a);
             MimeMessage msg = new MimeMessage(session);
-            boolean multipart = files != null && !files.isEmpty();
+            boolean multipart = (files != null && !files.isEmpty()) || !pictures.isEmpty();
             boolean withHtml = html != null && booking == null;
             MimeMessageHelper h = new MimeMessageHelper(msg, (multipart || withHtml) && booking == null, "UTF-8");
             h.setFrom(new InternetAddress(a.email(), a.displayName() == null ? a.email() : a.displayName(), "UTF-8"));
@@ -427,6 +436,9 @@ public class MailActions {
                 people.addAll(MeetInvites.addresses(nn(o.cc())));
                 msg.setContent(withInvite(o.text(), invites.ics(booking, a.email(), a.displayName(), people), files));
             } else if (multipart) {
+                for (InlineImages.Img p : pictures) {
+                    h.addInline(p.cid(), new org.springframework.core.io.ByteArrayResource(p.file().bytes()), p.file().contentType());
+                }
                 for (OutFile f : files) {
                     h.addAttachment(f.name(), new org.springframework.core.io.ByteArrayResource(f.bytes()),
                             f.contentType() == null ? "application/octet-stream" : f.contentType());
@@ -446,7 +458,7 @@ public class MailActions {
             String threadKey = original != null ? original.threadKey() : SyncService.threadKey(messageId, null, null, o.subject());
             MessageRepo.NewMessage row = new MessageRepo.NewMessage(a.id(), "SENT", uid, messageId, threadKey,
                     a.displayName(), a.email().toLowerCase(Locale.ROOT), nn(o.to()), nn(o.cc()), o.subject(),
-                    MessageParser.snippet(o.text()), o.text(), withHtml ? html : null, attachmentMeta(files),
+                    MessageParser.snippet(o.text()), o.text(), withHtml ? keptHtml : null, attachmentMeta(files),
                     OffsetDateTime.now(ZoneOffset.UTC), true, false, null, null, null, false);
             Long id = messages.insert(row);
             if (original != null && "INBOX".equals(original.folder()) && !original.seen()) messages.setSeen(original.id(), true);

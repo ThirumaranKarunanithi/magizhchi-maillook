@@ -245,6 +245,8 @@ export default function Composer() {
   const [files, setFiles] = useState([]) // picked here, not yet kept with the draft
   const [kept, setKept] = useState(composer.draft?.files || []) // kept with the draft on the server
   const [uploading, setUploading] = useState(false)
+  const previews = useRef({}) // picture name → a local URL for its thumbnail
+  useEffect(() => () => Object.values(previews.current).forEach((u) => URL.revokeObjectURL(u)), [])
   const [later, setLater] = useState(false) // the Send later menu is open
   const [laterAt, setLaterAt] = useState('')
   const pending = useRef({}) // send options waiting on a question (no subject, no attachment)
@@ -407,7 +409,48 @@ export default function Composer() {
     }
   }
 
+  /**
+   * A screenshot pasted (or a picture dropped) into the text goes where the cursor is: the text gets
+   * "[image: screenshot-1.png]" there and the picture is added like a file; on sending it shows at that spot.
+   */
+  function placePictures(e, list) {
+    const pics = [...(list || [])].filter((f) => /^image\/(png|jpe?g|gif|webp|bmp)$/i.test(f.type))
+    if (!pics.length) return
+    e.preventDefault()
+    const taken = new Set([...files, ...kept].map((f) => f.name))
+    const named = pics.map((f) => {
+      const ext = f.type.split('/')[1].replace('jpeg', 'jpg')
+      const base = /^image\.\w+$/i.test(f.name) || !f.name ? 'screenshot' : f.name.replace(/\.[^.]+$/, '').replace(/[[\]\n]/g, '').slice(0, 60)
+      // screenshot-1.png, screenshot-2.png…; a named picture keeps its name unless it's taken
+      let name = base === 'screenshot' ? `${base}-1.${ext}` : `${base}.${ext}`
+      for (let n = 2; taken.has(name); n++) name = `${base}-${n}.${ext}`
+      taken.add(name)
+      const file = new File([f], name, { type: f.type })
+      previews.current[name] = URL.createObjectURL(file)
+      return file
+    })
+    const el = bodyRef.current
+    const start = el ? el.selectionStart : text.length
+    const end = el ? el.selectionEnd : text.length
+    const before = text.slice(0, start)
+    const after = text.slice(end)
+    const lead = before && !before.endsWith('\n') ? '\n' : ''
+    const tail = after.startsWith('\n') ? '' : '\n'
+    const marks = named.map((f) => `[image: ${f.name}]`).join('\n')
+    setText(`${before}${lead}${marks}${tail}${after}`)
+    const caret = (before + lead + marks + tail).length
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(caret, caret) })
+    addFiles(named)
+  }
+
+  /** Taking a picture off the mail also takes its place in the text. */
+  function dropMarker(name) {
+    setText((t) => t.replace(`[image: ${name}]\n`, '').replace(`[image: ${name}]`, ''))
+  }
+
   async function removeKept(id) {
+    const f = kept.find((k) => k.id === id)
+    if (f) dropMarker(f.name)
     try {
       setKept(await del(`/api/drafts/${draftId.current}/files/${id}`))
     } catch (e) {
@@ -602,7 +645,14 @@ export default function Composer() {
           replyToId={init.replyToMessageId} bodyRef={bodyRef} notify={notify} />
 
         <textarea ref={bodyRef} className="scroll-thin min-h-0 flex-1 resize-none bg-white px-4 py-3 text-sm leading-relaxed outline-none"
-          value={text} onChange={(e) => setText(e.target.value)} aria-label="Message" placeholder="Write something kind…" />
+          value={text} onChange={(e) => setText(e.target.value)} aria-label="Message" placeholder="Write something kind…"
+          onPaste={(e) => placePictures(e, e.clipboardData?.files)}
+          onDrop={(e) => placePictures(e, e.dataTransfer?.files)} />
+        {/\[image: [^\]\n]+\]/.test(text) && (
+          <p className="border-t border-slate-100 bg-peacock-50/50 px-4 py-1 text-[11px] text-peacock-800">
+            Each [image: …] line shows as its picture in that spot when the mail is read.
+          </p>
+        )}
         {(() => {
           const from = accounts.find((a) => a.id === Number(fromId))
           const block = signatureBlock(from?.signature).trim()
@@ -628,15 +678,15 @@ export default function Composer() {
         {(files.length > 0 || kept.length > 0) && (
           <div className="flex flex-wrap gap-1.5 border-t border-slate-100 px-4 py-2">
             {kept.map((f) => (
-              <span key={`k${f.id}`} className="chip !bg-slate-100 !text-slate-700" title="Kept with the draft">
-                <IconPaperclip size={11} /> {f.name} <span className="text-slate-500">{formatSize(f.size)}</span>
+              <span key={`k${f.id}`} className="chip !bg-slate-100 !text-slate-700" title={text.includes(`[image: ${f.name}]`) ? 'Shows in the text, where its [image: …] line is' : 'Kept with the draft'}>
+                {previews.current[f.name] ? <img src={previews.current[f.name]} alt="" className="h-5 w-7 rounded object-cover" /> : <IconPaperclip size={11} />} {f.name} <span className="text-slate-500">{formatSize(f.size)}</span>
                 <button type="button" onClick={() => removeKept(f.id)} aria-label={`Remove ${f.name}`} disabled={sending}><IconX size={11} /></button>
               </span>
             ))}
             {files.map((f, i) => (
               <span key={`${f.name}-${i}`} className="chip !bg-slate-100 !text-slate-700" title={uploading ? 'Adding to the draft…' : 'Goes with the mail; not kept in the draft'}>
-                {uploading ? <span className="spinner !h-3 !w-3" /> : <IconPaperclip size={11} />} {f.name} <span className="text-slate-500">{formatSize(f.size)}</span>
-                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`}><IconX size={11} /></button>
+                {uploading ? <span className="spinner !h-3 !w-3" /> : previews.current[f.name] ? <img src={previews.current[f.name]} alt="" className="h-5 w-7 rounded object-cover" /> : <IconPaperclip size={11} />} {f.name} <span className="text-slate-500">{formatSize(f.size)}</span>
+                <button type="button" onClick={() => { dropMarker(f.name); setFiles(files.filter((_, j) => j !== i)) }} aria-label={`Remove ${f.name}`}><IconX size={11} /></button>
               </span>
             ))}
             <span className="self-center text-[11px] text-slate-500">{formatSize(totalSize)} total</span>
