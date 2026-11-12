@@ -513,6 +513,8 @@
   }
   @media (min-width: 640px) { .pa-head { border-top-left-radius: 1rem; border-top-right-radius: 1rem; } }
   .pa-foot { border-top: 1px solid var(--pa-line); }
+  .pa-plan { border-bottom: 1px solid var(--pa-line); background: var(--pa-step); opacity: 0.95; }
+  .pa-plan-low { background: rgba(245, 179, 32, 0.16); }
   .pa-bubble { background: var(--pa-bubble); box-shadow: inset 0 0 0 1px var(--pa-line); }
   .pa-bubble-error { background: rgba(220, 38, 38, 0.08); color: #b91c1c; }
   .pa-bubble-me {

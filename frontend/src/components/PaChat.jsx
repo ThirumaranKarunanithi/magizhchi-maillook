@@ -5,6 +5,7 @@ import { useMail } from '../state.jsx'
 import { laneName } from '../util.js'
 import { PA_DONE, PA_SEARCH, emit, screen } from '../pabus.js'
 import { IconMic, IconSend, IconX } from './Icons.jsx'
+import PaPlan from './PaPlan.jsx'
 
 const STORE = 'mlook.pa.chat'
 const SPEAK = 'mlook.pa.speak'
@@ -475,6 +476,7 @@ export default function PaChat() {
         {msgs.length > 0 && <button className="pa-chip" onClick={clear} title="Start a new chat">New</button>}
         <button className="icon-btn !h-8 !w-8" onClick={close} aria-label="Close"><IconX size={16} /></button>
       </header>
+      {ready && <PaPlan refresh={msgs.length} />}
 
       <div className="scroll-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {!ready && (

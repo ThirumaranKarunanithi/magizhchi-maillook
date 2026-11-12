@@ -3,6 +3,7 @@ package software.magizhchi.maillook.suite;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
@@ -374,6 +375,31 @@ public class PaChatController {
         }
         out.put("paActions", done);
         out.put("actions", List.of());
+        return out;
+    }
+
+    /**
+     * The person's Magizhchi PA plan (quick asks today, points this month) and where to upgrade, for the top of
+     * the chat. Never fails the panel: when PA can't be asked it says so with available = false.
+     */
+    @GetMapping("/plan")
+    public Map<String, Object> plan(@RequestAttribute long userId) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        String web = pa.webUrl() == null || pa.webUrl().isBlank() ? "https://pa.magizhchi.software" : pa.webUrl();
+        out.put("upgradeUrl", web + "/pricing");
+        out.put("available", false);
+        if (!pa.configured()) return out;
+        try {
+            PaClient.Reply r = pa.as(userId, "GET", "/api/v1/plan", null);
+            if (r.ok() && r.json() != null && r.json().isObject()) {
+                r.json().fields().forEachRemaining(e -> out.put(e.getKey(),
+                        e.getValue().isNull() ? null : e.getValue().isNumber() ? e.getValue().numberValue()
+                                : e.getValue().isBoolean() ? e.getValue().asBoolean() : e.getValue().asText()));
+                out.put("available", true);
+            }
+        } catch (RuntimeException ignored) {
+            // the chat works without the plan line
+        }
         return out;
     }
 
