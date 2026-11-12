@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { downloadFile, openFile, post } from '../api.js'
-import { showsInViewer, viewAttachment } from '../viewer.js'
+import { downloadFile, fileBlob, openFile, post } from '../api.js'
+import { showsInViewer, viewSet } from '../viewer.js'
 import { refreshBox, useBox } from '../box.js'
 import { formatSize } from '../util.js'
 import { IconCloudCheck, IconCloudUp, IconDownload, IconEye, IconPaperclip } from './Icons.jsx'
@@ -86,6 +86,13 @@ export default function AttachmentShelf({ messageId, attachments, notify, compac
     if (!box?.connected || res.saved) refreshBox()
   }
 
+  // Open in Magizhchi Viewer with the mail's other viewable files, so next/previous steps
+  // through them. Only the clicked one is fetched now.
+  const viewIt = (a) => {
+    const set = attachments.filter((x) => showsInViewer(x))
+    return viewSet(set.map((x) => ({ f: x, load: async () => ({ blob: await fileBlob(path(x), x.contentType) }) })), set.indexOf(a))
+  }
+
   const saveToBox = (a) => run(`b${a.index}`, async () => saved(await post(`${path(a)}/box`)))
   const saveAllToBox = () => run('box', async () => saved(await post(`/api/messages/${messageId}/box`)))
 
@@ -143,7 +150,7 @@ export default function AttachmentShelf({ messageId, attachments, notify, compac
               <div className="flex shrink-0 items-center gap-1">
                 {(kind.viewable || showsInViewer(a)) && (
                   <button className="icon-btn" title={`Open ${a.name}`} aria-label={`Open ${a.name}`} disabled={busy != null}
-                    onClick={() => run(`o${a.index}`, () => (showsInViewer(a) ? viewAttachment(a, path(a)) : openFile(path(a), a.contentType)))}>
+                    onClick={() => run(`o${a.index}`, () => (showsInViewer(a) ? viewIt(a) : openFile(path(a), a.contentType)))}>
                     {busy === `o${a.index}` ? <span className="spinner" /> : <IconEye size={17} />}
                   </button>
                 )}

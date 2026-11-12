@@ -13,7 +13,6 @@
 // The SDK is a copy in src/vendor (from Magizhchi-Viewer/frontend/public/sdk), not a script
 // loaded from the viewer's site, so no outside code runs in MailLook's page.
 import './vendor/magizhchi-viewer.js'
-import { fileBlob } from './api.js'
 
 const BASE = (import.meta.env.VITE_VIEWER_URL || '').trim().replace(/\/+$/, '')
 
@@ -63,31 +62,45 @@ function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(u), 60000)
 }
 
-function show(source, { onDownload, onFail }) {
+function show(source, { index, onDownload, onNeed, onFail }) {
   window.MagizhchiViewer.open(source, {
     base: BASE,
+    index,
     timeout: 7000,
+    onNeed,       // a file listed by name only: fetched when the user reaches it
     onDownload,   // MailLook saves the file itself, from its own page
     onError: () => { unavailable = true; onFail?.() },
   })
 }
 
-/** A mail attachment: fetch its bytes with the sign-in token, then show them. Rejects with
- *  the API's own error if the fetch fails, so the caller reports it as usual. */
-export async function viewAttachment(f, path) {
-  const blob = await fileBlob(path, f.contentType)
-  const name = f.name || 'attachment'
-  show({ name, mimeType: f.contentType || '', size: f.size ?? blob.size, blob }, {
-    onDownload: () => saveBlob(blob, name),
-    // The viewer did not start: the bytes are already here, so at least save them.
-    onFail: () => saveBlob(blob, name),
-  })
-}
-
-/** A picture, video or audio file by link (a file that lives in Box). */
-export function viewLink(f, url, { onDownload } = {}) {
-  show({ name: f.name || 'file', mimeType: f.contentType || '', size: f.size, url }, {
-    onDownload: onDownload || (() => window.open(url, '_blank', 'noopener')),
-    onFail: () => window.open(url, '_blank', 'noopener'),
+/**
+ * Several files with next/previous, opening on one of them. Only that one is fetched now;
+ * each of the others is fetched when the user reaches it.
+ * @param entries  [{ f: { name, contentType, size }, load, download? }]
+ *                 load()      → Promise<{ blob } | { url }>: the file's bytes or a link to it
+ *                 download()  → optional: how this file is saved (default: its bytes, or its link)
+ * @param index    which entry to open on
+ */
+export async function viewSet(entries, index) {
+  const got = new Map()   // index → what load() gave, so a download does not fetch twice
+  const load = async (i) => {
+    if (!got.has(i)) got.set(i, await entries[i].load())
+    return got.get(i)
+  }
+  const meta = (e) => ({ name: e.f.name || 'attachment', mimeType: e.f.contentType || '', size: e.f.size })
+  const first = await load(index)
+  const save = async (i) => {
+    const e = entries[i]
+    if (e.download) return e.download()
+    const src = await load(i)
+    if (src.blob) saveBlob(src.blob, e.f.name)
+    else window.open(src.url, '_blank', 'noopener')
+  }
+  show(entries.map((e, i) => (i === index ? { ...meta(e), ...first } : meta(e))), {
+    index,
+    onNeed: (_, i) => load(i),
+    onDownload: (_, i) => { save(i).catch(() => {}) },
+    // The viewer did not start: the clicked file is already here, so at least hand it over.
+    onFail: () => { save(index).catch(() => {}) },
   })
 }

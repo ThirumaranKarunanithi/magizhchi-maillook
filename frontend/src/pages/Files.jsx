@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { downloadFile, get, openFile, post, qs } from '../api.js'
-import { showsInViewer, viewAttachment, viewLink } from '../viewer.js'
+import { downloadFile, fileBlob, get, openFile, post, qs } from '../api.js'
+import { showsInViewer, viewSet } from '../viewer.js'
 import { refreshBox, useBox } from '../box.js'
 import { useMail } from '../state.jsx'
 import { formatSize, senderName } from '../util.js'
@@ -120,15 +120,20 @@ export default function Files() {
 
   // Open: Magizhchi Viewer when it can show the file, otherwise the old way (a new tab).
   // A Box file can only be handed over as a link, which works for pictures, video and audio.
+  // In the viewer, next/previous step through the other files on this page that it can show.
+  const inViewer = (f) => showsInViewer(f, { linkOnly: !!f.boxFileId })
+  const viewIt = (f) => {
+    const set = (items || []).filter(inViewer)
+    return viewSet(set.map((x) => (x.boxFileId
+      ? { f: x, load: async () => ({ url: (await get(`/api/files/box/${x.boxFileId}/open`)).url }), download: () => downloadFromBox(x) }
+      : { f: x, load: async () => ({ blob: await fileBlob(path(x), x.contentType) }) })), set.indexOf(f))
+  }
   const openIt = (f, id) => {
     if (f.boxFileId) {
-      if (!showsInViewer(f, { linkOnly: true })) return openInBox(f)
-      return run(`x${f.boxFileId}`, async () => {
-        const { url } = await get(`/api/files/box/${f.boxFileId}/open`)
-        viewLink(f, url, { onDownload: () => downloadFromBox(f) })
-      })
+      if (!inViewer(f)) return openInBox(f)
+      return run(`x${f.boxFileId}`, () => viewIt(f))
     }
-    return run(`o${id}`, () => (showsInViewer(f) ? viewAttachment(f, path(f)) : openFile(path(f), f.contentType)))
+    return run(`o${id}`, () => (inViewer(f) ? viewIt(f) : openFile(path(f), f.contentType)))
   }
 
   async function run(k, fn) {

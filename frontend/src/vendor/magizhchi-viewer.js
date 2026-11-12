@@ -14,6 +14,18 @@
  *   // Several files with next/previous, starting on the third:
  *   MagizhchiViewer.open(files, { index: 2, allowDownload: false, onClose: () => {} });
  *
+ * A long list does not have to be fetched up front. Give the files you have not loaded with
+ * only their name, type and size, and pass onNeed: the viewer asks for each one when the
+ * user reaches it.
+ *
+ *   MagizhchiViewer.open(
+ *     [{ name: 'a.pdf', blob }, { name: 'b.pdf', size: 52000 }, { name: 'c.jpg', size: 9000 }],
+ *     { onNeed: async (file, index) => ({ blob: await fetchMine(index) }) }   // or { url }
+ *   );
+ *
+ * The file the viewer opens on (options.index) must be given in full. A file may carry
+ * allowDownload: false to hide the download control for that file only.
+ *
  * A file sent by link may also carry `head`: a Blob with its first bytes (8 MB is plenty).
  * Viewers that only need a file's header, such as the database backup summary, use it when
  * they cannot read the storage link themselves.
@@ -23,6 +35,8 @@
  *   allowDownload  false hides every download control
  *   onDownload     (file, index) => {} – your app performs the download itself (its own
  *                  permissions, decryption or native save) instead of the viewer
+ *   onNeed         (file, index) => Promise<{ blob } | { url, head? } | Blob> – load a file
+ *                  that was listed without its bytes or link. Reject to show an error.
  *   onClose        () => {} – the user closed the viewer
  *   onError        (reason) => {} – the viewer did not start (site unreachable); the
  *                  overlay is already removed, so show your own fallback
@@ -66,17 +80,32 @@
     frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;margin:0;padding:0;' +
       'z-index:2147483000;background:#020617;color-scheme:dark';
 
+    function wire(f) {
+      return { name: f.name, mimeType: f.mimeType || f.type, size: f.size, url: f.url, blob: f.blob || f.file, data: f.data, head: f.head };
+    }
+    function loaded(f) { return Boolean(f.url || f.blob || f.file || f.data); }
+    // sent[i] is the place in `list` of the i-th file the viewer was given.
+    var sent = [];
+
     function onMessage(e) {
       if (e.source !== frame.contentWindow || e.origin !== origin || !e.data) return;
       if (e.data.type === 'mv:ready') {
         clearTimeout(current.timer);
         current.timer = null;
+        // An older viewer cannot ask for files later: give it only the ones already loaded.
+        var lazyOk = e.data.version >= 2 && typeof options.onNeed === 'function';
+        sent = [];
+        list.forEach(function (f, i) { if (lazyOk || loaded(f)) sent.push(i); });
         frame.contentWindow.postMessage({
           type: 'mv:open',
-          files: list.map(function (f) {
-            return { name: f.name, mimeType: f.mimeType || f.type, size: f.size, url: f.url, blob: f.blob || f.file, data: f.data, head: f.head };
+          files: sent.map(function (i) {
+            var f = list[i];
+            var w = wire(f);
+            if (!loaded(f)) w.lazy = true;
+            if (f.allowDownload === false) w.allowDownload = false;
+            return w;
           }),
-          index: options.index || 0,
+          index: Math.max(0, sent.indexOf(options.index || 0)),
           options: {
             allowDownload: options.allowDownload !== false,
             hostDownload: typeof options.onDownload === 'function',
@@ -86,8 +115,27 @@
       } else if (e.data.type === 'mv:close') {
         close();
       } else if (e.data.type === 'mv:download' && typeof options.onDownload === 'function') {
-        var i = e.data.index;
+        var i = sent[e.data.index];
         if (Number.isInteger(i) && list[i]) options.onDownload(list[i], i);
+      } else if (e.data.type === 'mv:need') {
+        var at = e.data.index;
+        var n = sent[at];
+        var reply = function (body) {
+          if (!current || current.frame !== frame) return;
+          body.type = 'mv:file';
+          body.index = at;
+          frame.contentWindow.postMessage(body, origin);
+        };
+        if (!Number.isInteger(n) || !list[n] || typeof options.onNeed !== 'function') { reply({ error: 'This file could not be loaded.' }); return; }
+        Promise.resolve().then(function () { return options.onNeed(list[n], n); }).then(function (got) {
+          if (typeof Blob !== 'undefined' && got instanceof Blob) got = { blob: got };
+          if (!got || !loaded(got)) throw new Error('This file could not be loaded.');
+          var f = list[n];
+          var w = wire(got);
+          reply({ file: { name: got.name || f.name, mimeType: w.mimeType || f.mimeType || f.type, size: got.size != null ? got.size : f.size, url: w.url, blob: w.blob, data: w.data, head: w.head } });
+        }).catch(function (err) {
+          reply({ error: String((err && err.message) || err || 'This file could not be loaded.').slice(0, 300) });
+        });
       }
     }
 
@@ -112,5 +160,5 @@
     return { close: close };
   }
 
-  window.MagizhchiViewer = { open: open, close: close, version: '0.3.0' };
+  window.MagizhchiViewer = { open: open, close: close, version: '0.4.0' };
 })();
