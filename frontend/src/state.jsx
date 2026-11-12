@@ -19,6 +19,7 @@ export function useLanes() {
 }
 
 const COUNTS_POLL_MS = 60_000
+const AI_RECHECK_MS = 120_000
 
 export function MailProvider({ children }) {
   const [accounts, setAccounts] = useState([])
@@ -44,6 +45,20 @@ export function MailProvider({ children }) {
       /* keep what we have */
     } finally {
       setAccountsLoaded(true)
+    }
+  }, [])
+
+  /** Asks again whether AI (from Magizhchi PA) is on; true when it is. */
+  const refreshAi = useCallback(async () => {
+    get('/api/pa/status').then(setPa).catch(() => setPa({ connected: false }))
+    try {
+      const s = await get('/api/ai/status')
+      setAiEnabled(!!s?.enabled)
+      setAiInfo(s || null)
+      return !!s?.enabled
+    } catch {
+      setAiEnabled((v) => (v === null ? false : v))
+      return false
     }
   }, [])
 
@@ -92,16 +107,23 @@ export function MailProvider({ children }) {
     refreshAccounts()
     refreshCounts()
     refreshDrafts()
-    get('/api/ai/status')
-      .then((s) => {
-        setAiEnabled(!!s?.enabled)
-        setAiInfo(s || null)
-      })
-      .catch(() => setAiEnabled(false))
-    get('/api/pa/status').then(setPa).catch(() => setPa({ connected: false }))
+    refreshAi()
     const t = setInterval(refreshCounts, COUNTS_POLL_MS)
     return () => clearInterval(t)
-  }, [refreshAccounts, refreshCounts, refreshDrafts])
+  }, [refreshAccounts, refreshCounts, refreshDrafts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // AI off may only mean PA was waking up when the app opened: look again every two minutes and when the
+  // window comes back, so suggestions appear without restarting the app.
+  useEffect(() => {
+    if (aiEnabled !== false) return undefined
+    const t = setInterval(refreshAi, AI_RECHECK_MS)
+    const onFocus = () => refreshAi()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [aiEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // If the selected account goes away, fall back to all accounts.
   useEffect(() => {
@@ -163,7 +185,7 @@ export function MailProvider({ children }) {
   const value = {
     accounts, setAccounts, accountsLoaded, refreshAccounts,
     counts, refreshCounts,
-    aiEnabled, setAiEnabled, aiInfo,
+    aiEnabled, setAiEnabled, aiInfo, refreshAi,
     pa,
     accountId, setAccountId,
     composer, openComposer, closeComposer,

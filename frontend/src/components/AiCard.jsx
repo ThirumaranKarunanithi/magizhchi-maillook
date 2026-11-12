@@ -11,7 +11,7 @@ const INTENT_STYLE = {
 
 /** Summarize / Draft reply, powered by Magizhchi PA's AI. Action items can go straight to PA as tasks. */
 export default function AiCard({ messageId, onDraft }) {
-  const { aiEnabled, setAiEnabled, aiInfo, pa, notify } = useMail()
+  const { aiEnabled, setAiEnabled, aiInfo, refreshAi, pa, notify } = useMail()
   const [added, setAdded] = useState({})
 
   async function addAction(i, what) {
@@ -30,6 +30,13 @@ export default function AiCard({ messageId, onDraft }) {
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState('')
   const disabled = aiEnabled === false
+
+  async function recheck() {
+    setBusy('check')
+    const on = await refreshAi()
+    setBusy(null)
+    notify(on ? 'AI is on. Suggestions are back.' : 'PA’s AI is still off.', on ? 'success' : 'info')
+  }
 
   async function run(kind) {
     setBusy(kind)
@@ -65,7 +72,10 @@ export default function AiCard({ messageId, onDraft }) {
 
       {disabled && (
         <p className="mt-1.5 text-xs text-slate-500">
-          AI comes from Magizhchi PA. {pa?.connected === false ? pa.message : 'Switch on PA’s AI (ANTHROPIC_API_KEY on the PA server).'}
+          AI comes from Magizhchi PA. {pa?.connected === false ? pa.message : 'Switch on PA’s AI (ANTHROPIC_API_KEY on the PA server).'}{' '}
+          <button className="font-semibold text-peacock-700 hover:underline disabled:opacity-60" disabled={busy === 'check'} onClick={recheck}>
+            {busy === 'check' ? 'Checking…' : 'Check again'}
+          </button>
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-700">{error}</p>}

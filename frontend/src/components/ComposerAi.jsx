@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, post } from '../api.js'
+import { useMail } from '../state.jsx'
 import { IconCalendar, IconChevron, IconSparkle, IconX } from './Icons.jsx'
 
 const STYLES = [
@@ -43,6 +44,10 @@ function useOutside(ref, open, onClose) {
  * more formal, fixed, translated), and put free times from the PA calendar into the text.
  */
 export default function ComposerAi({ aiEnabled, text, setText, anchor, sig, accountId, to, subject, setSubject, replyToId, bodyRef, notify }) {
+  const { refreshAi } = useMail()
+  const [checking, setChecking] = useState(false)
+  // Opening a mail to write is a good moment to look again whether PA's AI has come on.
+  useEffect(() => { if (aiEnabled === false) refreshAi() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [mode, setMode] = useState(null) // 'write' | 'rewrite' | 'times'
   const [prompt, setPrompt] = useState('')
   const [custom, setCustom] = useState('')
@@ -149,6 +154,15 @@ export default function ComposerAi({ aiEnabled, text, setText, anchor, sig, acco
           onClick={() => (mode === 'times' ? setMode(null) : loadTimes())} aria-expanded={mode === 'times'}>
           <IconCalendar size={14} /> Suggest times
         </button>
+        {aiEnabled === false && (
+          <span className="flex items-center gap-1 px-1 text-xs text-slate-500" title="Write with AI and Rewrite come from Magizhchi PA's AI">
+            <IconSparkle size={13} /> AI is off ·
+            <button type="button" className="font-semibold text-peacock-700 hover:underline disabled:opacity-60" disabled={checking}
+              onClick={async () => { setChecking(true); const on = await refreshAi(); setChecking(false); if (!on) notify('PA’s AI is still off.', 'info') }}>
+              {checking ? 'Checking…' : 'Check again'}
+            </button>
+          </span>
+        )}
         {busy && <span className="flex items-center gap-1.5 px-1 text-xs text-slate-500"><span className="spinner" /> {busy === 'write' ? 'Writing…' : 'Rewriting…'}</span>}
         {undo && !busy && (
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
