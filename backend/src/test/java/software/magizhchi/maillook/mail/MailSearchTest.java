@@ -85,4 +85,12 @@ class MailSearchTest {
         assertThat(ServerSearch.gmail(s)).isEqualTo("moa from:\"Vignesh S\" after:" + s.after().getEpochSecond());
         assertThat(ServerSearch.gmail(MailSearch.parse("is:unread", IST, NOW))).isNull();
     }
+
+    @Test
+    void gmailSearchGoesAsOneQuotedString() {
+        var forms = SyncService.gmailForms("moa from:\"Vignesh S\"");
+        assertThat(forms.get(0)[0]).isEqualTo("SEARCH X-GM-RAW \"moa from:\\\"Vignesh S\\\"\"");
+        assertThat(forms.get(0)[1]).isNull();
+        assertThat(SyncService.gmailForms("பள்ளி").get(0)[0]).isEqualTo("SEARCH CHARSET UTF-8");   // Tamil goes as UTF-8
+    }
 }

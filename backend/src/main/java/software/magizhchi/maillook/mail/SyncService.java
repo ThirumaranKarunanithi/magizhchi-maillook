@@ -353,31 +353,51 @@ public class SyncService {
         try {
             if (!((org.eclipse.angus.mail.imap.IMAPStore) folder.getStore()).hasCapability("X-GM-EXT-1")) return null;
             return (java.util.TreeSet<Integer>) folder.doCommand(p -> {
-                org.eclipse.angus.mail.iap.Argument args = new org.eclipse.angus.mail.iap.Argument();
-                args.writeAtom("X-GM-RAW");
-                try {
-                    args.writeString(raw, "UTF-8");
-                } catch (java.io.UnsupportedEncodingException e) {
-                    throw new org.eclipse.angus.mail.iap.ProtocolException(e.toString());
-                }
-                org.eclipse.angus.mail.iap.Response[] rs = p.command("SEARCH CHARSET UTF-8", args);
-                org.eclipse.angus.mail.iap.Response done = rs[rs.length - 1];
-                java.util.TreeSet<Integer> found = new java.util.TreeSet<>();
-                if (done.isOK()) {
-                    for (org.eclipse.angus.mail.iap.Response r : rs) {
-                        if (r instanceof org.eclipse.angus.mail.imap.protocol.IMAPResponse ir && ir.keyEquals("SEARCH")) {
-                            for (int n; (n = ir.readNumber()) != -1; ) found.add(n);
+                // Gmail takes the search words as one quoted string (SEARCH X-GM-RAW "moa from:ravi"); words
+                // beyond plain English letters go as UTF-8. If it doesn't take one form, the next one is tried.
+                org.eclipse.angus.mail.iap.ProtocolException last = null;
+                for (Object[] form : gmailForms(raw)) {
+                    org.eclipse.angus.mail.iap.Response[] rs = p.command((String) form[0], (org.eclipse.angus.mail.iap.Argument) form[1]);
+                    org.eclipse.angus.mail.iap.Response done = rs[rs.length - 1];
+                    java.util.TreeSet<Integer> found = new java.util.TreeSet<>();
+                    if (done.isOK()) {
+                        for (org.eclipse.angus.mail.iap.Response r : rs) {
+                            if (r instanceof org.eclipse.angus.mail.imap.protocol.IMAPResponse ir && ir.keyEquals("SEARCH")) {
+                                for (int n; (n = ir.readNumber()) != -1; ) found.add(n);
+                            }
                         }
                     }
+                    p.notifyResponseHandlers(rs);
+                    try {
+                        p.handleResult(done);
+                        return found;
+                    } catch (org.eclipse.angus.mail.iap.ProtocolException e) {
+                        last = e;
+                    }
                 }
-                p.notifyResponseHandlers(rs);
-                p.handleResult(done);
-                return found;
+                throw last;
             });
         } catch (Exception e) {
             log.info("Gmail search in {} didn't go through ({}); using plain search", folder.getFullName(), e.toString());
             return null;
         }
+    }
+
+    /** The ways to put a Gmail search to the server, most likely first: {command, argument or null}. */
+    static List<Object[]> gmailForms(String raw) {
+        List<Object[]> forms = new ArrayList<>();
+        boolean ascii = raw.chars().allMatch(c -> c >= 32 && c < 127);
+        if (ascii) {
+            String quoted = "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+            forms.add(new Object[]{"SEARCH X-GM-RAW " + quoted, null});
+            forms.add(new Object[]{"SEARCH CHARSET UTF-8 X-GM-RAW " + quoted, null});
+        } else {
+            org.eclipse.angus.mail.iap.Argument args = new org.eclipse.angus.mail.iap.Argument();
+            args.writeAtom("X-GM-RAW");
+            args.writeString(raw, java.nio.charset.StandardCharsets.UTF_8);
+            forms.add(new Object[]{"SEARCH CHARSET UTF-8", args});
+        }
+        return forms;
     }
 
     /** Pick up read/flag changes and removals made in other mail apps, for the newest messages. */
