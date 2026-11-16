@@ -70,6 +70,10 @@ class ServerSearchTest {
 
         // What's kept has nothing from the principal yet …
         assertThat(subjects(token, "all", "principal")).isEmpty();
+        // Words match where a word starts, as in Gmail: "cricket" finds Neel's mail, "icket" (inside it) doesn't.
+        assertThat(subjects(token, "all", "cricket")).containsExactly("Weekend plans");
+        assertThat(subjects(token, "all", "icket")).isEmpty();
+        assertThat(subjects(token, "all", "neel")).containsExactly("Weekend plans");   // the sender: any part
 
         // … the server does: its matches come in. (GreenMail matches a sender only by the whole address; Gmail
         // and other real servers match part of it too, so "principal" alone finds the sender there.)

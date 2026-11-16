@@ -116,14 +116,34 @@ public record MailSearch(String text, String from, boolean hasAttachment, boolea
         return "%" + s.trim().toLowerCase(Locale.ROOT).replace("%", "").replace("_", "") + "%";
     }
 
+    /** A column containing the text where a word starts: LIKE narrows it cheaply, the pattern checks the start. */
+    private static String starts(String col) {
+        return "(LOWER(" + col + ") LIKE ? AND REGEXP_LIKE(LOWER(" + col + "), ?))";
+    }
+
+    /** Pattern for the text at the start of a word, with what it holds taken literally (same in PostgreSQL and Java). */
+    static String wordStart(String s) {
+        String t = s.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        StringBuilder p = new StringBuilder("(^|[^a-z0-9])");
+        for (char c : t.toCharArray()) {
+            if (c < 128 && !Character.isLetterOrDigit(c) && c != ' ') p.append('\\');
+            p.append(c);
+        }
+        return p.toString();
+    }
+
     /** Appends this search's conditions on messages alias m. */
     void appendTo(StringBuilder sql, List<Object> args) {
         if (text != null && !text.isBlank()) {
+            // The sender matches anywhere in the name or address (people type part of it); everywhere else the
+            // words must start a word, as Gmail does, so "moa" finds "MOA" but not a link or a longer word.
             String l = like(text);
-            sql.append(" AND (LOWER(m.subject) LIKE ? OR LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ? OR LOWER(m.body_text) LIKE ?" +
-                    " OR LOWER(m.to_list) LIKE ? OR LOWER(m.cc_list) LIKE ?" +
-                    " OR EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key AND LOWER(tn.body) LIKE ?))");
-            args.addAll(List.of(l, l, l, l, l, l, l));
+            String w = wordStart(text);
+            sql.append(" AND (LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ?" +
+                    " OR " + starts("m.subject") + " OR " + starts("m.body_text") +
+                    " OR " + starts("m.to_list") + " OR " + starts("m.cc_list") +
+                    " OR EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key AND " + starts("tn.body") + "))");
+            args.addAll(List.of(l, l, l, w, l, w, l, w, l, w, l, w));
         }
         if (from != null && !from.isBlank()) {
             String l = like(from);

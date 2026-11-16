@@ -59,4 +59,16 @@ class MailSearchTest {
         assertThat(s.after()).isEqualTo(Instant.parse("2026-11-03T00:00:00Z"));    // the later of the two
         assertThat(MailSearch.parse(null, IST, NOW).with("ravi", null, false, null, null, null).from()).isEqualTo("ravi");
     }
+    @Test
+    void wordsMatchWhereAWordStarts() {
+        java.util.regex.Pattern moa = java.util.regex.Pattern.compile(MailSearch.wordStart(" MOA "));
+        assertThat(moa.matcher("fwd: memorandum (moa, aoa) printing").find()).isTrue();
+        assertThat(moa.matcher("spicemoa_inc form").find()).isFalse();             // inside a longer word
+        assertThat(moa.matcher("https://x.example/?id=ab3moaq").find()).isFalse();  // inside a link's code
+        assertThat(moa.matcher("moa").find()).isTrue();
+        // What people type is taken literally.
+        java.util.regex.Pattern dotted = java.util.regex.Pattern.compile(MailSearch.wordStart("a.b (c)"));
+        assertThat(dotted.matcher("see a.b (c) here").find()).isTrue();
+        assertThat(dotted.matcher("see axb (c) here").find()).isFalse();
+    }
 }

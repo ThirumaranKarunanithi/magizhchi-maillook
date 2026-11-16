@@ -29,6 +29,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Search reaches the whole mailbox, not just the mail MailLook keeps (sync keeps the newest few hundred).
@@ -48,6 +52,14 @@ public class ServerSearch {
     static final int PER_FOLDER = 40;
     /** The same search again within this long doesn't ask the server again. */
     private static final Duration FRESH = Duration.ofMinutes(10);
+    /** How long one account may take before its search counts as failed. */
+    private static final Duration PATIENCE = Duration.ofSeconds(90);
+    /** Searches run here, a few mailboxes at a time across everyone. */
+    private final ExecutorService pool = Executors.newFixedThreadPool(8, r -> {
+        Thread t = new Thread(r, "server-search");
+        t.setDaemon(true);
+        return t;
+    });
 
     private final AccountRepo accounts;
     private final SyncService sync;
@@ -84,15 +96,20 @@ public class ServerSearch {
             out.put("searched", true);
             return out;
         }
+        // Every account at once: one slow mailbox shouldn't hold the others up.
+        List<Account> mine = new ArrayList<>();
+        for (Account a : accounts.forUser(userId)) if (accountId == null || a.id() == accountId) mine.add(a);
+        List<Future<Integer>> runs = new ArrayList<>();
+        for (Account a : mine) runs.add(pool.submit(() -> sync.importMatching(a, term, codes, PER_FOLDER)));
         int added = 0;
         List<String> failed = new ArrayList<>();
-        for (Account a : accounts.forUser(userId)) {
-            if (accountId != null && a.id() != accountId) continue;
+        for (int i = 0; i < mine.size(); i++) {
             try {
-                added += sync.importMatching(a, term, codes, PER_FOLDER);
+                added += runs.get(i).get(PATIENCE.toSeconds(), TimeUnit.SECONDS);
             } catch (Exception e) {
-                log.info("Server search for {} failed: {}", a.email(), e.toString());
-                failed.add(a.email());
+                runs.get(i).cancel(true);
+                log.info("Server search for {} failed: {}", mine.get(i).email(), e.toString());
+                failed.add(mine.get(i).email());
             }
         }
         if (failed.isEmpty()) recent.put(key, Instant.now());
