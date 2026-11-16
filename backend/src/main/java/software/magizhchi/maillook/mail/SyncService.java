@@ -283,9 +283,12 @@ public class SyncService {
         boolean allMail = ImapClient.isAllMail(folder);
         folder.open(Folder.READ_ONLY);
         try {
-            // Each group must match; within a group, any of its simple searches.
-            java.util.TreeSet<Integer> hits = null;
-            for (List<jakarta.mail.search.SearchTerm> group : query.groups()) {
+            // Gmail is asked in its own search words, so it finds what its search box finds (attachment names too).
+            java.util.TreeSet<Integer> hits = gmailSearch(folder, query.gmail());
+            if (hits != null) {
+                if (hits.isEmpty()) return 0;
+            } else for (List<jakarta.mail.search.SearchTerm> group : query.groups()) {
+                // Elsewhere each group must match; within a group, any of its simple searches.
                 java.util.TreeSet<Integer> any = new java.util.TreeSet<>();
                 for (jakarta.mail.search.SearchTerm t : group) {
                     for (Message m : folder.search(query.limited(t))) any.add(m.getMessageNumber());
@@ -338,6 +341,42 @@ public class SyncService {
             return added;
         } finally {
             ImapClient.closeQuietly(folder, false);
+        }
+    }
+
+    /**
+     * Message numbers Gmail's own search finds in this folder (SEARCH X-GM-RAW), or null when the server isn't
+     * Gmail or the search didn't go through, so the plain IMAP search runs instead.
+     */
+    static java.util.TreeSet<Integer> gmailSearch(IMAPFolder folder, String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            if (!((org.eclipse.angus.mail.imap.IMAPStore) folder.getStore()).hasCapability("X-GM-EXT-1")) return null;
+            return (java.util.TreeSet<Integer>) folder.doCommand(p -> {
+                org.eclipse.angus.mail.iap.Argument args = new org.eclipse.angus.mail.iap.Argument();
+                args.writeAtom("X-GM-RAW");
+                try {
+                    args.writeString(raw, "UTF-8");
+                } catch (java.io.UnsupportedEncodingException e) {
+                    throw new org.eclipse.angus.mail.iap.ProtocolException(e.toString());
+                }
+                org.eclipse.angus.mail.iap.Response[] rs = p.command("SEARCH CHARSET UTF-8", args);
+                org.eclipse.angus.mail.iap.Response done = rs[rs.length - 1];
+                java.util.TreeSet<Integer> found = new java.util.TreeSet<>();
+                if (done.isOK()) {
+                    for (org.eclipse.angus.mail.iap.Response r : rs) {
+                        if (r instanceof org.eclipse.angus.mail.imap.protocol.IMAPResponse ir && ir.keyEquals("SEARCH")) {
+                            for (int n; (n = ir.readNumber()) != -1; ) found.add(n);
+                        }
+                    }
+                }
+                p.notifyResponseHandlers(rs);
+                p.handleResult(done);
+                return found;
+            });
+        } catch (Exception e) {
+            log.info("Gmail search in {} didn't go through ({}); using plain search", folder.getFullName(), e.toString());
+            return null;
         }
     }
 

@@ -71,4 +71,18 @@ class MailSearchTest {
         assertThat(dotted.matcher("see a.b (c) here").find()).isTrue();
         assertThat(dotted.matcher("see axb (c) here").find()).isFalse();
     }
+
+    @Test
+    void attachmentNamesMatchAnywhereInTheName() {
+        java.util.regex.Pattern moa = java.util.regex.Pattern.compile(MailSearch.inName("moa"));
+        assertThat(moa.matcher("[{\"index\":0,\"name\":\"spicemoa_inc-33.pdf\",\"size\":10}]").find()).isTrue();
+        assertThat(moa.matcher("[{\"index\":0,\"name\":\"pan.pdf\",\"contenttype\":\"application/moa\"}]").find()).isFalse();
+    }
+
+    @Test
+    void gmailIsAskedInItsOwnWords() {
+        MailSearch s = MailSearch.parse("moa from:\"Vignesh S\" after:2023-01-01", IST, NOW);
+        assertThat(ServerSearch.gmail(s)).isEqualTo("moa from:\"Vignesh S\" after:" + s.after().getEpochSecond());
+        assertThat(ServerSearch.gmail(MailSearch.parse("is:unread", IST, NOW))).isNull();
+    }
 }

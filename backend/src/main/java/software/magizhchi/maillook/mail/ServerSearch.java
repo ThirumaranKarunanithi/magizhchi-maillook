@@ -137,7 +137,7 @@ public class ServerSearch {
      * server as a simple search of its own and the results are combined here: some servers handle nested
      * OR searches badly, simple ones everywhere.
      */
-    public record Query(List<List<SearchTerm>> groups, List<SearchTerm> limits) {
+    public record Query(List<List<SearchTerm>> groups, List<SearchTerm> limits, String gmail) {
         /** The term with the date limits added, as one simple server search. */
         SearchTerm limited(SearchTerm t) {
             if (limits.isEmpty()) return t;
@@ -164,7 +164,24 @@ public class ServerSearch {
         List<SearchTerm> limits = new ArrayList<>();
         if (s.after() != null) limits.add(new ReceivedDateTerm(ComparisonTerm.GE, Date.from(s.after())));
         if (s.before() != null) limits.add(new ReceivedDateTerm(ComparisonTerm.LT, Date.from(s.before())));
-        return new Query(groups, limits);
+        return new Query(groups, limits, gmail(s));
+    }
+
+    /**
+     * The same search in Gmail's own words, for Gmail's IMAP (X-GM-RAW): it then finds exactly what Gmail's
+     * search box finds, attachment names and all, which the plain IMAP fields don't reach.
+     */
+    static String gmail(MailSearch s) {
+        StringBuilder g = new StringBuilder();
+        if (s.text() != null && !s.text().isBlank()) g.append(s.text().trim());
+        if (s.from() != null && !s.from().isBlank()) {
+            String f = s.from().trim().replace("\"", "");
+            g.append(g.isEmpty() ? "" : " ").append("from:").append(f.contains(" ") ? "\"" + f + "\"" : f);
+        }
+        if (g.isEmpty()) return null;
+        if (s.after() != null) g.append(" after:").append(s.after().getEpochSecond());
+        if (s.before() != null) g.append(" before:").append(s.before().getEpochSecond());
+        return g.toString();
     }
 
     private void sweep() {

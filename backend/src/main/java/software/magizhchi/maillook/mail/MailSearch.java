@@ -123,8 +123,17 @@ public record MailSearch(String text, String from, boolean hasAttachment, boolea
 
     /** Pattern for the text at the start of a word, with what it holds taken literally (same in PostgreSQL and Java). */
     static String wordStart(String s) {
+        return "(^|[^a-z0-9])" + literal(s);
+    }
+
+    /** Pattern for the text inside an attachment's name in the stored list ({"index":0,"name":"…",…}). */
+    static String inName(String s) {
+        return "\"name\":\"[^\"]*" + literal(s);
+    }
+
+    private static String literal(String s) {
         String t = s.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-        StringBuilder p = new StringBuilder("(^|[^a-z0-9])");
+        StringBuilder p = new StringBuilder();
         for (char c : t.toCharArray()) {
             if (c < 128 && !Character.isLetterOrDigit(c) && c != ' ') p.append('\\');
             p.append(c);
@@ -142,8 +151,10 @@ public record MailSearch(String text, String from, boolean hasAttachment, boolea
             sql.append(" AND (LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ?" +
                     " OR " + starts("m.subject") + " OR " + starts("m.body_text") +
                     " OR " + starts("m.to_list") + " OR " + starts("m.cc_list") +
+                    // an attachment's name, anywhere in it (SPICeMoA_INC.pdf for "moa"), as Gmail finds it
+                    " OR (LOWER(m.attachments) LIKE ? AND REGEXP_LIKE(LOWER(m.attachments), ?))" +
                     " OR EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key AND " + starts("tn.body") + "))");
-            args.addAll(List.of(l, l, l, w, l, w, l, w, l, w, l, w));
+            args.addAll(List.of(l, l, l, w, l, w, l, w, l, w, l, inName(text), l, w));
         }
         if (from != null && !from.isBlank()) {
             String l = like(from);
