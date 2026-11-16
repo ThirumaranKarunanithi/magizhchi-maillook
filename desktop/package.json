@@ -1,6 +1,6 @@
 {
   "name": "magizhchi-maillook-desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Magizhchi MailLook for Windows: one calm inbox in its own window, in the tray, with alerts",
   "main": "main.js",
   "author": "Magizhchi",
