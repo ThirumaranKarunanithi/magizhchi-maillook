@@ -826,7 +826,7 @@ export default function Mail() {
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-            <img src="/brand/maillook-mark.svg" alt="" width="112" height="112" className="reflect float-slow" style={{ filter: "drop-shadow(0 18px 30px rgba(0,0,0,.55))" }} />
+            <img src="/brand/maillook-icon-256.png" alt="" width="112" height="112" className="reflect float-slow" style={{ filter: "drop-shadow(0 18px 30px rgba(0,0,0,.55))" }} />
             <p className="mt-14 text-lg font-bold text-brand-ink">Pick a message to read</p>
             <p className="mt-1 text-sm text-slate-500">Use the ⋯ on a message to mark it Done, move it, or trash it. Tick several to handle them together.</p>
           </div>

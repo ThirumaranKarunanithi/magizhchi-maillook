@@ -64,7 +64,7 @@ For Google Play, put the upload keystore and `android/keystore.properties` (`sto
 `keyAlias`) beside the project, as for Meet; both are git-ignored. Then
 `cd android && gradlew.bat bundleRelease`.
 
-Icons and splash come from `docs/brand/maillook-mark-4k.png`: `npm run icons`.
+Icons and splash come from `docs/brand/maillook-icon-1024.png`: `npm run icons`.
 
 ## Trying it against a local MailLook
 

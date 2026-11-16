@@ -16,8 +16,8 @@ self.addEventListener('push', (event) => {
       body: data.body || '',
       tag: data.tag || 'maillook',
       renotify: true,
-      icon: '/brand/maillook-mark-512.png',
-      badge: '/brand/maillook-mark-sm.png',
+      icon: '/brand/maillook-icon-512.png',
+      badge: '/brand/maillook-icon-128.png',
       data: { url: data.url || '/' },
     })
   })())

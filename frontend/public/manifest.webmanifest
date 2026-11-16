@@ -11,8 +11,8 @@
   "lang": "en-IN",
   "categories": ["productivity", "business"],
   "icons": [
-    { "src": "/brand/maillook-mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+    { "src": "/brand/maillook-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/maillook-icon-apple-180.png", "sizes": "180x180", "type": "image/png" }
   ],
   "shortcuts": [
     { "name": "Needs me", "url": "/?view=needs_me" },
