@@ -238,6 +238,33 @@ export default function Mail() {
     load()
   }, [load, mailEpoch])
 
+  // MailLook keeps the newest few hundred mails; a search also asks the mail server itself for older matches
+  // (as Gmail would find them), brings them in and refreshes the list.
+  const [deep, setDeep] = useState(null) // { state: 'looking' | 'done', added, failed }
+  const deepWanted = !cfg.drafts && !fixedList && !!(q || filters.from)
+  useEffect(() => {
+    setDeep(null)
+    if (!deepWanted) return undefined
+    let gone = false
+    const t = setTimeout(async () => {
+      setDeep({ state: 'looking' })
+      try {
+        const res = await post(`/api/messages/server-search${qs({
+          q, from: filters.from || '', accountId: accountId ?? '', folder: cfg.folder, lane: cfg.lane, tz: TZ,
+        })}`)
+        if (gone) return
+        setDeep(res?.searched ? { state: 'done', added: res.added || 0, failed: res.failed } : null)
+        if (res?.added) load({ silent: true })
+      } catch {
+        if (!gone) setDeep(null)
+      }
+    }, 500)
+    return () => {
+      gone = true
+      clearTimeout(t)
+    }
+  }, [deepWanted, q, filters.from, accountId, cfg.folder, cfg.lane]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (cfg.drafts) refreshDrafts()
   }, [cfg.drafts, refreshDrafts, mailEpoch])
@@ -747,6 +774,17 @@ export default function Mail() {
             <input className="input mt-1.5 !py-1 text-xs" type="search" placeholder="Name or address, e.g. priya or @vendor.com" autoFocus
               value={fromInput} onChange={(e) => setFromInput(e.target.value)} aria-label="From"
               onKeyDown={(e) => e.key === 'Escape' && setFromOpen(false)} />
+          )}
+          {deep && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500" role="status">
+              {deep.state === 'looking'
+                ? <><span className="spinner !h-3 !w-3" /> Looking through older mail on the server…</>
+                : deep.added > 0
+                  ? <><IconCheck size={12} className="text-peacock-600" /> Found {deep.added} older {deep.added === 1 ? 'mail' : 'mails'} on the server.</>
+                  : deep.failed?.length
+                    ? <>Couldn't reach {deep.failed.join(', ')} to look through older mail.</>
+                    : <><IconCheck size={12} className="text-peacock-600" /> Looked through the whole mailbox.</>}
+            </p>
           )}
         </div>
         {(allShownPicked || pickAll) && wholeViewPossible && (

@@ -27,6 +27,11 @@ public record MailSearch(String text, String from, boolean hasAttachment, boolea
                 && after == null && before == null;
     }
 
+    /** Words or a sender to look for (not just filters like unread or a date). */
+    public boolean hasWords() {
+        return (text != null && !text.isBlank()) || (from != null && !from.isBlank());
+    }
+
     /** Reads the operators out of the box's text; what's left is the plain text search. */
     public static MailSearch parse(String q, ZoneId zone, Instant now) {
         if (q == null || q.isBlank()) return NONE;
@@ -116,8 +121,9 @@ public record MailSearch(String text, String from, boolean hasAttachment, boolea
         if (text != null && !text.isBlank()) {
             String l = like(text);
             sql.append(" AND (LOWER(m.subject) LIKE ? OR LOWER(m.from_email) LIKE ? OR LOWER(m.from_name) LIKE ? OR LOWER(m.body_text) LIKE ?" +
+                    " OR LOWER(m.to_list) LIKE ? OR LOWER(m.cc_list) LIKE ?" +
                     " OR EXISTS (SELECT 1 FROM thread_notes tn WHERE tn.account_id = m.account_id AND tn.thread_key = m.thread_key AND LOWER(tn.body) LIKE ?))");
-            args.addAll(List.of(l, l, l, l, l));
+            args.addAll(List.of(l, l, l, l, l, l, l));
         }
         if (from != null && !from.isBlank()) {
             String l = like(from);

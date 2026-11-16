@@ -129,7 +129,9 @@ public class MessageController {
             }
         }
         int n = Math.max(1, Math.min(100, limit));
-        List<MessageRepo.Row> rows = messages.list(userId, f, l, accountId, search, cAt, cId, n);
+        // Searching All mail looks through everything kept, like Gmail: Inbox, Sent and Archive (not Trash or Spam).
+        List<String> where = "INBOX".equals(f) && l == null && search.hasWords() ? ServerSearch.ALL_MAIL : List.of(f);
+        List<MessageRepo.Row> rows = messages.list(userId, where, l, accountId, search, cAt, cId, n);
         String next = null;
         if (rows.size() == n) {
             MessageRepo.Row last = rows.get(rows.size() - 1);

@@ -40,6 +40,27 @@ public class MessageRepo {
             this(accountId, folder, uid, messageId, threadKey, fromName, fromEmail, to, cc, subject, snippet, bodyText, bodyHtml,
                     attachments, receivedAt, seen, flagged, lane, laneSource, listUnsubscribe, listUnsubscribePost, null);
         }
+
+        public NewMessage withLane(String newLane, String newSource) {
+            return new NewMessage(accountId, folder, uid, messageId, threadKey, fromName, fromEmail, to, cc, subject, snippet,
+                    bodyText, bodyHtml, attachments, receivedAt, seen, flagged, newLane, newSource, listUnsubscribe,
+                    listUnsubscribePost, calendar);
+        }
+    }
+
+    /** Is this server message (by its UID in that folder) stored here already? */
+    public boolean hasUid(long accountId, String folder, long uid) {
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM messages WHERE account_id = ? AND folder = ? AND uid = ?",
+                Integer.class, accountId, folder, uid);
+        return n != null && n > 0;
+    }
+
+    /** Is a message with this Message-ID stored in any folder of the mailbox? */
+    public boolean hasMessageId(long accountId, String messageId) {
+        if (messageId == null || messageId.isBlank()) return false;
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM messages WHERE account_id = ? AND message_id = ?",
+                Integer.class, accountId, messageId);
+        return n != null && n > 0;
     }
 
     /** A stored row (bodies included only when asked for). */
@@ -249,9 +270,18 @@ public class MessageRepo {
 
     public List<Row> list(long userId, String folder, String lane, Long accountId, MailSearch search,
                           OffsetDateTime cursorAt, Long cursorId, int limit) {
+        return list(userId, List.of(folder), lane, accountId, search, cursorAt, cursorId, limit);
+    }
+
+    /** Several folders at once (searching All mail looks in Inbox, Sent and Archive, like Gmail). */
+    public List<Row> list(long userId, List<String> folders, String lane, Long accountId, MailSearch search,
+                          OffsetDateTime cursorAt, Long cursorId, int limit) {
         StringBuilder sql = new StringBuilder("SELECT " + COLS + " FROM messages m JOIN accounts a ON a.id = m.account_id " +
-                "WHERE a.user_id = ? AND m.folder = ? AND m.snoozed_until IS NULL");
-        List<Object> args = new ArrayList<>(List.of(userId, folder));
+                "WHERE a.user_id = ? AND m.folder IN (" + String.join(",", java.util.Collections.nCopies(folders.size(), "?")) +
+                ") AND m.snoozed_until IS NULL");
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.addAll(folders);
         if (lane != null) {
             sql.append(" AND m.lane = ?");
             args.add(lane);

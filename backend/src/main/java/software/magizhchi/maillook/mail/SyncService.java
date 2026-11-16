@@ -238,6 +238,109 @@ public class SyncService {
         return inserted;
     }
 
+    /**
+     * Mail older than what sync keeps, found on the mail server by a search and brought in so search shows it
+     * (Gmail finds it, so MailLook must too). For each folder, the newest {@code perFolder} matches not kept yet.
+     * Old mail found this way never lands in Needs me and doesn't ring. Returns how many were added.
+     */
+    public int importMatching(Account a, ServerSearch.Query term, Set<String> codes, int perFolder) throws Exception {
+        Store store = null;
+        int added = 0;
+        try {
+            store = imap.connect(a);
+            Set<String> own = new HashSet<>();
+            for (Account mine : accounts.forUser(a.userId())) own.add(mine.email().toLowerCase(Locale.ROOT));
+            Map<String, String> rules = messages.senderRules(a.userId());
+            Map<String, IMAPFolder> folders = new java.util.LinkedHashMap<>();
+            if (codes.contains("INBOX")) folders.put("INBOX", (IMAPFolder) store.getFolder("INBOX"));
+            if (codes.contains("SENT")) {
+                IMAPFolder f = imap.folder(store, a, ImapClient.Role.SENT, false);
+                if (f != null) folders.put("SENT", f);
+            }
+            if (codes.contains("ARCHIVE")) {
+                IMAPFolder f = imap.folder(store, a, ImapClient.Role.ARCHIVE, false);
+                if (f != null) folders.put("ARCHIVE", f);
+            }
+            List<Long> inbox = new ArrayList<>();
+            for (Map.Entry<String, IMAPFolder> e : folders.entrySet()) {
+                try {
+                    added += importFrom(a, e.getValue(), e.getKey(), term, own, rules, perFolder, inbox);
+                } catch (Exception ex) {
+                    log.info("Server search in {} of {} failed: {}", e.getKey(), a.email(), ex.toString());
+                }
+            }
+            // Their own rules still file it (School, Payments…).
+            sorting.applyNew(a.userId(), inbox);
+        } finally {
+            ImapClient.closeQuietly(store);
+        }
+        return added;
+    }
+
+    private int importFrom(Account a, IMAPFolder folder, String code, ServerSearch.Query query, Set<String> own,
+                           Map<String, String> rules, int perFolder, List<Long> inbox) throws MessagingException {
+        // Gmail's All Mail holds every message again: only what isn't kept in any folder yet is new.
+        boolean allMail = ImapClient.isAllMail(folder);
+        folder.open(Folder.READ_ONLY);
+        try {
+            // Each group must match; within a group, any of its simple searches.
+            java.util.TreeSet<Integer> hits = null;
+            for (List<jakarta.mail.search.SearchTerm> group : query.groups()) {
+                java.util.TreeSet<Integer> any = new java.util.TreeSet<>();
+                for (jakarta.mail.search.SearchTerm t : group) {
+                    for (Message m : folder.search(query.limited(t))) any.add(m.getMessageNumber());
+                }
+                if (hits == null) hits = any;
+                else hits.retainAll(any);
+                if (hits.isEmpty()) return 0;
+            }
+            if (hits == null || hits.isEmpty()) return 0;
+            List<Message> found = new ArrayList<>();
+            for (Integer n : hits.descendingSet()) found.add(folder.getMessage(n));   // newest first
+            Message[] scan = found.size() > 2000 ? found.subList(0, 2000).toArray(new Message[0]) : found.toArray(new Message[0]);
+            FetchProfile ids = new FetchProfile();
+            ids.add(UIDFolder.FetchProfileItem.UID);
+            folder.fetch(scan, ids);
+            List<Message> pick = new ArrayList<>();
+            for (Message m : scan) {
+                if (pick.size() >= perFolder) break;
+                if (!messages.hasUid(a.id(), code, folder.getUID(m))) pick.add(m);
+            }
+            if (pick.isEmpty()) return 0;
+            Message[] batch = pick.toArray(new Message[0]);
+            FetchProfile fp = new FetchProfile();
+            fp.add(FetchProfile.Item.ENVELOPE);
+            fp.add(FetchProfile.Item.FLAGS);
+            for (String h : new String[]{"Message-ID", "In-Reply-To", "References", "List-Unsubscribe",
+                    "List-Unsubscribe-Post", "List-Id", "Precedence", "Auto-Submitted"}) {
+                fp.add(h);
+            }
+            folder.fetch(batch, fp);
+            int added = 0;
+            for (Message m : batch) {
+                long uid = folder.getUID(m);
+                try {
+                    if (allMail && messages.hasMessageId(a.id(), trimId(MessageParser.header(m, "Message-ID")))) continue;
+                    MessageRepo.NewMessage row = toRow(a, m, uid, code, own, rules);
+                    if ("INBOX".equals(code) && !"rule".equals(row.laneSource())) {
+                        String lane = LaneClassifier.NEEDS_ME.equals(row.lane()) ? LaneClassifier.FYI : row.lane();
+                        row = row.withLane(lane, "search");
+                    }
+                    Long id = messages.insert(row);
+                    if (id != null) {
+                        added++;
+                        if ("INBOX".equals(code)) inbox.add(id);
+                    }
+                } catch (Exception e) {
+                    log.info("Skipping found message uid {} in {} of {}: {}", uid, code, a.email(), e.toString());
+                }
+            }
+            return added;
+        } finally {
+            ImapClient.closeQuietly(folder, false);
+        }
+    }
+
     /** Pick up read/flag changes and removals made in other mail apps, for the newest messages. */
     private void reconcileFlags(Account a, IMAPFolder folder, String code, int count) throws MessagingException {
         Message[] window = folder.getMessages(Math.max(1, count - FLAG_WINDOW + 1), count);
