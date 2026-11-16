@@ -9,7 +9,7 @@
     "sync": "cap sync android",
     "open": "cap open android",
     "apk": "cd android && gradlew.bat assembleDebug",
-    "icons": "node -e \"require('fs').mkdirSync('assets',{recursive:true});require('fs').copyFileSync('../docs/brand/maillook-mark-4k.png','assets/logo.png')\" && capacitor-assets generate --android --iconBackgroundColor #fbf8f2 --iconBackgroundColorDark #0e1a1d --splashBackgroundColor #fbf8f2 --splashBackgroundColorDark #0e1a1d --logoSplashScale 0.25"
+    "icons": "node -e \"require('fs').mkdirSync('assets',{recursive:true});require('fs').copyFileSync('../docs/brand/maillook-icon-1024.png','assets/logo.png')\" && capacitor-assets generate --android --iconBackgroundColor #fbf8f2 --iconBackgroundColorDark #0e1a1d --splashBackgroundColor #fbf8f2 --splashBackgroundColorDark #0e1a1d --logoSplashScale 0.25"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
