@@ -20,6 +20,7 @@ import Forms from './pages/Forms.jsx'
 import { DesktopBridge } from './desktop.js'
 import AlertsPrompt from './components/AlertsPrompt.jsx'
 import { NativeBridge } from './native.js'
+import UpdateCheck from './components/UpdateCheck.jsx'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -53,6 +54,7 @@ function Shell() {
       <DesktopBridge />
       <AlertsPrompt />
       <NativeBridge />
+      <UpdateCheck writing={!!composer} />
     </div>
   )
 }
