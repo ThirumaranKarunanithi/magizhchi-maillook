@@ -107,8 +107,21 @@ SPRING_FLYWAY_DEFAULT_SCHEMA=maillook
 Never "fix" Flyway's *non-empty schema* error with `baselineOnMigrate`: MailLook would then change the other app's tables.
 Then add the custom domain `maillookback.magizhchi.software` and its DNS record.
 
-**Web app on Hostinger.** `cd frontend && npm run build` (uses `.env.production`), then upload the
-**whole** `dist` folder to `maillook.magizhchi.software`, including the hidden `.htaccess`.
+**Web app on Hostinger, one command.** `scripts/release.mjs` builds the site and uploads it over FTP with TLS,
+like Magizhchi PA. Once: `cd scripts && npm install` (basic-ftp 6.2.4), and put `HOSTINGER_FTP_USER` and
+`HOSTINGER_FTP_PASSWORD` in `C:\Users\<you>\.magizhchi\hostinger-ftp.env` (see `.release.env.example`; never in a repo).
+```bash
+node scripts/release.mjs find                      # read only: proves /public_html/maillook/ is the live site
+node scripts/release.mjs site --dry-run            # build, make the zip, list what would go up
+node scripts/release.mjs site                      # build, zip, upload (new assets, other files, .htaccess and index.html last)
+node scripts/release.mjs downloads                 # APK + Windows installer (when changed), latest.yml, then latest.json
+```
+It refuses to upload unless the folder already has an `index.html` that loads what the live site loads, and checks
+the live site (and the downloads' sizes and the APK's sha256) afterwards. In Git Bash, prefix with
+`MSYS_NO_PATHCONV=1` when setting `HOSTINGER_FTP_DIR`.
+
+**By hand** still works: the same command (or `cd frontend && npm run build`) leaves `maillook-web-upload.zip`;
+upload it in hPanel's File Manager to the `maillook` folder and extract it there. It includes the hidden `.htaccess`.
 
 **Magizhchi ID.** Set `VITE_APP_URL_MAILLOOK=https://maillook.magizhchi.software` in ID's
 `frontend/.env.production` and redeploy ID. Until then ID won't send people back to MailLook.

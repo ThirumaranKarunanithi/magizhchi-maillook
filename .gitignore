@@ -6,3 +6,10 @@ dist/
 # Local H2 database, wherever the API was started from
 data/
 **/data/*.mv.db
+
+# Release script: its packages and what it writes; upload zips; the login never lives in a repo
+scripts/node_modules/
+scripts/out/
+.release.env
+maillook-web-upload.zip
+frontend/maillook-web-upload.zip

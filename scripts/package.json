@@ -1,0 +1,12 @@
+{
+  "name": "magizhchi-maillook-release",
+  "private": true,
+  "type": "module",
+  "description": "Builds the MailLook website and uploads it and the app downloads to Hostinger",
+  "scripts": {
+    "release": "node release.mjs"
+  },
+  "dependencies": {
+    "basic-ftp": "6.2.4"
+  }
+}
