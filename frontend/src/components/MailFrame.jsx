@@ -53,8 +53,36 @@ export function tidyLinks(doc) {
   }
 }
 
+/**
+ * What's in a letter for browsers that run scripts or not. Scripts never run here, so a <noscript> notice
+ * ("You need to enable JavaScript to run this app.") would show over the real letter; mail apps drop it.
+ */
+export function dropNoscript(html) {
+  return String(html || '').replace(/<noscript\b[\s\S]*?<\/noscript\s*>/gi, '')
+}
+
+const rgb = (c) => (/rgba?\(([^)]+)\)/.exec(c || '')?.[1] || '').split(',').map((n) => parseFloat(n))
+
+/**
+ * Keep a letter's own background. Our page style would otherwise beat <body bgcolor> (a CSS rule wins over the
+ * old attribute) and leave light text on our light paper, unreadable. Light text with nothing behind it gets dark.
+ */
+export function keepBackground(doc) {
+  const body = doc?.body
+  if (!body) return
+  const bg = body.getAttribute('bgcolor')
+  if (bg && !body.style.backgroundColor) body.style.backgroundColor = bg
+  const cs = doc.defaultView?.getComputedStyle(body)
+  if (!cs) return
+  const back = rgb(cs.backgroundColor)
+  const ink = rgb(cs.color)
+  const clear = back.length < 3 || back[3] === 0
+  const light = ink.length >= 3 && (0.299 * ink[0] + 0.587 * ink[1] + 0.114 * ink[2]) > 186
+  if (clear && light) body.style.backgroundColor = '#1c1b22'
+}
+
 export function buildSrcDoc(html) {
-  const src = String(html || '')
+  const src = dropNoscript(html)
   if (/<head[^>]*>/i.test(src)) return src.replace(/<head[^>]*>/i, (m) => m + INJECT)
   if (/<html[^>]*>/i.test(src)) return src.replace(/<html[^>]*>/i, (m) => `${m}<head>${INJECT}</head>`)
   return `<!doctype html><html><head>${INJECT}</head><body>${src}</body></html>`
@@ -76,6 +104,8 @@ export default function MailFrame({ html, title = 'Message body' }) {
     }
     function onLoad() {
       try {
+        frame.contentDocument?.querySelectorAll('noscript').forEach((n) => n.remove())
+        keepBackground(frame.contentDocument)
         tidyLinks(frame.contentDocument)
       } catch {
         // an odd letter never stops it from showing

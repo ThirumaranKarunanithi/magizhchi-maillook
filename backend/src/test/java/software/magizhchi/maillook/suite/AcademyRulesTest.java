@@ -28,6 +28,16 @@ class AcademyRulesTest {
     }
 
     @Test
+    void onlyStatusReportsMakeADigest() {
+        for (String s : new String[]{"Daily report – 5 Nov", "Sprint 14 status update", "Standup notes, Mon 2 Nov",
+                "EOD - Priya", "Weekly progress", "Timesheet week 45"})
+            assertThat(DigestController.REPORT.matcher(DigestController.stem(s)).find()).as(s).isTrue();
+        for (String s : new String[]{"Reminder: Confirm your $219.75 payment to Railway Corporation",
+                "You need to verify your identity", "Your invoice for November", "Resource Creation Paused"})
+            assertThat(DigestController.REPORT.matcher(DigestController.stem(s)).find()).as(s).isFalse();
+    }
+
+    @Test
     void picksTheStandupRoomThatSharesAWord() {
         List<Map<String, Object>> rooms = List.of(Map.of("id", "a", "name", "Payments standup"), Map.of("id", "b", "name", "Mobile scrum"));
         assertThat(DigestController.guessRoom(rooms, "Mobile team daily report")).isEqualTo("b");

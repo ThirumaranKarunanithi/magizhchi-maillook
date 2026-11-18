@@ -190,10 +190,26 @@ public class DigestController {
     /** Mail in the same mailbox, in the last {@code days}, whose subject is this one's with dates and numbers taken out. */
     List<MessageRepo.Row> series(MessageRepo.Row msg, int days) {
         String key = stem(msg.subject());
-        if (key.length() < 4) return List.of();
+        // A team's status report, written by a person: not every repeating subject (a payment reminder, an alert).
+        if (key.length() < 4 || !REPORT.matcher(key).find() || !byPerson(msg)) return List.of();
         return messages.recent(msg.accountId(), OffsetDateTime.now(ZoneOffset.UTC).minusDays(days), 400).stream()
-                .filter(r -> key.equals(stem(r.subject())))
+                .filter(r -> key.equals(stem(r.subject())) && byPerson(r))
                 .toList();
+    }
+
+    /** Words a status report's subject has (in its stem: lower case, no dates or numbers). */
+    static final Pattern REPORT = Pattern.compile(
+            "\\b(reports?|status|stand ?ups?|scrum|eod|sod|progress|sprint|timesheets?|work ?log|daily log|weekly log|" +
+            "work done|work update|daily update|weekly update|task update|updates? for|huddle)\\b");
+    private static final Pattern AUTOMATED = Pattern.compile(
+            "^(no-?reply|noreply|do-?not-?reply|donotreply|notifications?|notify|alerts?|mailer-daemon|postmaster|bounces?|" +
+            "billing|invoices?|payments?|receipts?|support|hello|info|team|news|newsletters?|marketing|system|automated)([.+_-].*)?@");
+
+    /** Written by someone, not sent by a service: no unsubscribe link, not a no-reply or billing address. */
+    static boolean byPerson(MessageRepo.Row m) {
+        if (m.listUnsubscribe() != null && !m.listUnsubscribe().isBlank()) return false;
+        String from = m.fromEmail() == null ? "" : m.fromEmail().toLowerCase(Locale.ROOT);
+        return !from.isEmpty() && !AUTOMATED.matcher(from).find();
     }
 
     private static final Pattern PREFIX = Pattern.compile("^((re|fwd?|fw|aw|wg)\\s*:\\s*)+");
