@@ -60,6 +60,10 @@ public class SyncService {
 
     private final Sorting sorting;
 
+    /** maillook.mail.received on the suite's events bus. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private software.magizhchi.maillook.suite.MailBusEvents bus;
+
     public SyncService(AccountRepo accounts, MessageRepo messages, ImapClient imap, AiService ai, FolderCursors cursors,
                        software.magizhchi.maillook.notify.MailAlerts alerts,
                        @Value("${maillook.sync.initial-inbox}") int initialInbox,
@@ -128,6 +132,8 @@ public class SyncService {
                 } catch (Exception e) {
                     log.debug("Alerts failed: {}", e.toString());
                 }
+                // And tell PA (maillook.mail.received), whatever the person's alert setting is.
+                if (bus != null) bus.received(a.userId(), newInbox);
             }
             // New mail plus anything an earlier AI pass missed (newest first; AI marks what it checked).
             List<Long> unchecked = messages.awaitingAiLane(a.id(), 100);

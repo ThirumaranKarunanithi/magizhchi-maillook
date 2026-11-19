@@ -19,7 +19,7 @@ import java.util.Optional;
  * Verifies the token a person brings back from the ID sign-in page, and signs short
  * ones for that same person to sign in to other suite apps (Magizhchi PA).
  */
-@Component
+@Component("mailLookSuiteTokens")   // the suite library has its own "suiteTokens" bean
 public class SuiteTokens {
 
     public static final String ISSUER = "magizhchi-id";

@@ -22,7 +22,7 @@ import java.util.Set;
  * is not valid as a normal sign-in token and a token minted for another product is rejected.
  * See Magizhchi PA's docs/Suite-Brain-Protocol.md.
  */
-@Component
+@Component("mailLookDelegationVerifier")   // the suite library has its own "suiteDelegationVerifier" bean
 public class SuiteDelegationVerifier {
 
     public static final String AUDIENCE = "Magizhchi MailLook";

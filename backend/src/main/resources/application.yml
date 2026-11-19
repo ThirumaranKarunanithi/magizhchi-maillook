@@ -67,6 +67,11 @@ magizhchi:
   # Optional: report sign-ins to Magizhchi ID so Mail shows under "connected apps".
   base-url: ${MAGIZHCHI_ID_BASE_URL:}
   provision-secret: ${MAGIZHCHI_PROVISION_SECRET:}
+  # The suite library (events bus): MailLook publishes maillook.mail.received to PA; the PA secret is provision-secret.
+  suite:
+    app-id: maillook
+  pa:
+    url: ${MAGIZHCHI_PA_URL:https://paback.magizhchi.software}
   apps:
     pa:
       # Magizhchi PA's API. Mail signs in there as the same person (suite SSO) for AI,

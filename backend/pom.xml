@@ -21,6 +21,13 @@
         <java.version>17</java.version>
     </properties>
 
+    <repositories>
+        <repository>
+            <id>magizhchi-suite</id>
+            <url>${project.baseUri}suite-repo</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -38,6 +45,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
+        <!-- Magizhchi suite library: events bus (maillook.mail.received) -->
+        <dependency>
+            <groupId>software.magizhchi</groupId>
+            <artifactId>magizhchi-suite-starter</artifactId>
+            <version>1.2.0</version>
         </dependency>
 
         <!-- Magizhchi ID suite tokens (shared-secret HS256, same as Forms/CRM/PA) -->
