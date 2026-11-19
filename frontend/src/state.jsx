@@ -19,6 +19,7 @@ export function useLanes() {
 }
 
 const COUNTS_POLL_MS = 60_000
+const NEW_MAIL_POLL_MS = 15_000 // while MailLook is on screen
 const AI_RECHECK_MS = 120_000
 
 export function MailProvider({ children }) {
@@ -32,6 +33,7 @@ export function MailProvider({ children }) {
   const [composer, setComposer] = useState(null) // { mode, message?, draftBody? } or null
   const [menuOpen, setMenuOpen] = useState(false)
   const [mailEpoch, setMailEpoch] = useState(0) // bump to make the list reload
+  const [mailFresh, setMailFresh] = useState(0) // new mail came in: the list reloads quietly
   const [toast, setToast] = useState(null)
   const [drafts, setDrafts] = useState([]) // unsent mail, newest first
   const [folders, setFolders] = useState(null) // per mailbox: { accountId, email, folders: [{ code, name, path, opened }], error? }
@@ -111,6 +113,39 @@ export function MailProvider({ children }) {
     const t = setInterval(refreshCounts, COUNTS_POLL_MS)
     return () => clearInterval(t)
   }, [refreshAccounts, refreshCounts, refreshDrafts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // New mail shows by itself: the server learns of it within seconds (it watches each Inbox), and while MailLook
+  // is on screen it asks every few seconds whether anything newer came in, then reloads the list and the counts.
+  const latestSeen = useRef(null)
+  useEffect(() => {
+    let busy = false
+    const look = async () => {
+      if (busy || document.visibilityState !== 'visible') return
+      busy = true
+      try {
+        const { latest } = await get('/api/messages/latest')
+        if (latestSeen.current != null && latest > latestSeen.current) {
+          setMailFresh((n) => n + 1)
+          refreshCounts()
+        }
+        latestSeen.current = latest
+      } catch {
+        // offline for a moment: the next look catches up
+      } finally {
+        busy = false
+      }
+    }
+    const t = setInterval(look, NEW_MAIL_POLL_MS)
+    const onShow = () => { if (document.visibilityState === 'visible') look() }
+    document.addEventListener('visibilitychange', onShow)
+    window.addEventListener('focus', look)
+    look()
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onShow)
+      window.removeEventListener('focus', look)
+    }
+  }, [refreshCounts])
 
   // AI off may only mean PA was waking up when the app opened: look again every two minutes and when the
   // window comes back, so suggestions appear without restarting the app.
@@ -192,7 +227,7 @@ export function MailProvider({ children }) {
     drafts, refreshDrafts,
     folders, refreshFolders, openFolder,
     menuOpen, setMenuOpen,
-    mailEpoch, bumpMail,
+    mailEpoch, bumpMail, mailFresh,
     toast, notify, dismissToast, undoSend,
   }
   return <MailCtx.Provider value={value}>{children}</MailCtx.Provider>

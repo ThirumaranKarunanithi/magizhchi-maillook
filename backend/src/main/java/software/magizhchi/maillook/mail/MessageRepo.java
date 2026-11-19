@@ -512,6 +512,13 @@ public class MessageRepo {
         return out;
     }
 
+    /** The newest mail this person has (its id only grows): a cheap way for an open app to see that mail came in. */
+    public long latestId(long userId) {
+        Long id = jdbc.queryForObject("SELECT MAX(m.id) FROM messages m JOIN accounts a ON a.id = m.account_id WHERE a.user_id = ?",
+                Long.class, userId);
+        return id == null ? 0 : id;
+    }
+
     public Map<Long, Long> unreadByAccount(long userId) {
         Map<Long, Long> out = new LinkedHashMap<>();
         jdbc.query("SELECT m.account_id, SUM(CASE WHEN m.seen THEN 0 ELSE 1 END) FROM messages m JOIN accounts a ON a.id = m.account_id " +

@@ -127,7 +127,7 @@ export default function Mail() {
   const folderCode = params.get('view') === 'folder' && params.get('f')?.startsWith('F:') ? params.get('f') : null
   const sectionLane = /^s\d+$/.test(params.get('view') || '') ? params.get('view') : null
   const view = folderCode ? 'folder' : sectionLane ? 'section' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
-  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled, counts, bumpMail } = useMail()
+  const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, mailFresh, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled, counts, bumpMail } = useMail()
   const navigate = useNavigate()
   const section = sectionLane ? (counts?.sections || []).find((x) => x.lane === sectionLane) || SECTIONS[sectionLane] : null
   const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode }
@@ -238,6 +238,11 @@ export default function Mail() {
   useEffect(() => {
     load()
   }, [load, mailEpoch])
+
+  // New mail came in: the list takes it in quietly (no spinner, the open mail stays open).
+  useEffect(() => {
+    if (mailFresh) load({ silent: true })
+  }, [mailFresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // MailLook keeps the newest few hundred mails; a search also asks the mail server itself for older matches
   // (as Gmail would find them), brings them in and refreshes the list.

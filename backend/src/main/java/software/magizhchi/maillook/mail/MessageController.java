@@ -190,6 +190,12 @@ public class MessageController {
         }
     }
 
+    /** Polled often by an open MailLook: when {@code latest} grows, new mail has come in and the list reloads. */
+    @GetMapping("/messages/latest")
+    public Map<String, Object> latest(@RequestAttribute long userId) {
+        return Map.of("latest", messages.latestId(userId));
+    }
+
     @GetMapping("/counts")
     public Map<String, Object> counts(@RequestAttribute long userId, @RequestParam(required = false) Long accountId) {
         Map<String, long[]> lanes = messages.laneCounts(userId, accountId);
