@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "990026099354",
+    "project_id": "magizhchi-meet-94382",
+    "storage_bucket": "magizhchi-meet-94382.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:990026099354:android:9c293d98aa881e9cae0d23",
+        "android_client_info": {
+          "package_name": "software.magizhchi.maillook"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4t0mFocKiNA9MHJnAM2YDhInRbb46mwI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
