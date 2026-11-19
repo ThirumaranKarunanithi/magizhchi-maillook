@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { PA_DONE, PA_SEARCH, setScreen } from '../pabus.js'
 import { del, get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
@@ -11,7 +11,7 @@ import AskCard from '../components/AskCard.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import { folderLabel } from '../components/MoveMenu.jsx'
 import { whenLabel } from '../when.js'
-import { IconArchive, IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconSparkle, IconTrash, IconX } from '../components/Icons.jsx'
+import { IconAlert, IconArchive, IconCheck, IconCompose, IconDraft, IconFlag, IconMenu, IconPaperclip, IconRefresh, IconSearch, IconSparkle, IconTrash, IconX } from '../components/Icons.jsx'
 
 const PAGE = 50
 /** Moving more than this many at once asks first. */
@@ -128,6 +128,7 @@ export default function Mail() {
   const sectionLane = /^s\d+$/.test(params.get('view') || '') ? params.get('view') : null
   const view = folderCode ? 'folder' : sectionLane ? 'section' : VIEWS[params.get('view')] ? params.get('view') : 'needs_me'
   const { accounts, accountId, refreshCounts, refreshAccounts, mailEpoch, notify, setMenuOpen, openComposer, drafts, refreshDrafts, aiEnabled, counts, bumpMail } = useMail()
+  const navigate = useNavigate()
   const section = sectionLane ? (counts?.sections || []).find((x) => x.lane === sectionLane) || SECTIONS[sectionLane] : null
   const cfg = folderCode ? { title: params.get('name') || folderLabel(folderCode), lane: 'all', folder: folderCode }
     : sectionLane ? { title: section ? `${section.icon} ${section.name}` : 'Section', lane: sectionLane, folder: 'INBOX' }
@@ -676,6 +677,9 @@ export default function Mail() {
   }
 
   const account = accountId != null ? accounts.find((a) => a.id === accountId) : null
+  // A mailbox MailLook can't get into (a changed or revoked password) says so where mail should be arriving,
+  // not only as a small mark in the sidebar.
+  const stuck = accounts.filter((a) => a.status === 'error' && a.lastError && (accountId == null || a.id === accountId))
 
   return (
     <div className="flex min-h-0 flex-1 gap-2.5">
@@ -792,6 +796,17 @@ export default function Mail() {
             onAll={() => setPickAll(true)} onShown={() => setPickAll(false)} />
         )}
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto max-md:pb-24">
+          {stuck.map((a) => (
+            <div key={a.id} role="alert" className="mx-3 mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              <p className="flex items-start gap-1.5 font-semibold">
+                <IconAlert size={14} className="mt-px shrink-0" /> New mail isn't coming in for {a.email}
+              </p>
+              <p className="mt-0.5 text-red-700">{a.lastError}</p>
+              <button type="button" className="mt-1.5 font-semibold text-red-800 underline" onClick={() => navigate('/accounts')}>
+                Fix it in Manage accounts
+              </button>
+            </div>
+          ))}
           {asked && (
             <AskCard question={asked.q} state={asked} items={asked.result?.items} onOpen={setSelectedId}
               onClose={() => setAsked(null)} onRetry={() => askAi(asked.q)} />
