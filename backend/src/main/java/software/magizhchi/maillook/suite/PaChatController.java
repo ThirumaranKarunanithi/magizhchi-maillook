@@ -72,6 +72,18 @@ public class PaChatController {
         this.jdbc = jdbc;
     }
 
+    private Colleagues colleagues;
+
+    /** "HR", "the manager": colleagues by their Magizhchi ID designation. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setColleagues(Colleagues colleagues) {
+        this.colleagues = colleagues;
+    }
+
+    private Colleagues.Found colleagues(long userId, String ask) {
+        return colleagues == null ? new Colleagues.Found(List.of(), null) : colleagues.find(userId, ask);
+    }
+
     @PostMapping("/chat")
     public Map<String, Object> chat(@RequestAttribute long userId, @RequestBody ChatRequest req) {
         String message = req.message() == null ? "" : req.message().trim();
@@ -206,9 +218,32 @@ public class PaChatController {
             case "rule" -> {
                 try {
                     List<String> forward = new ArrayList<>();
-                    for (JsonNode f : a.path("forwardTo")) if (f.isTextual() && !f.asText().isBlank()) forward.add(f.asText().trim());
-                    // A forward sends mail by itself, so only to addresses already in their mail (a misheard name never gets it).
-                    List<String> unseen = forward.stream().filter(e -> !seenAddress(userId, e)).toList();
+                    Set<String> team = new java.util.HashSet<>();
+                    for (JsonNode f : a.path("forwardTo")) {
+                        if (!f.isTextual() || f.asText().isBlank()) continue;
+                        String entry = f.asText().trim();
+                        if (EMAIL.matcher(entry).matches()) {
+                            forward.add(entry);
+                            continue;
+                        }
+                        // A role ("HR", "the manager"): the colleagues who hold that designation in Magizhchi ID.
+                        Colleagues.Found who = colleagues(userId, entry);
+                        if (!who.any()) {
+                            notes.add(who.problem() != null ? who.problem() + " Tell me the address instead."
+                                    : "I couldn't find who your " + entry + " is. The owner can set each person's designation in "
+                                    + "Magizhchi ID, Organisations, or tell me the address.");
+                            return null;
+                        }
+                        for (String e : who.emails()) {
+                            if (!forward.contains(e)) forward.add(e);
+                            team.add(e.toLowerCase(Locale.ROOT));
+                        }
+                        notes.add("Your " + entry + ": " + who.who() + ".");
+                    }
+                    // A forward sends mail by itself, so only to addresses already in their mail (a misheard name never gets it)
+                    // or to colleagues found by their designation.
+                    List<String> unseen = forward.stream()
+                            .filter(e -> !team.contains(e.toLowerCase(Locale.ROOT)) && !seenAddress(userId, e)).toList();
                     if (!unseen.isEmpty()) {
                         notes.add("I haven't seen " + String.join(", ", unseen) + " in your mail, so I didn't set up the forward. "
                                 + "Check the address, or add it yourself under Automations.");
@@ -369,11 +404,21 @@ public class PaChatController {
                 out.add(s);
                 continue;
             }
+            // "HR", "the manager": a clear designation match among their colleagues comes first.
+            Colleagues.Found team = colleagues(userId, s);
+            if (team.exact()) {
+                for (String e : team.emails()) if (!out.contains(e)) out.add(e);
+                notes.add("Your " + s + ": " + team.who() + ".");
+                continue;
+            }
             Object items = contacts.suggest(userId, s, null, null, 1).get("items");
             String email = items instanceof List<?> l && !l.isEmpty() && l.get(0) instanceof Map<?, ?> first && first.get("email") != null
                     ? first.get("email").toString() : null;
             if (email != null) out.add(email);
-            else notes.add("I don't know " + s + "'s address, so add it in To.");
+            else if (team.any()) {
+                for (String e : team.emails()) if (!out.contains(e)) out.add(e);
+                notes.add("Your " + s + ": " + team.who() + ".");
+            } else notes.add("I don't know " + s + "'s address, so add it in To.");
         }
         return out;
     }
@@ -528,10 +573,12 @@ public class PaChatController {
                   does and how many mails it moved. The person can change it under Automations.
                 - "go to <their section>" = {"type":"go","to":"<section name>"}; moving one mail there = act "lane" with "lane":"<section name>".
                 - "forward/redirect/send all <kind of> mail to X from now on": a rule with forwardTo (add it to the automation that
-                  already files that mail, by ruleId). forwardTo takes email addresses only. When they name people or roles
-                  ("HR", "the manager", a name), use an address only if the mails here show it clearly (e.g. "HR" and
-                  hr@company.com in the open mail); otherwise ask for the address in "say", with no actions. Say plainly in
-                  "say" that new mail of that kind will now be forwarded by itself, and to whom.
+                  already files that mail, by ruleId). forwardTo takes email addresses or roles. For a role or job title
+                  ("HR", "the manager", "accountant", "MD"), put the role word itself in forwardTo (and likewise in "to" for
+                  compose and forward): MailLook finds the colleague who holds that designation in Magizhchi ID and tells
+                  the person who it is. For a person's name, use an address only if the mails here show it clearly;
+                  otherwise ask for the address in "say", with no actions. Say plainly in "say" that new mail of that kind
+                  will now be forwarded by itself.
                 """.formatted(now.toLocalDate(), now.toLocalTime(), now.getDayOfWeek(), String.join(" ", Sorting.ICONS));
     }
 
