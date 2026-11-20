@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import software.magizhchi.maillook.auth.SessionTokens;
 import software.magizhchi.suite.SuiteException;
 import software.magizhchi.suite.calls.SuiteCalls;
+import software.magizhchi.suite.chat.SuiteChat;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -43,6 +44,7 @@ class CallBarTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired SessionTokens sessions;
     @MockBean SuiteCalls calls;
+    @MockBean SuiteChat chat;
 
     @Test
     void handsTheSignedInPersonTheirOwnPass() throws Exception {
@@ -92,5 +94,67 @@ class CallBarTest {
                 .header("Authorization", "Bearer " + sessions.issue(userId))).andReturn().getResponse();
         assertThat(res.getStatus()).isEqualTo(409);
         verify(calls, never()).ringPass(any(), any(), any(), any());
+    }
+
+    /** The Magizhchi bar: the person's own chat pass (Box) and ring pass (Meet); chat survives Meet refusing. */
+    @Test
+    void barPassHandsBothOwnPasses() throws Exception {
+        reset(calls, chat);
+        String token = json.readTree(mvc.perform(post("/api/auth/sso").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idToken\":\"" + TestIds.idToken(ACCOUNT_ID, "caller@magizhchi.test", "Caller") + "\"}"))
+                .andReturn().getResponse().getContentAsString()).path("token").asText();
+        Map<String, Object> chatRaw = new LinkedHashMap<>();
+        chatRaw.put("pass", "c-1");
+        chatRaw.put("expiresAt", "2026-11-21T01:00:00Z");
+        Map<String, Object> ringRaw = new LinkedHashMap<>();
+        ringRaw.put("pass", "r-1");
+        when(chat.configured()).thenReturn(true);
+        when(chat.chatPass(ACCOUNT_ID, "caller@magizhchi.test", "Caller"))
+                .thenReturn(new SuiteChat.ChatPass("c-1", "2026-11-21T01:00:00Z", chatRaw));
+        when(calls.configured()).thenReturn(true);
+        when(calls.ringPass(ACCOUNT_ID, "caller@magizhchi.test", "Caller", "d-1"))
+                .thenReturn(new SuiteCalls.RingPass("r-1", null, ringRaw));
+
+        var res = mvc.perform(get("/api/calls/bar-pass").param("device", "d-1").param("client", "web")
+                .header("Authorization", "Bearer " + token)).andReturn().getResponse();
+        assertThat(res.getStatus()).isEqualTo(200);
+        JsonNode body = json.readTree(res.getContentAsString());
+        assertThat(body.path("chat").path("pass").asText()).isEqualTo("c-1");
+        assertThat(body.path("ring").path("pass").asText()).isEqualTo("r-1");
+
+        // Meet refuses: chat still comes, ring is null.
+        when(calls.ringPass(any(), any(), any(), any())).thenThrow(new SuiteException(503, "meet_down", "Down."));
+        body = json.readTree(mvc.perform(get("/api/calls/bar-pass").header("Authorization", "Bearer " + token))
+                .andReturn().getResponse().getContentAsString());
+        assertThat(body.path("chat").path("pass").asText()).isEqualTo("c-1");
+        assertThat(body.path("ring").isNull()).isTrue();
+
+        // Box refuses: its status, except a 401 (the page would sign out) which becomes 502.
+        when(chat.chatPass(any(), any(), any())).thenThrow(new SuiteException(403, "box_403", "Not active."));
+        assertThat(mvc.perform(get("/api/calls/bar-pass").header("Authorization", "Bearer " + token))
+                .andReturn().getResponse().getStatus()).isEqualTo(403);
+        reset(chat);
+        when(chat.configured()).thenReturn(true);
+        when(chat.chatPass(any(), any(), any())).thenThrow(new SuiteException(401, "box_401", "No."));
+        assertThat(mvc.perform(get("/api/calls/bar-pass").header("Authorization", "Bearer " + token))
+                .andReturn().getResponse().getStatus()).isEqualTo(502);
+
+        // Chat not set up: 503. Signed out: 401.
+        when(chat.configured()).thenReturn(false);
+        assertThat(mvc.perform(get("/api/calls/bar-pass").header("Authorization", "Bearer " + token))
+                .andReturn().getResponse().getStatus()).isEqualTo(503);
+        assertThat(mvc.perform(get("/api/calls/bar-pass")).andReturn().getResponse().getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void barPassNeedsMagizhchiIdAccount() throws Exception {
+        reset(chat);
+        when(chat.configured()).thenReturn(true);
+        jdbc.update("INSERT INTO users (email, name) VALUES (?, ?)", "old-bar@magizhchi.test", "Old");
+        long userId = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, "old-bar@magizhchi.test");
+        var res = mvc.perform(get("/api/calls/bar-pass").header("Authorization", "Bearer " + sessions.issue(userId)))
+                .andReturn().getResponse();
+        assertThat(res.getStatus()).isEqualTo(409);
+        verify(chat, never()).chatPass(any(), any(), any());
     }
 }

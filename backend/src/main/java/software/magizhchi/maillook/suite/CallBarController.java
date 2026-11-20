@@ -9,7 +9,9 @@ import org.springframework.web.bind.annotation.RestController;
 import software.magizhchi.maillook.common.ApiException;
 import software.magizhchi.suite.SuiteException;
 import software.magizhchi.suite.calls.SuiteCalls;
+import software.magizhchi.suite.chat.SuiteChat;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -23,10 +25,47 @@ public class CallBarController {
 
     private final MailLookUsers users;
     private final SuiteCalls calls;
+    private final SuiteChat chat;
 
-    public CallBarController(MailLookUsers users, SuiteCalls calls) {
+    public CallBarController(MailLookUsers users, SuiteCalls calls, SuiteChat chat) {
         this.users = users;
         this.calls = calls;
+        this.chat = chat;
+    }
+
+    /**
+     * The Magizhchi bar ({@code messenger.magizhchi.software/bar/magizhchi-bar.js}): chat through Magizhchi
+     * Messenger (stored in Box chat) and calls through Meet. Both passes, only ever the signed-in person's own:
+     * {@code chat} (Box chat, required) and {@code ring} (Meet; null when calls are off or Meet refuses, so chat
+     * still works). Under /api/calls, not /api/suite: /api/suite/** carries the suite secret, not a session.
+     */
+    @GetMapping("/calls/bar-pass")
+    public Map<String, Object> barPass(@RequestAttribute long userId,
+                                       @RequestParam(value = "device", required = false) String device,
+                                       @RequestParam(value = "client", required = false) String client) {
+        SuiteTokens.Identity me = users.identity(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "Sign in with Magizhchi ID to chat in MailLook."));
+        if (!chat.configured()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Chat isn't set up on this server.");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        try {
+            out.put("chat", chat.chatPass(me.accountId(), me.email(), me.name()).raw());
+        } catch (SuiteException e) {
+            // Never a 401: the page would take it as its own sign-in ending.
+            HttpStatus status = HttpStatus.resolve(e.status());
+            throw new ApiException(status == null || status == HttpStatus.UNAUTHORIZED ? HttpStatus.BAD_GATEWAY : status, e.getMessage());
+        }
+        Map<String, Object> ring = null;
+        if (calls.configured()) {
+            try {
+                ring = calls.ringPass(me.accountId(), me.email(), me.name(), device == null ? null : device.trim()).raw();
+            } catch (SuiteException e) {
+                ring = null;   // calls stay off in the bar; chat carries on
+            }
+        }
+        out.put("ring", ring);
+        return out;
     }
 
     @GetMapping("/calls/ring-pass")

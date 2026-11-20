@@ -51,7 +51,7 @@
         <dependency>
             <groupId>software.magizhchi</groupId>
             <artifactId>magizhchi-suite-starter</artifactId>
-            <version>1.6.0</version>
+            <version>1.7.0</version>
         </dependency>
 
         <!-- Magizhchi ID suite tokens (shared-secret HS256, same as Forms/CRM/PA) -->
