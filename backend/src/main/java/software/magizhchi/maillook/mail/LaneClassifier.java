@@ -26,6 +26,28 @@ public final class LaneClassifier {
 
     private LaneClassifier() {}
 
+    /**
+     * Mail where the owner is only copied (not in To) stays out of Needs me, whatever the AI thinks, unless it
+     * calls the owner by name: "Thirumaran sir, please approve" names thirumarankarunanithi@….
+     */
+    public static String keepCcOutOfNeedsMe(String lane, String accountEmail, Collection<String> to, String text) {
+        if (!NEEDS_ME.equals(lane) || accountEmail == null) return lane;
+        String me = accountEmail.toLowerCase(Locale.ROOT);
+        for (String t : to) if (t != null && t.toLowerCase(Locale.ROOT).contains(me)) return lane;
+        return namesOwner(me, text) ? lane : FYI;
+    }
+
+    /** A word of five letters or more in the text that is part of the owner's address before the @. */
+    static boolean namesOwner(String accountEmail, String text) {
+        int at = accountEmail.indexOf('@');
+        String local = (at > 0 ? accountEmail.substring(0, at) : accountEmail).replaceAll("[^a-z]", "");
+        if (text == null || local.length() < 5) return false;
+        for (String w : text.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+            if (w.length() >= 5 && local.contains(w)) return true;
+        }
+        return false;
+    }
+
     public static boolean isLane(String lane) {
         return NEEDS_ME.equals(lane) || FYI.equals(lane) || CAN_WAIT.equals(lane);
     }

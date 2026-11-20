@@ -96,15 +96,21 @@ public class AiService {
         JsonNode out = llm(userId, """
                 You sort email into three lanes for a busy person.
                 needs_me: a real person (or a client, student, colleague) expects a reply, decision or action from the owner.
-                fyi: worth knowing but no reply needed: receipts, bank/UPI alerts, OTPs, order/shipping updates, calendar notices, CCs, team broadcasts.
+                fyi: worth knowing but no reply needed: receipts, bank/UPI alerts, OTPs, order/shipping updates, calendar notices, team broadcasts,
+                and mail where the owner is only in cc (written to someone else), unless it asks the owner by name.
                 can_wait: newsletters, promotions, offers, marketing, social notifications, digests,
                 and cold outreach: a stranger pitching a service, product, partnership, SEO, design, leads or
                 "I came across your company" mail, even when it is personally addressed and written like a letter.
                 Reply as JSON: {"items":[{"id":<number>,"lane":"needs_me|fyi|can_wait"}]}. Include every id.
                 """, sb.toString(), 0.0, 2000);
+        Map<Long, MessageRepo.Row> byId = new LinkedHashMap<>();
+        for (MessageRepo.Row r : rows) byId.put(r.id(), r);
         for (JsonNode it : out.path("items")) {
             long id = it.path("id").asLong(-1);
             String lane = it.path("lane").asText("");
+            MessageRepo.Row r = byId.get(id);
+            if (r != null) lane = LaneClassifier.keepCcOutOfNeedsMe(lane, r.accountEmail(), r.to(),
+                    nz(r.subject()) + "\n" + nz(r.snippet()));
             if (id > 0 && LaneClassifier.isLane(lane) && ids.contains(id)) {
                 messages.setLane(id, lane, "ai");
             }
