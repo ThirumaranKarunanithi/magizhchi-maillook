@@ -70,6 +70,12 @@ magizhchi:
   # The suite library (events bus): MailLook publishes maillook.mail.received to PA; the PA secret is provision-secret.
   suite:
     app-id: maillook
+    # This app's name as Magizhchi ID and Meet know it (the call bar's ring pass names it).
+    app-name: ${MAGIZHCHI_APP_NAME:Magizhchi MailLook}
+  # Magizhchi Meet, the suite's calling hub: the call bar's ring pass (SuiteCalls) comes from here,
+  # with the provision secret above (the same Meet API as apps.meet.api). Blank turns the call bar off.
+  meet:
+    url: ${MAGIZHCHI_MEET_URL:https://meetback.magizhchi.software}
   pa:
     url: ${MAGIZHCHI_PA_URL:https://paback.magizhchi.software}
   apps:

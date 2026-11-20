@@ -21,6 +21,7 @@ import { DesktopBridge } from './desktop.js'
 import AlertsPrompt from './components/AlertsPrompt.jsx'
 import { NativeBridge } from './native.js'
 import UpdateCheck from './components/UpdateCheck.jsx'
+import CallBar from './components/CallBar.jsx'
 
 function RequireAuth({ children }) {
   const { token } = useAuth()
@@ -55,6 +56,7 @@ function Shell() {
       <AlertsPrompt />
       <NativeBridge />
       <UpdateCheck writing={!!composer} />
+      <CallBar />
     </div>
   )
 }
