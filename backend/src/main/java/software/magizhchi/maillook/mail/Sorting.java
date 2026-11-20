@@ -39,21 +39,37 @@ public class Sorting {
 
     public record Section(long id, String lane, String name, String icon, String color, int position) {}
 
+    /** {@code forwardTo}: addresses each new mail it catches is forwarded to (empty for none). */
     public record Rule(long id, String from, String subject, String to, String words, String lane, boolean markRead,
-                       boolean archive, boolean enabled, String madeBy, int matched, String lastMatched) {}
+                       boolean archive, boolean enabled, String madeBy, int matched, String lastMatched, List<String> forwardTo) {
+        public Rule(long id, String from, String subject, String to, String words, String lane, boolean markRead,
+                    boolean archive, boolean enabled, String madeBy, int matched, String lastMatched) {
+            this(id, from, subject, to, words, lane, markRead, archive, enabled, madeBy, matched, lastMatched, List.of());
+        }
+    }
 
-    /** What a rule is made of, from the rules page or from PA. */
+    /** What a rule is made of, from the rules page or from PA. {@code forwardTo} null = leave as it is, empty = none. */
     public record RuleIn(String from, String subject, String to, String words, String lane, Boolean markRead,
-                         Boolean archive, Boolean enabled) {}
+                         Boolean archive, Boolean enabled, List<String> forwardTo) {
+        public RuleIn(String from, String subject, String to, String words, String lane, Boolean markRead,
+                      Boolean archive, Boolean enabled) {
+            this(from, subject, to, words, lane, markRead, archive, enabled, null);
+        }
+    }
+
+    static final int MAX_FORWARD = 10;
+    private static final Pattern ADDRESS = Pattern.compile("^[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}$");
 
     private final JdbcTemplate jdbc;
     private final MessageRepo messages;
     private final MailActions actions;
+    private final RuleForwarder forwarder;
 
-    public Sorting(JdbcTemplate jdbc, MessageRepo messages, @Lazy MailActions actions) {
+    public Sorting(JdbcTemplate jdbc, MessageRepo messages, @Lazy MailActions actions, @Lazy RuleForwarder forwarder) {
         this.jdbc = jdbc;
         this.messages = messages;
         this.actions = actions;
+        this.forwarder = forwarder;
     }
 
     public static boolean isSectionLane(String lane) {
@@ -159,13 +175,15 @@ public class Sorting {
                         "AND COALESCE(subject_match,'') = ? AND COALESCE(to_match,'') = ? AND COALESCE(words_match,'') = ?", Long.class,
                 userId, nz(c.from), nz(c.subject), nz(c.to), nz(c.words));
         if (!same.isEmpty()) {
-            jdbc.update("UPDATE mail_rules SET lane = ?, mark_read = ?, archive = ?, enabled = TRUE WHERE id = ?",
-                    c.lane, c.markRead, c.archive, same.get(0));
+            Rule old = rule(userId, same.get(0));
+            String fwd = in.forwardTo() == null ? joined(old.forwardTo()) : c.forward;
+            jdbc.update("UPDATE mail_rules SET lane = ?, mark_read = ?, archive = ?, forward_to = ?, enabled = TRUE WHERE id = ?",
+                    c.lane, c.markRead, c.archive, fwd, same.get(0));
             return rule(userId, same.get(0));
         }
         long id = insert("INSERT INTO mail_rules (user_id, from_match, subject_match, to_match, words_match, lane, " +
-                        "mark_read, archive, enabled, made_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                userId, c.from, c.subject, c.to, c.words, c.lane, c.markRead, c.archive,
+                        "mark_read, archive, forward_to, enabled, made_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                userId, c.from, c.subject, c.to, c.words, c.lane, c.markRead, c.archive, c.forward,
                 in.enabled() == null || in.enabled(), "pa".equals(madeBy) ? "pa" : "user");
         return rule(userId, id);
     }
@@ -175,11 +193,12 @@ public class Sorting {
         RuleIn merged = new RuleIn(in.from() != null ? in.from() : old.from(), in.subject() != null ? in.subject() : old.subject(),
                 in.to() != null ? in.to() : old.to(), in.words() != null ? in.words() : old.words(),
                 in.lane() != null ? in.lane() : old.lane(), in.markRead() != null ? in.markRead() : old.markRead(),
-                in.archive() != null ? in.archive() : old.archive(), in.enabled() != null ? in.enabled() : old.enabled());
+                in.archive() != null ? in.archive() : old.archive(), in.enabled() != null ? in.enabled() : old.enabled(),
+                in.forwardTo() != null ? in.forwardTo() : old.forwardTo());
         Checked c = check(userId, merged);
         jdbc.update("UPDATE mail_rules SET from_match = ?, subject_match = ?, to_match = ?, words_match = ?, lane = ?, mark_read = ?, " +
-                        "archive = ?, enabled = ? WHERE id = ? AND user_id = ?", c.from, c.subject, c.to, c.words, c.lane, c.markRead,
-                c.archive, merged.enabled() == null || merged.enabled(), id, userId);
+                        "archive = ?, forward_to = ?, enabled = ? WHERE id = ? AND user_id = ?", c.from, c.subject, c.to, c.words, c.lane,
+                c.markRead, c.archive, c.forward, merged.enabled() == null || merged.enabled(), id, userId);
         return rule(userId, id);
     }
 
@@ -188,7 +207,8 @@ public class Sorting {
         jdbc.update("DELETE FROM mail_rules WHERE id = ? AND user_id = ?", id, userId);
     }
 
-    private record Checked(String from, String subject, String to, String words, String lane, boolean markRead, boolean archive) {}
+    private record Checked(String from, String subject, String to, String words, String lane, boolean markRead, boolean archive,
+                           String forward) {}
 
     private Checked check(long userId, RuleIn in) {
         String from = cond(in.from(), 400);
@@ -201,9 +221,43 @@ public class Sorting {
         String lane = in.lane() == null || in.lane().isBlank() ? null : in.lane().trim();
         boolean archive = Boolean.TRUE.equals(in.archive());
         boolean read = Boolean.TRUE.equals(in.markRead());
+        List<String> forward = forwardList(userId, in.forwardTo());
         if (lane != null && !isTarget(userId, lane)) throw ApiException.bad("That section doesn't exist.");
-        if (lane == null && !archive && !read) throw ApiException.bad("Say what to do with the mail: a section, mark as read, or archive.");
-        return new Checked(from, subject, to, words, lane, read, archive);
+        if (lane == null && !archive && !read && forward.isEmpty()) {
+            throw ApiException.bad("Say what to do with the mail: a section, mark as read, archive, or forward it.");
+        }
+        return new Checked(from, subject, to, words, lane, read, archive, forward.isEmpty() ? null : String.join(", ", forward));
+    }
+
+    /** Clean, distinct addresses (up to 10); never one of the person's own mailboxes, so mail can't go round in circles. */
+    private List<String> forwardList(long userId, List<String> in) {
+        List<String> out = new ArrayList<>();
+        if (in == null) return out;
+        java.util.Set<String> own = new java.util.HashSet<>(jdbc.queryForList(
+                "SELECT LOWER(email) FROM accounts WHERE user_id = ?", String.class, userId));
+        for (String raw : in) {
+            if (raw == null) continue;
+            for (String part : raw.split("[,;\\s]+")) {
+                String e = part.trim().replaceAll("^<|>$", "").toLowerCase(Locale.ROOT);
+                if (e.isEmpty()) continue;
+                if (!ADDRESS.matcher(e).matches() || e.length() > 200) throw ApiException.bad("\"" + part.trim() + "\" isn't an email address.");
+                if (own.contains(e)) throw ApiException.bad(e + " is one of your own mailboxes, so forwarding there would loop.");
+                if (!out.contains(e)) out.add(e);
+            }
+        }
+        if (out.size() > MAX_FORWARD) throw ApiException.bad("A rule can forward to up to " + MAX_FORWARD + " people.");
+        return out;
+    }
+
+    static List<String> split(String joined) {
+        if (joined == null || joined.isBlank()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String p : joined.split(",")) if (!p.isBlank()) out.add(p.trim());
+        return out;
+    }
+
+    private static String joined(List<String> list) {
+        return list == null || list.isEmpty() ? null : String.join(", ", list);
     }
 
     private static String cond(String s, int max) {
@@ -218,7 +272,7 @@ public class Sorting {
         return new Rule(rs.getLong("id"), rs.getString("from_match"), rs.getString("subject_match"), rs.getString("to_match"),
                 rs.getString("words_match"), rs.getString("lane"), rs.getBoolean("mark_read"), rs.getBoolean("archive"),
                 rs.getBoolean("enabled"), rs.getString("made_by"), rs.getInt("matched"),
-                last == null ? null : last.toInstant().toString());
+                last == null ? null : last.toInstant().toString(), split(rs.getString("forward_to")));
     }
 
     // ── matching ──────────────────────────────────────────────────
@@ -272,8 +326,16 @@ public class Sorting {
                         rs.getString(6), rs.getString(7), rs.getString(8)), args);
     }
 
-    /** New inbox mail: the first enabled rule that fits decides (before the AI sorts it). Never fails the sync. */
+    /** Mail found by a search of the server (old mail): filed, never forwarded. */
     public void applyNew(long userId, List<Long> ids) {
+        applyNew(userId, ids, false);
+    }
+
+    /**
+     * New inbox mail: the first enabled rule that fits decides (before the AI sorts it). Never fails the sync.
+     * {@code live}: mail that has just arrived (not the first fill of a mailbox), so a rule's forward goes too.
+     */
+    public void applyNew(long userId, List<Long> ids, boolean live) {
         if (ids == null || ids.isEmpty()) return;
         try {
             List<Rule> rules = rules(userId).stream().filter(Rule::enabled).toList();
@@ -284,6 +346,7 @@ public class Sorting {
                 for (Mail m : mails("a.user_id = ? AND m.folder = 'INBOX' AND m.id IN (" + in + ")", userId)) {
                     for (Rule r : rules) {
                         if (matches(r, m)) {
+                            if (live && !r.forwardTo().isEmpty()) forwarder.forward(userId, r, m.id(), m.fromEmail());
                             act(userId, r, m);
                             jdbc.update("UPDATE mail_rules SET matched = matched + 1, last_matched = CURRENT_TIMESTAMP WHERE id = ?", r.id());
                             break;
@@ -316,8 +379,9 @@ public class Sorting {
     /** How many inbox mails a rule would catch now, and a few of them (for "this will move 12 mails"). */
     public Map<String, Object> preview(long userId, RuleIn in) {
         Checked c = check(userId, new RuleIn(in.from(), in.subject(), in.to(), in.words(),
-                in.lane() == null && !Boolean.TRUE.equals(in.archive()) ? LaneClassifier.FYI : in.lane(), in.markRead(), in.archive(), true));
-        Rule r = new Rule(0, c.from, c.subject, c.to, c.words, c.lane, c.markRead, c.archive, true, "user", 0, null);
+                in.lane() == null && !Boolean.TRUE.equals(in.archive()) ? LaneClassifier.FYI : in.lane(), in.markRead(), in.archive(), true,
+                in.forwardTo()));
+        Rule r = new Rule(0, c.from, c.subject, c.to, c.words, c.lane, c.markRead, c.archive, true, "user", 0, null, split(c.forward));
         int n = 0;
         List<Map<String, Object>> sample = new ArrayList<>();
         for (Mail m : mails("a.user_id = ? AND m.folder = 'INBOX' ORDER BY m.received_at DESC LIMIT 2000", userId)) {

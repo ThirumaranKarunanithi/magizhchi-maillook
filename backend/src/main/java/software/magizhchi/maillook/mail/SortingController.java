@@ -21,11 +21,11 @@ public class SortingController {
 
     public record SectionRequest(String name, String icon, String color) {}
 
-    /** applyNow: also file the mail already in the inbox. */
+    /** applyNow: also file the mail already in the inbox (that never forwards it). forwardTo: null leaves it as it is. */
     public record RuleRequest(String from, String subject, String to, String words, String lane, Boolean markRead,
-                              Boolean archive, Boolean enabled, Boolean applyNow) {
+                              Boolean archive, Boolean enabled, Boolean applyNow, java.util.List<String> forwardTo) {
         Sorting.RuleIn in() {
-            return new Sorting.RuleIn(from, subject, to, words, lane, markRead, archive, enabled);
+            return new Sorting.RuleIn(from, subject, to, words, lane, markRead, archive, enabled, forwardTo);
         }
     }
 

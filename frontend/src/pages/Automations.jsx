@@ -7,7 +7,10 @@ import PageHeader from '../components/PageHeader.jsx'
 import { SectionDialog } from '../components/Sections.jsx'
 import { IconPlus, IconRefresh, IconSparkle, IconTrash } from '../components/Icons.jsx'
 
-const EMPTY_RULE = { from: '', subject: '', to: '', words: '', lane: '', markRead: false, archive: false }
+const EMPTY_RULE = { from: '', subject: '', to: '', words: '', lane: '', markRead: false, archive: false, forward: '' }
+
+/** "a@x.com, b@y.com" -> ['a@x.com', 'b@y.com'] */
+const addresses = (s) => (s || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean)
 
 /** "Mail from …, with … in the subject → goes to …, marked read." */
 function describe(r) {
@@ -20,6 +23,7 @@ function describe(r) {
   if (r.lane) what.push(<>goes to <b>{laneName(r.lane)}</b></>)
   if (r.markRead) what.push('is marked read')
   if (r.archive) what.push('is archived')
+  if (r.forwardTo?.length) what.push(<>is forwarded to <b>{r.forwardTo.join(', ')}</b></>)
   const join = (parts, last) => parts.map((p, i) => <span key={i}>{i > 0 && (i === parts.length - 1 ? ` ${last} ` : ', ')}{p}</span>)
   return <>Mail {join(when, 'and')} {join(what, 'and')}.</>
 }
@@ -27,14 +31,14 @@ function describe(r) {
 function RuleForm({ initial, onDone, onCancel }) {
   const { notify, refreshCounts, bumpMail } = useMail()
   const lanes = useLanes()
-  const [r, setR] = useState(initial || EMPTY_RULE)
+  const [r, setR] = useState(initial ? { ...initial, forward: (initial.forwardTo || []).join(', ') } : EMPTY_RULE)
   const [applyNow, setApplyNow] = useState(true)
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
   const [newSection, setNewSection] = useState(false)
   const set = (k, v) => setR((x) => ({ ...x, [k]: v }))
   const hasWhen = [r.from, r.subject, r.to, r.words].some((v) => v && v.trim())
-  const hasWhat = !!r.lane || r.markRead || r.archive
+  const hasWhat = !!r.lane || r.markRead || r.archive || addresses(r.forward).length > 0
 
   // How many mails already here it would catch, as they type.
   useEffect(() => {
@@ -43,7 +47,8 @@ function RuleForm({ initial, onDone, onCancel }) {
       return undefined
     }
     const t = setTimeout(() => {
-      post('/api/rules/preview', { ...r, lane: r.lane || null }).then(setPreview).catch(() => setPreview(null))
+      const { forward, ...rest } = r
+      post('/api/rules/preview', { ...rest, lane: r.lane || null }).then(setPreview).catch(() => setPreview(null))
     }, 400)
     return () => clearTimeout(t)
   }, [r, hasWhen])
@@ -52,7 +57,8 @@ function RuleForm({ initial, onDone, onCancel }) {
     e.preventDefault()
     setBusy(true)
     try {
-      const body = { ...r, lane: r.lane || null }
+      const { forward, ...rest } = r
+      const body = { ...rest, lane: r.lane || null, forwardTo: addresses(forward) }
       if (initial?.id) {
         await put(`/api/rules/${initial.id}`, body)
         notify('Automation saved', 'success')
@@ -99,6 +105,14 @@ function RuleForm({ initial, onDone, onCancel }) {
         <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="accent-[#b45309]" checked={r.markRead} onChange={(e) => set('markRead', e.target.checked)} /> Mark as read</label>
         <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="accent-[#b45309]" checked={r.archive} onChange={(e) => set('archive', e.target.checked)} /> Archive</label>
       </div>
+      <label className="mt-3 block">
+        <span className="text-xs font-semibold text-slate-600">Also forward to</span>
+        <input className="input mt-1 w-full" type="text" inputMode="email" value={r.forward || ''} placeholder="hr@company.com, manager@company.com"
+          onChange={(e) => set('forward', e.target.value)} />
+        <span className="mt-0.5 block text-[11px] text-slate-500">
+          Each new mail that fits is forwarded by itself, with its attachments, from the mailbox it came to. Mail already here is never forwarded.
+        </span>
+      </label>
       {preview && (
         <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
           {preview.count ? <>Fits <b>{preview.count}</b> {preview.count === 1 ? 'mail' : 'mails'} already in your inbox, like {preview.sample.slice(0, 3).map((x) => `“${x.subject || '(no subject)'}”`).join(', ')}.</>
@@ -166,7 +180,7 @@ export default function Automations() {
 
   return (
     <div className="slab rise-3d d1 scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto max-lg:rounded-none">
-      <PageHeader title="Automations" subtitle="Mail sorts itself: into your sections, read, or archived">
+      <PageHeader title="Automations" subtitle="Mail sorts itself: into your sections, read, archived, or forwarded">
         {editing == null && (
           <button className="btn-primary" onClick={() => setEditing('new')}><IconPlus size={15} /> New</button>
         )}

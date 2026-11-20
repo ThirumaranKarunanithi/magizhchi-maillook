@@ -205,6 +205,28 @@ public class PaChatController {
             }
             case "rule" -> {
                 try {
+                    List<String> forward = new ArrayList<>();
+                    for (JsonNode f : a.path("forwardTo")) if (f.isTextual() && !f.asText().isBlank()) forward.add(f.asText().trim());
+                    // A forward sends mail by itself, so only to addresses already in their mail (a misheard name never gets it).
+                    List<String> unseen = forward.stream().filter(e -> !seenAddress(userId, e)).toList();
+                    if (!unseen.isEmpty()) {
+                        notes.add("I haven't seen " + String.join(", ", unseen) + " in your mail, so I didn't set up the forward. "
+                                + "Check the address, or add it yourself under Automations.");
+                        return null;
+                    }
+                    long ruleId = a.path("ruleId").asLong(0);
+                    if (ruleId > 0) {
+                        // Changing one they have: only what was asked (e.g. add the forward), the rest stays.
+                        Sorting.Rule r = sorting.updateRule(userId, ruleId, new Sorting.RuleIn(null, null, null, null, null,
+                                a.has("markRead") ? a.path("markRead").asBoolean() : null, a.has("archive") ? a.path("archive").asBoolean() : null,
+                                null, a.has("forwardTo") ? forward : null));
+                        m.put("ruleId", r.id());
+                        m.put("lane", r.lane());
+                        m.put("section", r.lane() == null ? null : sectionName(userId, r.lane()));
+                        m.put("applied", 0);
+                        m.put("summary", describe(r, r.lane() == null ? null : sectionName(userId, r.lane())));
+                        return m;
+                    }
                     String lane = null;
                     String name = text(a, "section");
                     if (name != null) {
@@ -213,7 +235,8 @@ public class PaChatController {
                         if (lane == null) lane = sorting.createSection(userId, name, text(a, "icon"), null).lane();
                     }
                     Sorting.Rule r = sorting.createRule(userId, new Sorting.RuleIn(text(a, "from"), text(a, "subject"), text(a, "to"),
-                            text(a, "words"), lane, a.path("markRead").asBoolean(false), a.path("archive").asBoolean(false), true), "pa");
+                            text(a, "words"), lane, a.path("markRead").asBoolean(false), a.path("archive").asBoolean(false), true,
+                            a.has("forwardTo") ? forward : null), "pa");
                     int applied = a.path("applyNow").asBoolean(true) ? sorting.applyExisting(userId, r.id()) : 0;
                     m.put("ruleId", r.id());
                     m.put("lane", r.lane());
@@ -230,6 +253,16 @@ public class PaChatController {
             }
         }
         return m;
+    }
+
+    /** Whether this address has written to them, or they (or someone) copied it, in any of their mail. */
+    private boolean seenAddress(long userId, String email) {
+        String e = email.toLowerCase(Locale.ROOT).replaceAll("^<|>$", "");
+        String like = "%" + e.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM (SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id "
+                        + "WHERE a.user_id = ? AND (LOWER(m.from_email) = ? OR LOWER(m.to_list) LIKE ? OR LOWER(m.cc_list) LIKE ?) LIMIT 1) t",
+                Integer.class, userId, e, like, like);
+        return n != null && n > 0;
     }
 
     /** "Meet notices", "s12" or a built-in lane's own name -> the person's section's lane, or null. */
@@ -264,6 +297,7 @@ public class PaChatController {
         if (section != null) what.add("goes to " + section);
         if (r.markRead()) what.add("is marked read");
         if (r.archive()) what.add("is archived");
+        if (!r.forwardTo().isEmpty()) what.add("is forwarded to " + String.join(", ", r.forwardTo()));
         return "Mail " + String.join(", ", when) + " " + String.join(" and ", what) + ".";
     }
 
@@ -468,6 +502,10 @@ public class PaChatController {
                    or needs_me|fyi|can_wait, or null","icon":"for a new section","markRead":false,"archive":false,"applyNow":true}
                    an automation: from now on, mail that fits goes there by itself. applyNow also files the mail already here.
                    Commas in a condition mean "any of" (from:"amazon.in, flipkart.com").
+                   "forwardTo":["address", ...] also forwards each NEW mail that fits (with its attachments) to those people,
+                   by itself, from the mailbox it came to. Mail already here is never forwarded.
+                   To change one of their automations (listed below as "rule <number>"), give "ruleId":<number> with only
+                   what changes, e.g. {"type":"rule","ruleId":12,"forwardTo":["hr@example.com"]}.
 
                 Rules:
                 - "this mail", "it", "this one" mean the open mail (which:"open"); after you open a mail, "it" is that mail.
@@ -489,6 +527,11 @@ public class PaChatController {
                   after what the mail is, e.g. "Meet notices", with a fitting icon). Never say you can't; say what the rule
                   does and how many mails it moved. The person can change it under Automations.
                 - "go to <their section>" = {"type":"go","to":"<section name>"}; moving one mail there = act "lane" with "lane":"<section name>".
+                - "forward/redirect/send all <kind of> mail to X from now on": a rule with forwardTo (add it to the automation that
+                  already files that mail, by ruleId). forwardTo takes email addresses only. When they name people or roles
+                  ("HR", "the manager", a name), use an address only if the mails here show it clearly (e.g. "HR" and
+                  hr@company.com in the open mail); otherwise ask for the address in "say", with no actions. Say plainly in
+                  "say" that new mail of that kind will now be forwarded by itself, and to whom.
                 """.formatted(now.toLocalDate(), now.toLocalTime(), now.getDayOfWeek(), String.join(" ", Sorting.ICONS));
     }
 
@@ -532,7 +575,8 @@ public class PaChatController {
         if (!rules.isEmpty()) {
             p.append("Their automations:\n");
             for (Sorting.Rule r : rules.subList(0, Math.min(rules.size(), 15))) {
-                p.append("  ").append(r.enabled() ? "" : "(off) ").append(describe(r, sectionName(userId, r.lane()))).append('\n');
+                p.append("  rule ").append(r.id()).append(": ").append(r.enabled() ? "" : "(off) ")
+                        .append(describe(r, sectionName(userId, r.lane()))).append('\n');
             }
         }
         p.append("On screen: ").append(ctx.page() == null ? "mail" : cut(ctx.page(), 40));

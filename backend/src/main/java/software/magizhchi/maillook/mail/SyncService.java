@@ -123,7 +123,8 @@ public class SyncService {
             }
             syncExtras(store, a, own, rules);
             // The person's own rules file new inbox mail before alerts ring and before the AI sorts it.
-            sorting.applyNew(a.userId(), newInbox);
+            // A rule's forward goes only for mail that has just arrived, never for the first fill of a mailbox.
+            sorting.applyNew(a.userId(), newInbox, a.inboxLastUid() != null);
             accounts.syncDone(a.id());
             // Ring their browsers and phones, but not for the first fill of a mailbox just added.
             if (a.inboxLastUid() != null && !newInbox.isEmpty()) {
