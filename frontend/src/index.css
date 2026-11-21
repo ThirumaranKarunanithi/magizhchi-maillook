@@ -587,3 +587,9 @@
   .msg-row:hover, .nav-item:hover, .file-card:hover { transform: none; }
   body { transition: none; }
 }
+
+/* Ask PA can be moved: the pill, and the open card by its top bar. */
+.pa-grab { cursor: grab; }
+.pa-dragging { cursor: grabbing; }
+.pa-dragging .pa-grab { cursor: grabbing; }
+.pa-launch.pa-dragging:hover { transform: none; }

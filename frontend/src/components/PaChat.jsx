@@ -6,6 +6,7 @@ import { laneName } from '../util.js'
 import { PA_DONE, PA_SEARCH, emit, screen } from '../pabus.js'
 import { IconMic, IconSend, IconX } from './Icons.jsx'
 import PaPlan from './PaPlan.jsx'
+import { useMovable } from '../pa/useMovable.js'
 
 const STORE = 'mlook.pa.chat'
 const SPEAK = 'mlook.pa.speak'
@@ -145,6 +146,12 @@ export default function PaChat() {
   const navigate = useNavigate()
   const location = useLocation()
   const [open, setOpen] = useState(false)
+  // Ask PA can be dragged anywhere: the pill, and on a wide screen the open card by its top bar (double-click it to
+  // put both back). Remembered on this computer.
+  const [wide] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(min-width: 640px)').matches)
+  const pill = useMovable('maillook.pa.pillSpot')
+  const card = useMovable('maillook.pa.cardSpot', { enabled: wide })
+  const putBack = () => { card.reset(); pill.reset() }
   const [msgs, setMsgs] = useState(load)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -451,8 +458,9 @@ export default function PaChat() {
 
   if (!open) {
     return (
-      <button className="pa-launch fixed bottom-24 right-4 z-40 flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-4 lg:bottom-5 lg:right-5"
-        onClick={() => setOpen(true)} title="Ask Magizhchi PA (Ctrl+J)" aria-label="Open Magizhchi PA chat">
+      <button ref={pill.ref} {...pill.handle}
+        className="pa-launch fixed bottom-24 right-4 z-40 flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-4 lg:bottom-5 lg:right-5"
+        onClick={() => setOpen(true)} title="Ask Magizhchi PA (Ctrl+J). Drag to move it." aria-label="Open Magizhchi PA chat">
         <Orb size={34} state={state} />
         <span className="text-sm font-bold">Ask PA</span>
       </button>
@@ -460,9 +468,11 @@ export default function PaChat() {
   }
 
   return (
-    <aside className={`pa-panel ${closing ? 'pa-lid-close' : 'pa-lid-open'} fixed inset-0 z-40 flex flex-col sm:inset-y-2.5 sm:left-auto sm:right-2.5 sm:w-[420px] sm:rounded-2xl`}
+    <aside ref={card.ref} className={`pa-panel ${closing ? 'pa-lid-close' : 'pa-lid-open'} fixed inset-0 z-40 flex flex-col sm:inset-y-2.5 sm:left-auto sm:right-2.5 sm:h-[calc(100vh-20px)] sm:w-[420px] sm:rounded-2xl`}
       role="dialog" aria-label="Magizhchi PA">
-      <header className="pa-head flex items-center gap-3 px-4 py-3">
+      <header {...card.handle} onDoubleClick={wide ? putBack : undefined}
+        className={`pa-head flex items-center gap-3 px-4 py-3${wide ? ' pa-grab select-none' : ''}`}
+        title={wide ? 'Drag here to move PA anywhere. Double-click to put it back.' : undefined}>
         <Orb size={38} state={state} />
         <div className="min-w-0 flex-1">
           <h2 className="text-[15px] font-bold leading-tight">Magizhchi PA</h2>
