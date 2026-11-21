@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { senderName, shortTime } from '../util.js'
+import { cleanSnippet, senderName, shortTime } from '../util.js'
 import { IconBell, IconCheck, IconClock, IconFlag, IconNote, IconPaperclip, IconSnooze, IconVideo } from './Icons.jsx'
 import { whenLabel } from '../when.js'
 import MailActionsMenu from './MailActionsMenu.jsx'
@@ -104,7 +104,7 @@ function Row({ m, selected, picked, picking, sentView, onSelect, onPick, onDone,
         )}
         {m.subject || '(no subject)'}
       </div>
-      <div className="mt-0.5 truncate text-[15px] text-slate-600 pr-9 sm:mt-0 sm:text-xs sm:text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : m.snippet}</div>
+      <div className="mt-0.5 truncate text-[15px] text-slate-600 pr-9 sm:mt-0 sm:text-xs sm:text-slate-500">{m.waitingFor ? <>Waiting for {m.waitingFor}</> : cleanSnippet(m.snippet)}</div>
       {m.attachmentNames?.length > 0 && (
         <div className="mt-1.5 flex min-w-0 items-center gap-1.5 pr-9">
           {m.attachmentNames.slice(0, 2).map((n, i) => (

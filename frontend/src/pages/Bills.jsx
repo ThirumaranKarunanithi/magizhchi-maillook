@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { get, patch, post, put } from '../api.js'
 import { useMail } from '../state.jsx'
-import { DATA_WEB, TONE_CLASS, daysLeft, dueLabel, dueTone, groupBills, inrNote, money, shortDay, totalInr, unsure, upiLink } from '../bills.js'
+import { DATA_WEB, TONE_CLASS, daysLeft, dueLabel, dueTone, foldBills, groupBills, inrNote, money, shortDay, totalInr, unsure, upiLink } from '../bills.js'
 import { safeHttpUrl } from '../util.js'
 import { BillEditor, BillFacts, PayNow } from '../components/BillCard.jsx'
 import BillsSummary from './BillsSummary.jsx'
@@ -45,6 +45,9 @@ export default function Bills() {
   // A bill saved by the editor comes back without its "above usual" mark: keep it while the amount is the same.
   const replace = (b) => setData((d) => ({ ...d, bills: d.bills.map((x) => (x.id === b.id ? { ...b, jump: b.jump ?? (Number(b.amount) === Number(x.amount) ? x.jump : undefined) } : x)) }))
   const remove = (id) => setData((d) => ({ ...d, bills: d.bills.filter((x) => x.id !== id) }))
+  // A bill that came in several mails is one row; marking it paid or "not a bill" acts on every one of its mails.
+  const replaceMany = (list) => setData((d) => ({ ...d, bills: d.bills.map((x) => list.find((b) => b.id === x.id) || x) }))
+  const removeMany = (ids) => setData((d) => ({ ...d, bills: d.bills.filter((x) => !ids.includes(x.id)) }))
 
   return (
     <section className="slab rise-3d d1 flex min-h-0 flex-1 flex-col overflow-hidden max-lg:rounded-none">
@@ -81,7 +84,7 @@ export default function Bills() {
                         loadSetup()
                       } catch (e) { notify(e.message, 'error') }
                     }} />
-                    {data && <BillList data={data} openId={openId} onChange={replace} onRemove={remove} />}
+                    {data && <BillList data={data} openId={openId} onChange={replace} onChangeMany={replaceMany} onRemove={remove} onRemoveMany={removeMany} />}
                     <Settings setup={setup} onChange={(s) => setSetup(s)} onScanned={loadSetup} />
                   </>
                 )}
@@ -197,11 +200,12 @@ function Waiting({ setup, onRetry }) {
   )
 }
 
-function BillList({ data, openId, onChange, onRemove }) {
+function BillList({ data, openId, onChange, onChangeMany, onRemove, onRemoveMany }) {
   const today = data.today
-  const groups = useMemo(() => groupBills(data.bills, today), [data.bills, today])
+  const bills = useMemo(() => foldBills(data.bills), [data.bills])
+  const groups = useMemo(() => groupBills(bills, today), [bills, today])
   const thisMonth = today.slice(0, 7)
-  const monthBills = data.bills.filter((b) => b.kind === 'bill' && (b.dueDate || b.invoiceDate || '').startsWith(thisMonth))
+  const monthBills = bills.filter((b) => b.kind === 'bill' && (b.dueDate || b.invoiceDate || '').startsWith(thisMonth))
 
   if (!data.bills.length) {
     return (
@@ -231,7 +235,8 @@ function BillList({ data, openId, onChange, onRemove }) {
             {title} <span className="num font-semibold normal-case tracking-normal">{groups[key].length}{key !== 'paid' && totalInr(groups[key]) > 0 ? ` · ${money(totalInr(groups[key]))}` : ''}</span>
           </h2>
           <div className="card divide-y divide-slate-200/70 overflow-hidden">
-            {groups[key].map((b) => <BillRow key={b.id} bill={b} today={today} open={b.id === openId} onChange={onChange} onRemove={onRemove} />)}
+            {groups[key].map((b) => <BillRow key={b.id} bill={b} today={today} open={b.id === openId || (b.foldedIds || []).includes(openId)}
+              onChange={onChange} onChangeMany={onChangeMany} onRemove={onRemove} onRemoveMany={onRemoveMany} />)}
           </div>
         </section>
       ))}
@@ -292,7 +297,7 @@ function Stat({ label, n, total, tone }) {
   )
 }
 
-function BillRow({ bill, today, open, onChange, onRemove }) {
+function BillRow({ bill, today, open, onChange, onChangeMany, onRemove, onRemoveMany }) {
   const { notify } = useMail()
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(open)
@@ -307,7 +312,9 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
   async function setStatus(status) {
     setBusy(status)
     try {
-      onChange(await patch(`/api/bills/${bill.id}`, { status }))
+      const ids = bill.foldedIds || [bill.id]
+      if (ids.length > 1) onChangeMany(await Promise.all(ids.map((id) => patch(`/api/bills/${id}`, { status }))))
+      else onChange(await patch(`/api/bills/${bill.id}`, { status }))
       notify(status === 'paid' ? `${bill.vendor}: marked paid ✓` : 'Marked as still to pay', 'success')
     } catch (e) {
       notify(e.message, 'error')
@@ -319,8 +326,10 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
   async function notABill() {
     setBusy('not')
     try {
-      await post(`/api/bills/${bill.id}/not-a-bill`, { never: false })
-      onRemove(bill.id)
+      const ids = bill.foldedIds || [bill.id]
+      await Promise.all(ids.map((id) => post(`/api/bills/${id}/not-a-bill`, { never: false })))
+      if (ids.length > 1) onRemoveMany(ids)
+      else onRemove(bill.id)
       notify('Removed from Bills', 'info')
     } catch (e) {
       notify(e.message, 'error')
@@ -340,7 +349,10 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
               {(bill.accountName || bill.customerRef) && <span className="shrink-0 truncate text-sm text-slate-500 sm:text-xs">· {bill.accountName || `A/c ${bill.customerRef}`}</span>}
               {shaky && <IconAlert size={13} className="shrink-0 text-amber-600" aria-label="Check this bill" />}
             </div>
-            <div className="truncate text-sm text-slate-500 sm:text-xs">{bill.invoiceNo ? `Invoice ${bill.invoiceNo}` : bill.mailSubject || ''}</div>
+            <div className="truncate text-sm text-slate-500 sm:text-xs">
+              {bill.invoiceNo ? `Invoice ${bill.invoiceNo}` : bill.mailSubject || ''}
+              {bill.mails > 1 && <span className="font-semibold text-slate-600"> · came in {bill.mails} mails</span>}
+            </div>
           </div>
           <div className="shrink-0 text-right">
             <div className="text-[15px] font-bold num text-brand-ink sm:text-sm">{money(bill.amount, bill.currency)}</div>
@@ -372,7 +384,7 @@ function BillRow({ bill, today, open, onChange, onRemove }) {
                   {bill.messageId && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.messageId}`)}>Open the mail</button>}
                   {bill.paidMessageId && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => navigate(`/?open=${bill.paidMessageId}`)}>Open the bank alert</button>}
                   <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setEditing(true)}>Edit</button>
-                  {bill.kind === 'bill' && bill.status === 'paid' && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setStatus('due')} disabled={!!busy}>Still to pay</button>}
+                  {bill.kind === 'bill' && bill.status === 'paid' && !bill.paidByReceipt && <button className="btn-secondary !px-2.5 !py-1 text-xs" onClick={() => setStatus('due')} disabled={!!busy}>Still to pay</button>}
                   <button className="ml-auto text-xs text-slate-500 hover:text-brand-ink hover:underline" onClick={notABill} disabled={!!busy}>Not a bill</button>
                 </div>
               </>

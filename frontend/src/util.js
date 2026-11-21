@@ -108,6 +108,23 @@ export function senderName(m) {
 }
 
 /** Only follow http(s) links handed back by the server (never javascript: and friends). */
+/**
+ * A mail's preview line without the clutter of its plain-text copy: "[image: Google]" stands where a logo was,
+ * rows of ***** or ===== were underlines, and bare links say nothing in one line.
+ */
+export function cleanSnippet(s) {
+  if (!s) return s
+  return s
+    .replace(/\[(image|cid|logo)[^\]]*\]/gi, ' ')
+    .replace(/([*=_~#-])\1{3,}/g, ' ')
+    .replace(/<?https?:\/\/\S+>?/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+/** A phone number as people write it: no stray apostrophe from a spreadsheet ("'+91 98947 66466"), no spaces at the ends. */
+export const cleanPhone = (p) => (p == null ? p : String(p).replace(/^[\s'"`’‘]+|[\s'"`’‘]+$/g, ''))
+
 export function safeHttpUrl(url) {
   try {
     const u = new URL(url)

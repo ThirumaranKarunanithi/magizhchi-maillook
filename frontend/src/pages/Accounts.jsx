@@ -300,11 +300,9 @@ export default function Accounts() {
       </PageHeader>
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6">
-        <AlertsCard />
-        <DesktopCard />
-        <GetAppsCard />
         <section>
-          <h2 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Your mailboxes ({accounts.length})</h2>
+          {/* No count while they load: "(0)" read as if every mailbox had gone. */}
+          <h2 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Your mailboxes{accountsLoaded ? ` (${accounts.length})` : ''}</h2>
           {!accountsLoaded ? (
             <div className="card p-6 text-center text-slate-400"><span className="spinner" /></div>
           ) : accounts.length === 0 ? (
@@ -318,6 +316,9 @@ export default function Accounts() {
           )}
         </section>
 
+        <AlertsCard />
+        <DesktopCard />
+        <GetAppsCard />
         <BoxCard notify={notify} />
 
         <section className="card p-5">

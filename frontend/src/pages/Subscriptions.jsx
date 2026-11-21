@@ -5,6 +5,10 @@ import { safeHttpUrl, shortTime } from '../util.js'
 import PageHeader from '../components/PageHeader.jsx'
 import { IconCheck, IconRefresh } from '../components/Icons.jsx'
 
+// Bank and card alerts tell you about your own money; they are not newsletters to clear away.
+const BANK = /(.bank.|bank|alerts?@.*(bank|card|upi)|hdfc|icici|sbi|axis|kotak|kvb|sib)/i
+const isBank = (r) => BANK.test(`${r.fromEmail || ''} ${r.fromName || ''}`) && /alert|transaction|txn|info@alerts|alerts@/i.test(`${r.fromEmail || ''} ${r.fromName || ''}`)
+
 export default function Subscriptions() {
   const { accounts, accountId } = useMail()
   const [rows, setRows] = useState([])
@@ -88,6 +92,14 @@ export default function Subscriptions() {
                       <td className="max-w-[260px] px-4 py-2.5">
                         <div className="truncate font-semibold">{r.fromName || r.fromEmail}</div>
                         {r.fromName && <div className="truncate text-xs text-slate-500">{r.fromEmail}</div>}
+                        {/* On a phone the Account column is hidden; the same sender in two mailboxes looked like a repeat. */}
+                        {accountId == null && (
+                          <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-slate-500 md:hidden">
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colorOf(r.accountId) }} />
+                            <span className="truncate">{r.accountEmail}</span>
+                          </div>
+                        )}
+                        {isBank(r) && <div className="mt-0.5 text-[11px] font-semibold text-amber-700">Bank alerts: they tell you about your money</div>}
                       </td>
                       <td className="hidden max-w-[200px] px-3 py-2.5 md:table-cell">
                         <span className="flex items-center gap-1.5 truncate text-xs text-slate-600">
@@ -112,7 +124,9 @@ export default function Subscriptions() {
                           </span>
                         ) : (
                           <div className="flex flex-col items-end gap-1">
-                            <button className="btn-secondary !py-1 text-xs" onClick={() => unsubscribe(r)}>Unsubscribe</button>
+                            {isBank(r)
+                              ? <button className="text-xs text-slate-500 hover:text-brand-ink hover:underline" onClick={() => unsubscribe(r)}>Unsubscribe anyway</button>
+                              : <button className="btn-secondary !py-1 text-xs" onClick={() => unsubscribe(r)}>Unsubscribe</button>}
                             {res?.status === 'error' && <span className="text-xs text-red-700">{res.message}</span>}
                           </div>
                         )}

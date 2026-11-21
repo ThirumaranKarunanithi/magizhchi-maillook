@@ -32,7 +32,7 @@ export function shortDay(iso) {
 export function dueLabel(bill, today) {
   if (bill.kind === 'credit_note') return 'Credit note'
   if (bill.kind === 'receipt') return 'Paid (receipt)'
-  if (bill.status === 'paid') return bill.paidHow === 'alert' ? 'Paid · bank alert' : 'Paid'
+  if (bill.status === 'paid') return bill.paidHow === 'alert' ? 'Paid · bank alert' : bill.paidByReceipt ? 'Paid · receipt came' : 'Paid'
   const d = daysLeft(bill.dueDate, today)
   if (bill.autopay) return bill.dueDate ? `Auto-pay · ${shortDay(bill.dueDate)}` : 'Auto-pay'
   if (d == null) return 'No due date'
@@ -63,6 +63,47 @@ export const TONE_CLASS = {
 
 /** A field Data wasn't sure about (below 0.8): the card asks the person to check it. */
 export const unsure = (bill, field) => bill.confidence && bill.confidence[field] != null && bill.confidence[field] < 0.8
+
+// "LiveKit Cloud" and "LiveKit", "Railway Corporation" and "Railway" are the same company.
+const SUFFIX = /\b(inc|llc|ltd|limited|pvt|private|corp|corporation|company|co|pbc|cloud|payments?|technologies|services|india)\b/g
+const vendorKey = (v) => (v || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').replace(SUFFIX, ' ').replace(/\s+/g, ' ').trim()
+
+/**
+ * One bill, however many mails it came in. A failed card payment sends the invoice, a "payment failed" mail and
+ * "failed again" mails; a payment to confirm sends a reminder or two. Each of those was a bill of its own, so one
+ * $1,703.40 LiveKit charge showed five times and the totals added it five times. Unpaid bills from the same
+ * company for the same amount (and the same month, when they have a due date) become one bill, which says how many
+ * mails it came in. When a receipt or a paid bill for the same company and amount came after them, they were paid:
+ * they go to Paid instead of waiting to be paid again.
+ */
+export function foldBills(bills) {
+  const keyOf = (b) => `${vendorKey(b.vendor)}|${b.currency || 'INR'}|${b.amount == null ? '' : Number(b.amount).toFixed(2)}`
+  const paidAfter = new Map() // key → the newest receipt or paid bill
+  for (const b of bills) {
+    if (b.amount == null || !(b.kind === 'receipt' || (b.kind === 'bill' && b.status === 'paid'))) continue
+    const k = keyOf(b)
+    if (!paidAfter.has(k) || paidAfter.get(k).id < b.id) paidAfter.set(k, b)
+  }
+  const groups = new Map()
+  const out = []
+  for (const b of bills) {
+    if (b.kind !== 'bill' || b.status !== 'due' || b.amount == null) { out.push(b); continue }
+    const k = `${keyOf(b)}|${b.dueDate ? b.dueDate.slice(0, 7) : 'none'}`
+    if (!groups.has(k)) { groups.set(k, [b]); out.push(k) } else groups.get(k).push(b)
+  }
+  return out.map((x) => {
+    if (typeof x !== 'string') return x
+    const list = groups.get(x)
+    // The one to show: one with an invoice number and a due date, else the newest.
+    const main = [...list].sort((a, b) => (!!b.invoiceNo - !!a.invoiceNo) || (!!b.dueDate - !!a.dueDate) || b.id - a.id)[0]
+    const paid = paidAfter.get(keyOf(main))
+    const folded = list.length > 1 ? { ...main, mails: list.length, foldedIds: list.map((b) => b.id), jump: list.find((b) => b.jump)?.jump } : main
+    if (paid && paid.id > Math.min(...list.map((b) => b.id))) {
+      return { ...folded, status: 'paid', paidHow: 'receipt', paidByReceipt: paid.id, jump: undefined }
+    }
+    return folded
+  })
+}
 
 /** Groups for the Bills page, in the order they're shown. */
 export function groupBills(bills, today) {

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { get, post, qs } from '../api.js'
 import { useMail } from '../state.jsx'
-import { EMAIL_RE } from '../util.js'
+import { EMAIL_RE, cleanPhone } from '../util.js'
+
+// Numbers brought in from a spreadsheet carry a leading apostrophe ("'+91 98947 66466"): show and dial them without it.
+const tidy = (p) => ({ ...p, phone: cleanPhone(p.phone), phones: p.phones?.map(cleanPhone) })
 import { whatsApp } from '../components/PersonCard.jsx'
 import { Avatar } from '../components/AddressSuggest.jsx'
 import { IconBook, IconCompose, IconMenu, IconPhone, IconPlus, IconSearch, IconUserPlus, IconX } from '../components/Icons.jsx'
@@ -170,7 +173,7 @@ export default function Contacts() {
     try {
       const res = await get(`/api/contacts${qs({ q, limit: Math.min(1000, Math.max(PAGE, shown.current)) })}`)
       setData(res)
-      setItems(res.items || [])
+      setItems((res.items || []).map(tidy))
       setNext(res.nextOffset ?? null)
       stamp.current = res.stamp
     } catch (e) {
@@ -187,7 +190,7 @@ export default function Contacts() {
     setMore(true)
     try {
       const res = await get(`/api/contacts${qs({ q, limit: PAGE, offset: next })}`)
-      setItems((x) => { const all = [...x, ...(res.items || [])]; shown.current = all.length; return all })
+      setItems((x) => { const all = [...x, ...(res.items || []).map(tidy)]; shown.current = all.length; return all })
       setNext(res.nextOffset ?? null)
     } catch (e) {
       notify(e.message, 'error')

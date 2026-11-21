@@ -149,7 +149,7 @@ export default function Mail() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
-  const [selectedId, setSelectedId] = useState(null)
+  const [selectedId, setSelectedId] = useState(() => Number(new URLSearchParams(window.location.search).get('open')) || null)
   const [syncing, setSyncing] = useState(false)
   const reqSeq = useRef(0)
   const syncTimer = useRef(null)
@@ -287,19 +287,32 @@ export default function Mail() {
 
   const shownDrafts = accountId == null ? drafts : drafts.filter((d) => d.accountId === accountId)
 
-  // a new view or account starts with nothing open
+  // a new view or account starts with nothing open (but not on the first visit, which may open ?open=123)
+  const placeKey = `${view}|${accountId}|${folderCode}`
+  const lastPlace = useRef(placeKey)
   useEffect(() => {
+    if (lastPlace.current === placeKey) return
+    lastPlace.current = placeKey
     setSelectedId(null)
-  }, [view, accountId, folderCode])
+  }, [placeKey])
 
-  // A tapped alert opens its mail (?open=123).
+  // The open mail lives in the address (?open=123): a tapped alert opens it, a refresh keeps it, a link to it
+  // works, and Back closes it (on a phone that returns to the list instead of leaving MailLook).
   const openParam = params.get('open')
   useEffect(() => {
-    const id = Number(openParam)
-    if (!id) return
-    setSelectedId(id)
-    setParams((p) => { const n = new URLSearchParams(p); n.delete('open'); return n }, { replace: true })
+    const id = Number(openParam) || null
+    if (id !== selectedId) setSelectedId(id)
   }, [openParam]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const inUrl = Number(params.get('open')) || null
+    if (inUrl === selectedId) return
+    setParams((p) => {
+      const n = new URLSearchParams(p)
+      if (selectedId) n.set('open', String(selectedId))
+      else n.delete('open')
+      return n
+    }, { replace: inUrl != null || !selectedId })
+  }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadMore() {
     if (!nextCursor) return

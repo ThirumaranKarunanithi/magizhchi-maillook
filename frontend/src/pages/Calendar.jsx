@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { get, qs } from '../api.js'
 import { useMail } from '../state.jsx'
 import { IconBack, IconCalendar, IconCheck, IconChevron, IconMenu, IconRefresh, IconX } from '../components/Icons.jsx'
@@ -19,8 +19,7 @@ const time = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit
 
 function rangeLabel(from, days) {
   const to = addDays(from, days - 1)
-  const sameMonth = from.getMonth() === to.getMonth()
-  const a = from.toLocaleDateString([], { day: 'numeric', ...(sameMonth ? {} : { month: 'short' }) })
+  const a = from.toLocaleDateString([], { day: 'numeric', month: 'short', ...(from.getFullYear() === to.getFullYear() ? {} : { year: 'numeric' }) })
   const b = to.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })
   return `${a} – ${b}`
 }
@@ -173,6 +172,16 @@ export default function Calendar() {
   }, [byDay])
 
   const step = (dir) => setAnchor((a) => addDays(a, dir * days))
+
+  // The list starts on Monday; on a Saturday that is five days of the past to scroll through. Open it at today
+  // (or the first day after today with something on it).
+  const listRef = useRef(null)
+  const startOfToday = useMemo(() => new Date(now.getFullYear(), now.getMonth(), now.getDate()), [now])
+  useEffect(() => {
+    const box = listRef.current
+    const first = box?.querySelector('[data-day="on"]')
+    if (box && first) box.scrollTop = first.offsetTop - box.offsetTop - 4
+  }, [data, shown])
   const isThisWeek = sameDay(anchor, startOfWeek(new Date()))
   const total = (data?.events?.length || 0) + (data?.tasks?.length || 0)
 
@@ -214,7 +223,7 @@ export default function Calendar() {
           <button className="btn-secondary mt-3" onClick={load}>Try again</button>
         </div>
       ) : shown === 'agenda' ? (
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5">
+        <div ref={listRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-5">
           {loading && !data && <p className="flex items-center gap-2 text-sm text-slate-500"><span className="spinner" /> Loading your calendar…</p>}
           {data && !total && (
             <p className="py-10 text-center text-sm text-slate-500">Nothing on your calendar for these two weeks. Add a mail to it from “Add to PA”.</p>
@@ -222,7 +231,7 @@ export default function Calendar() {
           {data && total > 0 && byDay.filter((s) => s.timed.length || s.allDay.length || s.tasks.length).map((slot) => {
             const today = sameDay(slot.day, now)
             return (
-              <div key={slot.day.toISOString()} className="mb-4">
+              <div key={slot.day.toISOString()} className="mb-4" data-day={slot.day >= startOfToday ? 'on' : undefined}>
                 <h2 className={`sticky top-0 z-10 -mx-1 bg-[var(--slab-bg)] px-1 py-1 text-xs font-bold uppercase tracking-wider ${today ? 'text-brand-primary' : 'text-slate-500'}`}>
                   {today ? 'Today · ' : ''}{slot.day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' })}
                 </h2>

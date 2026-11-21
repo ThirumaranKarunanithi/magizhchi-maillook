@@ -49,7 +49,9 @@ function Section({ title, Icon, action, children }) {
 
 /** Today: the AI overview, who is waiting on you and what each needs, today's PA calendar, and who you're waiting on. */
 export default function Today() {
-  const { accountId, setMenuOpen, pa } = useMail()
+  const { accountId, setMenuOpen, pa, counts } = useMail()
+  // The briefing counts only unread mail; the Needs me lane in the menu counts everything in it.
+  const laneTotal = counts?.lanes?.needs_me?.total || 0
   const navigate = useNavigate()
   const [b, setB] = useState(null)
   const [error, setError] = useState('')
@@ -114,7 +116,7 @@ export default function Today() {
               </section>
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Stat n={b.needsMeTotal} label="waiting on you" Icon={IconHand} tone="bg-amber-50 text-amber-700" />
+                <Stat n={b.needsMeTotal} label="new, waiting on you" Icon={IconHand} tone="bg-amber-50 text-amber-700" />
                 <Stat n={b.events.length} label={b.paConnected ? 'meetings today' : 'meetings (PA not linked)'} Icon={IconCalendar} tone="bg-emerald-50 text-emerald-700" />
                 <Stat n={b.waitingTotal} label="you're waiting on" Icon={IconClock} tone="bg-peacock-50 text-peacock-700" />
                 <Stat n={b.snoozedToday} label="coming back today" Icon={IconSnooze} tone="bg-slate-100 text-slate-600" />
@@ -125,7 +127,13 @@ export default function Today() {
                   <button className="text-xs font-semibold text-peacock-700 hover:underline" onClick={() => navigate('/?view=needs_me')}>All {b.needsMeTotal} →</button>
                 )}>
                 {b.needsMe.length === 0 ? (
-                  <p className="flex items-center gap-2 py-1 text-sm text-slate-600"><IconCheck size={15} className="text-emerald-600" /> Nobody is waiting on you. Lovely.</p>
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1 text-sm text-slate-600">
+                    <IconCheck size={15} className="text-emerald-600" />
+                    {laneTotal > 0 ? (
+                      <>Nothing new. You have opened every mail in Needs me; {laneTotal} still sit there until you reply, archive or snooze them.
+                        <button className="text-xs font-semibold text-peacock-700 hover:underline" onClick={() => navigate('/?view=needs_me')}>Open Needs me →</button></>
+                    ) : 'Nobody is waiting on you. Lovely.'}
+                  </p>
                 ) : (
                   <ul className="-mx-1 divide-y divide-slate-200/70">
                     {b.needsMe.map((m) => (
